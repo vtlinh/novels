@@ -57,7 +57,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.5";
+const VERSION = "1.6";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -96,6 +96,19 @@ function log(msg, cls) {
 }
 function setStatus(msg) { statusEl.textContent = msg; }
 const errMsg = e => (e.name && e.name !== "Error" ? `${e.name}: ` : "") + e.message;
+
+async function probeWrite(handle, label) {
+  const name = "write-test.tmp";
+  try {
+    const w = await (await handle.getFileHandle(name, { create: true })).createWritable();
+    await w.write("ok");
+    await w.close();
+    log(`write test (${label}): OK`, "ok");
+  } catch (e) {
+    log(`write test (${label}): FAILED — ${errMsg(e)}`, "err");
+  }
+  try { await handle.removeEntry(name); } catch {}
+}
 
 /* ---------------- fetching & parsing ---------------- */
 
@@ -209,9 +222,15 @@ function extractContent(doc) {
     .join("\n\n");
 }
 
+/* Chromium can refuse a handle whose cached name and on-disk name disagree
+   after Unicode normalization ("state had changed since it was read from
+   disk"), so fold names to plain ASCII */
 const sanitize = name => name
-  .replace(/:/g, "：").replace(/\?/g, "？").replace(/"/g, "'")
-  .replace(/</g, "(").replace(/>/g, ")").replace(/[\/\\|]/g, "-").replace(/\*/g, "")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/đ/g, "d").replace(/Đ/g, "D")
+  .replace(/:/g, " -").replace(/[\/\\|]/g, "-")
+  .replace(/"/g, "'").replace(/</g, "(").replace(/>/g, ")").replace(/[?*]/g, "")
+  .replace(/[^\x20-\x7E]/g, " ")
   .replace(/\s+/g, " ").trim().replace(/[. ]+$/, "").slice(0, 180);
 
 const chapterFilename = (num, title) =>
@@ -256,7 +275,11 @@ function folderSink(rootHandle, folderName) {
   let consecFails = 0;
 
   return {
-    async init() { dir = await openDir(); },
+    async init() {
+      await probeWrite(rootHandle, "picked folder");
+      dir = await openDir();
+      await probeWrite(dir, "novel folder");
+    },
     exists(name) {
       return locked(async () => {
         try { return (await (await dir.getFileHandle(name)).getFile()).size > 0; }
@@ -349,6 +372,7 @@ async function run(makeSink) {
     if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
     const folderName = sanitize(title);
     log(`${title} — ${chapters.length} chapters, concurrency ${concurrency} (v${VERSION})`);
+    log(`Browser: ${navigator.userAgent}`);
 
     const sink = await makeSink(folderName);
     await sink.init();
