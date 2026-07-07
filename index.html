@@ -57,7 +57,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.4";
+const VERSION = "1.5";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -268,6 +268,7 @@ function folderSink(rootHandle, folderName) {
         let lastErr;
         const attempts = consecFails >= 3 ? 1 : MAX_RETRIES;
         for (let attempt = 0; attempt < attempts; attempt++) {
+          let w;
           try {
             if (attempt > 0) {
               try { dir = await openDir(); } catch {}
@@ -275,13 +276,17 @@ function folderSink(rootHandle, folderName) {
                  rewrite attempt — drop it and recreate from scratch */
               if (attempt > 1) { try { await dir.removeEntry(name); } catch {} }
             }
-            const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+            w = await (await dir.getFileHandle(name, { create: true })).createWritable();
             await w.write(text);
             await w.close();
             consecFails = 0;
             return;
           } catch (e) {
             lastErr = e;
+            /* never leave a failed stream dangling: its open swap file keeps
+               the handle in the stale "state changed" condition and can wedge
+               every subsequent attempt on the same file */
+            if (w) { try { await w.abort(); } catch {} }
             await new Promise(res => setTimeout(res, 500 * 2 ** attempt));
           }
         }
