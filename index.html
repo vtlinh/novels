@@ -66,7 +66,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.7";
+const VERSION = "1.8";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -302,13 +302,6 @@ function folderSink(rootHandle, folderName) {
         catch { return null; }
       });
     },
-    listNames(sub) {
-      return locked(async () => {
-        const out = [];
-        try { for await (const n of (await dirFor(sub)).keys()) out.push(n); } catch {}
-        return out;
-      });
-    },
     write(name, text, sub) {
       return locked(async () => {
         let lastErr;
@@ -366,12 +359,6 @@ function zipSink(folderName) {
     async init() {},
     async exists() { return false; },
     async read(name, sub) { return files.find(f => f.filename === path(name, sub))?.body ?? null; },
-    async listNames(sub) {
-      const prefix = sub ? `${sub}/` : "";
-      return files.filter(f => f.filename.startsWith(prefix))
-                  .map(f => f.filename.slice(prefix.length))
-                  .filter(n => !n.includes("/"));
-    },
     async write(name, text, sub) { files.push({ filename: path(name, sub), body: text }); },
     async finish() {
       setStatus("Building ZIP…");
@@ -380,11 +367,54 @@ function zipSink(folderName) {
   };
 }
 
+/* helpers on the user-picked root folder: the per-slug title cache lives
+   there, and a novel folder gets renamed once its title translation becomes
+   available (copy + delete — the File System Access API can't rename dirs) */
+function rootOps(rootHandle) {
+  return {
+    async read(name) {
+      try { return await (await (await rootHandle.getFileHandle(name)).getFile()).text(); }
+      catch { return null; }
+    },
+    async write(name, text) {
+      const w = await (await rootHandle.getFileHandle(name, { create: true })).createWritable();
+      await w.write(text);
+      await w.close();
+    },
+    async renameMerge(oldName, newName) {
+      let oldDir;
+      try { oldDir = await rootHandle.getDirectoryHandle(oldName); } catch { return; }
+      setStatus(`Renaming folder to "${newName}"…`);
+      const copyInto = async (src, dst) => {
+        for await (const [n, h] of src.entries()) {
+          if (h.kind === "directory") {
+            await copyInto(h, await dst.getDirectoryHandle(n, { create: true }));
+          } else {
+            let already = true;
+            try { await dst.getFileHandle(n); } catch { already = false; }
+            if (already) continue;  /* both exist: keep the existing file */
+            const w = await (await dst.getFileHandle(n, { create: true })).createWritable();
+            await w.write(await (await h.getFile()).arrayBuffer());
+            await w.close();
+          }
+        }
+      };
+      await copyInto(oldDir, await rootHandle.getDirectoryHandle(newName, { create: true }));
+      await rootHandle.removeEntry(oldName, { recursive: true });
+      log(`Renamed folder "${oldName}" -> "${newName}"`);
+    },
+  };
+}
+
 /* ---------------- translation (Claude API) ---------------- */
 
 const HAIKU = "claude-haiku-4-5";
 const SONNET = "claude-sonnet-5";
-const GLOSSARY_FILE = "names.json";
+const TRANSLATE_EFFORT = "medium";
+const NAMES_CACHE_FILE = ".names_cache.json";
+const TITLE_CACHE_FILE = ".title_cache.json";
+const TRANSLATED_DIR = "translated";
+const BATCH_POLL_MS = 30000;
 
 async function apiFetch(path, body) {
   const r = await fetch(`https://api.anthropic.com/v1${path}`, {
@@ -401,31 +431,44 @@ async function apiFetch(path, body) {
   return r;
 }
 
-/* submit a Message Batch, poll until it ends, return Map(custom_id → text) */
+/* single synchronous Messages API call, returns the reply text */
+async function llmMessage(model, maxTokens, prompt) {
+  const j = await (await apiFetch("/messages", {
+    model,
+    max_tokens: maxTokens,
+    messages: [{ role: "user", content: prompt }],
+  })).json();
+  return messageText(j);
+}
+
+/* submit a Message Batch, poll until it ends, return Map(custom_id → message) */
 async function runBatch(requests, label) {
   const batch = await (await apiFetch("/messages/batches", { requests })).json();
-  log(`${label}: batch submitted (${requests.length} request${requests.length > 1 ? "s" : ""})`);
+  log(`[${label}] batch submitted (${requests.length} request${requests.length > 1 ? "s" : ""}); polling…`);
   for (;;) {
-    await new Promise(res => setTimeout(res, 20000));
+    await new Promise(res => setTimeout(res, BATCH_POLL_MS));
     const b = await (await apiFetch(`/messages/batches/${batch.id}`)).json();
     const c = b.request_counts;
-    setStatus(`${label}: ${c.succeeded + c.errored + c.canceled + c.expired}/${requests.length} processed…`);
+    setStatus(`[${label}] processing: ${c.processing}  ok: ${c.succeeded}  err: ${c.errored}`);
     if (b.processing_status !== "ended") continue;
     const results = new Map();
     const text = await (await apiFetch(`/messages/batches/${batch.id}/results`)).text();
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
-      const r = JSON.parse(line);
-      if (r.result.type === "succeeded") {
-        results.set(r.custom_id, r.result.message.content
-          .filter(bl => bl.type === "text").map(bl => bl.text).join(""));
-      } else {
-        log(`${label}: request ${r.custom_id} ${r.result.type}`, "err");
-      }
+      const item = JSON.parse(line);
+      if (item.result.type === "succeeded") results.set(item.custom_id, item.result.message);
+      else log(`[${label}] ${item.custom_id}: ${item.result.type}`, "err");
     }
     return results;
   }
 }
+
+const messageText = msg =>
+  msg.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
+
+/* parse JSON from an LLM reply, tolerating markdown code fences */
+const parseJsonReply = text =>
+  JSON.parse(text.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, ""));
 
 const jsonFormat = schema => ({ format: { type: "json_schema", schema } });
 const chapterNum = filename => {
@@ -433,24 +476,63 @@ const chapterNum = filename => {
   return m ? parseInt(m[1], 10) : null;
 };
 
-async function translateNovel(sink, title, chapters) {
-  /* per-novel glossary lives next to the chapters so names stay consistent
-     across chapters and across re-runs */
-  let glossary = { title: "", names: {} };
-  try {
-    const j = await sink.read(GLOSSARY_FILE);
-    if (j) glossary = JSON.parse(j);
-  } catch {}
+/* ---- novel folder name: "{English title} ({Vietnamese title})" ---- */
 
-  /* 1. Haiku: extract person/place names from every chapter */
-  const extractReqs = chapters.map((ch, i) => ({
-    custom_id: `x-${i}`,
+async function resolveFolderName(root, slug, title) {
+  /* cached per novel slug in .title_cache.json in the picked folder; once
+     the title has been translated the folder name is final */
+  let cache = {};
+  if (root) { try { cache = JSON.parse(await root.read(TITLE_CACHE_FILE) ?? "{}"); } catch {} }
+  let entry = cache[slug];
+  if (typeof entry === "string") entry = { name: entry, translated: false };
+  if (entry?.translated) return entry.name;
+
+  let english = null;
+  if ($("apikey").value.trim()) {
+    setStatus("Translating novel title…");
+    try {
+      english = await llmMessage(HAIKU, 100,
+        "Translate this Vietnamese novel title to natural English. Reply with ONLY the translated title, nothing else:\n" + title);
+    } catch (e) { log(`title translation failed (${errMsg(e)}); using original title`, "err"); }
+  }
+  const translated = !!english;
+  const name = translated ? sanitize(`${english} (${title})`)
+                          : (entry ? entry.name : sanitize(title));
+
+  /* translation just became available: rename the folder from a prior run */
+  if (root && entry && translated && entry.name !== name) {
+    try { await root.renameMerge(entry.name, name); }
+    catch (e) { log(`folder rename failed — ${errMsg(e)}`, "err"); }
+  }
+  if (root) {
+    cache[slug] = { name, translated };
+    try { await root.write(TITLE_CACHE_FILE, JSON.stringify(cache, null, 2)); } catch {}
+  }
+  return name;
+}
+
+/* ---- chapter translation into the translated/ subfolder ---- */
+
+async function loadGlossary(sink) {
+  try { return JSON.parse(await sink.read(NAMES_CACHE_FILE) ?? "{}") || {}; }
+  catch { return {}; }
+}
+
+/* Phase 1+2: extract proper names from the pending chapters, render the new
+   ones into English, and merge into the per-novel glossary (existing entries
+   win, so chapters translated earlier stay consistent). */
+async function buildGlossary(sink, pending) {
+  const glossary = await loadGlossary(sink);
+
+  log(`Phase 1: extracting proper names from ${pending.length} chapter(s)`);
+  const extracted = await runBatch(pending.map((ch, i) => ({
+    custom_id: `names-${i}`,
     params: {
       model: HAIKU,
-      max_tokens: 2048,
+      max_tokens: 2000,
       system: [{
         type: "text",
-        text: "You are given one chapter of a Vietnamese web novel. List every proper noun that names a person, place, organization, sect, clan, or technique — each exactly as written in the chapter, listed once. Ignore common nouns and pronouns.",
+        text: "Extract every proper name from the given Vietnamese novel chapter: characters, nicknames, places, organizations, company/brand names. List each unique name exactly as written in the chapter.",
         cache_control: { type: "ephemeral" },
       }],
       messages: [{ role: "user", content: ch.body }],
@@ -461,105 +543,94 @@ async function translateNovel(sink, title, chapters) {
         additionalProperties: false,
       }),
     },
-  }));
-  const extracted = await runBatch(extractReqs, "Extracting names (Haiku)");
-  const found = new Set();
-  for (const text of extracted.values()) {
-    try { for (const n of JSON.parse(text).names) if (n.trim()) found.add(n.trim()); } catch {}
+  })), "names");
+  const names = new Set();
+  for (const msg of extracted.values()) {
+    try { for (const n of JSON.parse(messageText(msg)).names) if (n.trim()) names.add(n.trim()); } catch {}
   }
-  const newNames = [...found].filter(n => !glossary.names[n]);
-  log(`Names found: ${found.size} (${newNames.length} new)`);
+  const newNames = [...names].filter(n => !(n in glossary)).sort();
+  log(`${names.size} unique names, ${newNames.length} new`);
+  if (!newNames.length) return glossary;
 
-  /* 2. Haiku: translate the new names (and the novel title, once) */
-  if (newNames.length || !glossary.title) {
-    const res = await runBatch([{
-      custom_id: "glossary",
-      params: {
-        model: HAIKU,
-        max_tokens: 16000,
-        messages: [{
-          role: "user",
-          content: "Translate this Vietnamese novel title and the names below into English renderings for a translated novel. Keep person names romanized (Vietnamese without diacritics, or pinyin-style if of Chinese origin); translate meaningful place/sect/technique names.\n\nTITLE: "
-            + title + "\n\nNAMES:\n" + newNames.join("\n"),
-        }],
-        output_config: jsonFormat({
-          type: "object",
-          properties: {
-            title: { type: "string" },
-            names: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: { original: { type: "string" }, english: { type: "string" } },
-                required: ["original", "english"],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ["title", "names"],
-          additionalProperties: false,
-        }),
-      },
-    }], "Translating names (Haiku)");
-    try {
-      const g = JSON.parse(res.get("glossary") ?? "");
-      if (!glossary.title) glossary.title = g.title;
-      /* existing entries win, so chapters translated earlier stay consistent */
-      for (const { original, english } of g.names)
-        if (!glossary.names[original]) glossary.names[original] = english;
-    } catch (e) {
-      throw new Error(`glossary translation returned no usable result (${errMsg(e)})`);
-    }
-    await sink.write(GLOSSARY_FILE, JSON.stringify(glossary, null, 2));
-    log(`Glossary saved: ${GLOSSARY_FILE} (${Object.keys(glossary.names).length} entries)`, "ok");
+  log("Phase 2: rendering new names into English");
+  try {
+    const mapping = parseJsonReply(await llmMessage(HAIKU, 8000,
+      "These proper names appear in a Vietnamese web novel. Provide the English rendering to use consistently in a translation (romanize person names; translate meaningful place/organization names).\n"
+      + "Existing glossary, keep new entries stylistically consistent with it:\n"
+      + JSON.stringify(glossary) + "\n\n"
+      + "Reply with ONLY a JSON object mapping each of these names to its English form:\n"
+      + JSON.stringify(newNames)));
+    for (const [k, v] of Object.entries(mapping))
+      if (!(k in glossary)) glossary[k] = String(v);
+  } catch (e) {
+    log(`! name rendering failed (${errMsg(e)}); translating without new names`, "err");
   }
+  const sorted = Object.fromEntries(Object.entries(glossary).sort(([a], [b]) => a.localeCompare(b)));
+  await sink.write(NAMES_CACHE_FILE, JSON.stringify(sorted, null, 2));
+  log(`Glossary saved: ${NAMES_CACHE_FILE} (${Object.keys(sorted).length} entries)`, "ok");
+  return sorted;
+}
 
-  const trFolder = sanitize(glossary.title || `${title} (English)`);
+/* Phase 3: translate pending chapters into translated/, keeping the same
+   filenames as their sources so re-runs can skip what's already done. */
+async function translateNovel(sink, chapters) {
+  const pending = [];
+  for (const ch of chapters) {
+    if (await sink.exists(ch.filename, TRANSLATED_DIR)) continue;
+    const body = ch.body ?? await sink.read(ch.filename);
+    if (body) pending.push({ filename: ch.filename, body });
+  }
+  if (!pending.length) { log("Translation: everything already translated.", "ok"); return; }
 
-  /* 3. Sonnet: translate chapters that don't have a translated file yet */
-  const existing = await sink.listNames(trFolder);
-  const todo = chapters.filter(ch => {
-    const num = chapterNum(ch.filename);
-    return num == null || !existing.some(n => n === `Chapter ${num}.txt` || n.startsWith(`Chapter ${num} `));
-  });
-  log(`Translating ${todo.length} chapter(s) into "${trFolder}/" (${chapters.length - todo.length} already translated)`);
-  if (!todo.length) return;
+  log(`Translating ${pending.length} chapter(s) with ${SONNET} (effort=${TRANSLATE_EFFORT}, Batches API)`);
+  const glossary = await buildGlossary(sink, pending);
 
-  const glossaryBlock = Object.entries(glossary.names).map(([o, e]) => `${o} = ${e}`).join("\n");
+  log(`Phase 3: translating ${pending.length} chapter(s)`);
   const system = [{
     type: "text",
-    text: 'Translate the given Vietnamese web-novel chapter into natural, fluent English. Preserve paragraph breaks. Render every glossary term below with its given English form, exactly and consistently.\n\nGLOSSARY:\n'
-      + glossaryBlock
-      + '\n\nOutput exactly: a first line "TITLE: <chapter title in English>", a blank line, then the translated chapter text. No notes or commentary.',
+    text: "Translate this Vietnamese web novel chapter into natural, fluent English.\nRules:\n- Use EXACTLY these English renderings for proper names:\n"
+      + JSON.stringify(glossary)
+      + "\n- Preserve paragraph breaks (blank line between paragraphs).\n- Output ONLY the translated chapter text: no chapter title, no headers, no notes, no commentary.",
     cache_control: { type: "ephemeral" },
   }];
-  const translated = await runBatch(todo.map((ch, i) => ({
-    custom_id: `t-${i}`,
+  const results = await runBatch(pending.map((ch, i) => ({
+    custom_id: `ch-${i}`,
     params: {
       model: SONNET,
-      max_tokens: 24000,
-      output_config: { effort: "medium" },
+      max_tokens: 32000,
+      output_config: { effort: TRANSLATE_EFFORT },
       system,
-      messages: [{ role: "user", content: `${ch.filename.replace(/\.txt$/, "")}\n\n${ch.body}` }],
+      messages: [{ role: "user", content: ch.body }],
     },
-  })), "Translating chapters (Sonnet)");
+  })), "translate");
 
-  let saved = 0;
-  for (let i = 0; i < todo.length; i++) {
-    const out = translated.get(`t-${i}`);
-    if (!out) continue;
-    const m = out.match(/^TITLE:\s*(.*)$/m);
-    const body = out.replace(/^TITLE:.*\n+/, "").trim();
-    const fname = chapterFilename(chapterNum(todo[i].filename) ?? i + 1, m ? m[1].trim() : "");
-    try { await sink.write(fname, body, trFolder); saved++; log(`saved  ${trFolder}/${fname}`, "ok"); }
-    catch (e) { log(`SAVE FAILED ${trFolder}/${fname} — ${errMsg(e)}`, "err"); }
+  let failed = 0;
+  for (let i = 0; i < pending.length; i++) {
+    const msg = results.get(`ch-${i}`);
+    /* a truncated translation is incomplete — leave it unsaved so the next
+       run retries it */
+    if (msg && msg.stop_reason === "max_tokens") {
+      log(`! ${pending[i].filename}: output truncated (max_tokens); not saved`, "err");
+      failed++;
+      continue;
+    }
+    const text = msg ? messageText(msg) : "";
+    if (!text) { failed++; continue; }
+    try {
+      await sink.write(pending[i].filename, text, TRANSLATED_DIR);
+      log(`saved  ${TRANSLATED_DIR}/${pending[i].filename}`, "ok");
+    } catch (e) {
+      failed++;
+      log(`SAVE FAILED ${TRANSLATED_DIR}/${pending[i].filename} — ${errMsg(e)}`, "err");
+    }
   }
-  log(`Translation done: ${saved}/${todo.length} chapter(s) saved to "${trFolder}/".`, "ok");
+  log(`Translation done: ${pending.length - failed} ok, ${failed} failed`
+    + (failed ? " (re-run to retry the failures)" : ""), failed ? "err" : "ok");
 }
 
 /* ---------------- main flow ---------------- */
 
-async function run(makeSink) {
+async function run(makeSink, root = null) {
   if (running) return;
   const novelUrl = $("url").value.trim();
   const concurrency = Math.max(1, Math.min(10, parseInt($("conc").value, 10) || 5));
@@ -583,8 +654,9 @@ async function run(makeSink) {
     setStatus("Listing chapters…");
     const { title, chapters } = await listAllChapters(novelUrl);
     if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
-    const folderName = sanitize(title);
     log(`${title} — ${chapters.length} chapters, concurrency ${concurrency} (v${VERSION})`);
+    const folderName = await resolveFolderName(root, slugOf(novelUrl.replace(/\/+$/, "") + "/"), title);
+    log(`Saving to: ${folderName}/`);
 
     const sink = await makeSink(folderName);
     await sink.init();
@@ -600,14 +672,26 @@ async function run(makeSink) {
       while (queue.length) {
         const ch = queue.shift();
         try {
-          const { filename, body } = await downloadChapter(ch);
-          collected.push({ filename, body });
-          if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); }
-          else {
-            try { await sink.write(filename, body); saved++; log(`saved  ${filename}`, "ok"); }
-            catch (e) {
-              pendingSaves.push({ url: ch.url, filename, body });
-              log(`SAVE FAILED ${filename} — ${errMsg(e)} (will retry at the end)`, "err");
+          /* skip the fetch entirely when a previous download exists — the
+             filename is predictable from the URL number + the link text */
+          const m = ch.url.match(/chuong-(\d+)/g);
+          const urlNum = m ? parseInt(m[m.length - 1].slice(7), 10) : null;
+          const linkTitle = parseHeading(ch.text).title;
+          const preName = urlNum != null && linkTitle ? chapterFilename(urlNum, linkTitle) : null;
+          if (preName && await sink.exists(preName)) {
+            collected.push({ filename: preName, body: null });
+            skipped++;
+            log(`skip   ${preName}`);
+          } else {
+            const { filename, body } = await downloadChapter(ch);
+            collected.push({ filename, body });
+            if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); }
+            else {
+              try { await sink.write(filename, body); saved++; log(`saved  ${filename}`, "ok"); }
+              catch (e) {
+                pendingSaves.push({ url: ch.url, filename, body });
+                log(`SAVE FAILED ${filename} — ${errMsg(e)} (will retry at the end)`, "err");
+              }
             }
           }
         } catch (e) {
@@ -641,7 +725,7 @@ async function run(makeSink) {
 
     if (translate && collected.length) {
       collected.sort((a, b) => (chapterNum(a.filename) ?? 1e9) - (chapterNum(b.filename) ?? 1e9));
-      try { await translateNovel(sink, title, collected); }
+      try { await translateNovel(sink, collected); }
       catch (e) { log(`TRANSLATION FAILED — ${errMsg(e)}`, "err"); }
     }
 
@@ -661,7 +745,7 @@ $("btn-folder").addEventListener("click", async () => {
   let root;
   try { root = await showDirectoryPicker({ mode: "readwrite" }); }
   catch { return; /* user canceled */ }
-  run(folderName => folderSink(root, folderName));
+  run(folderName => folderSink(root, folderName), rootOps(root));
 });
 
 $("btn-zip").addEventListener("click", () => run(folderName => zipSink(folderName)));
