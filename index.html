@@ -21,6 +21,10 @@
   input:focus { outline:none; border-color:var(--accent); }
   input[type="range"] { padding:0; border:none; background:none;
                         accent-color:var(--accent); }
+  label.check { display:flex; align-items:center; gap:8px; margin-top:16px;
+                color:var(--fg); font-size:14px; cursor:pointer; }
+  label.check input { width:auto; accent-color:var(--accent); }
+  #tr-opts { display:none; }
   button { margin-top:16px; padding:11px 18px; border:none; border-radius:8px;
            font-size:14px; font-weight:600; cursor:pointer; }
   #btn-folder { background:var(--accent); color:#fff; margin-right:8px; }
@@ -45,6 +49,11 @@
     <input id="url" type="url" placeholder="https://truyenfull.today/ten-truyen/" spellcheck="false">
     <label for="conc">Simultaneous downloads: <span id="conc-val">5</span></label>
     <input id="conc" type="range" min="1" max="10" value="5">
+    <label class="check"><input type="checkbox" id="translate"> Translate to English (Claude)</label>
+    <div id="tr-opts">
+      <label for="apikey">Anthropic API key (kept in this browser only)</label>
+      <input id="apikey" type="password" placeholder="sk-ant-..." spellcheck="false">
+    </div>
     <button id="btn-folder">Download to folder…</button>
     <button id="btn-zip">Download as ZIP</button>
     <div id="status"></div>
@@ -57,7 +66,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.6";
+const VERSION = "1.7";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -71,6 +80,15 @@ $("conc").addEventListener("input", e => {
   $("conc-val").textContent = e.target.value;
   localStorage.setItem("conc", e.target.value);
 });
+$("translate").checked = localStorage.getItem("translate") === "1";
+$("apikey").value = localStorage.getItem("apikey") || "";
+const syncTrOpts = () => { $("tr-opts").style.display = $("translate").checked ? "block" : "none"; };
+$("translate").addEventListener("change", e => {
+  localStorage.setItem("translate", e.target.checked ? "1" : "0");
+  syncTrOpts();
+});
+$("apikey").addEventListener("change", e => localStorage.setItem("apikey", e.target.value.trim()));
+syncTrOpts();
 
 const NOVEL_URL_RE = /^https:\/\/truyenfull\.today(\/|$)/i;
 let running = false;
@@ -96,19 +114,6 @@ function log(msg, cls) {
 }
 function setStatus(msg) { statusEl.textContent = msg; }
 const errMsg = e => (e.name && e.name !== "Error" ? `${e.name}: ` : "") + e.message;
-
-async function probeWrite(handle, label) {
-  const name = "write-test.tmp";
-  try {
-    const w = await (await handle.getFileHandle(name, { create: true })).createWritable();
-    await w.write("ok");
-    await w.close();
-    log(`write test (${label}): OK`, "ok");
-  } catch (e) {
-    log(`write test (${label}): FAILED — ${errMsg(e)}`, "err");
-  }
-  try { await handle.removeEntry(name); } catch {}
-}
 
 /* ---------------- fetching & parsing ---------------- */
 
@@ -274,19 +279,37 @@ function folderSink(rootHandle, folderName) {
      ~7s of retries per file and fast-fail into the rescue path */
   let consecFails = 0;
 
+  /* sub-directory handles (e.g. the translated-chapters folder) */
+  const subdirs = new Map();
+  const dirFor = async sub => {
+    if (!sub) return dir;
+    if (!subdirs.has(sub))
+      subdirs.set(sub, await dir.getDirectoryHandle(sub, { create: true }));
+    return subdirs.get(sub);
+  };
+
   return {
-    async init() {
-      await probeWrite(rootHandle, "picked folder");
-      dir = await openDir();
-      await probeWrite(dir, "novel folder");
-    },
-    exists(name) {
+    async init() { dir = await openDir(); },
+    exists(name, sub) {
       return locked(async () => {
-        try { return (await (await dir.getFileHandle(name)).getFile()).size > 0; }
+        try { return (await (await (await dirFor(sub)).getFileHandle(name)).getFile()).size > 0; }
         catch { return false; }
       });
     },
-    write(name, text) {
+    read(name, sub) {
+      return locked(async () => {
+        try { return await (await (await (await dirFor(sub)).getFileHandle(name)).getFile()).text(); }
+        catch { return null; }
+      });
+    },
+    listNames(sub) {
+      return locked(async () => {
+        const out = [];
+        try { for await (const n of (await dirFor(sub)).keys()) out.push(n); } catch {}
+        return out;
+      });
+    },
+    write(name, text, sub) {
       return locked(async () => {
         let lastErr;
         const attempts = consecFails >= 3 ? 1 : MAX_RETRIES;
@@ -294,12 +317,12 @@ function folderSink(rootHandle, folderName) {
           let w;
           try {
             if (attempt > 0) {
-              try { dir = await openDir(); } catch {}
+              try { dir = await openDir(); subdirs.clear(); } catch {}
               /* a half-written or externally touched file can wedge every
                  rewrite attempt — drop it and recreate from scratch */
-              if (attempt > 1) { try { await dir.removeEntry(name); } catch {} }
+              if (attempt > 1) { try { await (await dirFor(sub)).removeEntry(name); } catch {} }
             }
-            w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+            w = await (await (await dirFor(sub)).getFileHandle(name, { create: true })).createWritable();
             await w.write(text);
             await w.close();
             consecFails = 0;
@@ -338,15 +361,200 @@ async function saveAsZip(folderName, files, zipName) {
 
 function zipSink(folderName) {
   const files = [];
+  const path = (name, sub) => (sub ? `${sub}/${name}` : name);
   return {
     async init() {},
     async exists() { return false; },
-    async write(name, text) { files.push({ filename: name, body: text }); },
+    async read(name, sub) { return files.find(f => f.filename === path(name, sub))?.body ?? null; },
+    async listNames(sub) {
+      const prefix = sub ? `${sub}/` : "";
+      return files.filter(f => f.filename.startsWith(prefix))
+                  .map(f => f.filename.slice(prefix.length))
+                  .filter(n => !n.includes("/"));
+    },
+    async write(name, text, sub) { files.push({ filename: path(name, sub), body: text }); },
     async finish() {
       setStatus("Building ZIP…");
       await saveAsZip(folderName, files, `${folderName}.zip`);
     },
   };
+}
+
+/* ---------------- translation (Claude API) ---------------- */
+
+const HAIKU = "claude-haiku-4-5";
+const SONNET = "claude-sonnet-5";
+const GLOSSARY_FILE = "names.json";
+
+async function apiFetch(path, body) {
+  const r = await fetch(`https://api.anthropic.com/v1${path}`, {
+    method: body ? "POST" : "GET",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": $("apikey").value.trim(),
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error(`Claude API ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  return r;
+}
+
+/* submit a Message Batch, poll until it ends, return Map(custom_id → text) */
+async function runBatch(requests, label) {
+  const batch = await (await apiFetch("/messages/batches", { requests })).json();
+  log(`${label}: batch submitted (${requests.length} request${requests.length > 1 ? "s" : ""})`);
+  for (;;) {
+    await new Promise(res => setTimeout(res, 20000));
+    const b = await (await apiFetch(`/messages/batches/${batch.id}`)).json();
+    const c = b.request_counts;
+    setStatus(`${label}: ${c.succeeded + c.errored + c.canceled + c.expired}/${requests.length} processed…`);
+    if (b.processing_status !== "ended") continue;
+    const results = new Map();
+    const text = await (await apiFetch(`/messages/batches/${batch.id}/results`)).text();
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      const r = JSON.parse(line);
+      if (r.result.type === "succeeded") {
+        results.set(r.custom_id, r.result.message.content
+          .filter(bl => bl.type === "text").map(bl => bl.text).join(""));
+      } else {
+        log(`${label}: request ${r.custom_id} ${r.result.type}`, "err");
+      }
+    }
+    return results;
+  }
+}
+
+const jsonFormat = schema => ({ format: { type: "json_schema", schema } });
+const chapterNum = filename => {
+  const m = filename.match(/^Chapter (\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+};
+
+async function translateNovel(sink, title, chapters) {
+  /* per-novel glossary lives next to the chapters so names stay consistent
+     across chapters and across re-runs */
+  let glossary = { title: "", names: {} };
+  try {
+    const j = await sink.read(GLOSSARY_FILE);
+    if (j) glossary = JSON.parse(j);
+  } catch {}
+
+  /* 1. Haiku: extract person/place names from every chapter */
+  const extractReqs = chapters.map((ch, i) => ({
+    custom_id: `x-${i}`,
+    params: {
+      model: HAIKU,
+      max_tokens: 2048,
+      system: [{
+        type: "text",
+        text: "You are given one chapter of a Vietnamese web novel. List every proper noun that names a person, place, organization, sect, clan, or technique — each exactly as written in the chapter, listed once. Ignore common nouns and pronouns.",
+        cache_control: { type: "ephemeral" },
+      }],
+      messages: [{ role: "user", content: ch.body }],
+      output_config: jsonFormat({
+        type: "object",
+        properties: { names: { type: "array", items: { type: "string" } } },
+        required: ["names"],
+        additionalProperties: false,
+      }),
+    },
+  }));
+  const extracted = await runBatch(extractReqs, "Extracting names (Haiku)");
+  const found = new Set();
+  for (const text of extracted.values()) {
+    try { for (const n of JSON.parse(text).names) if (n.trim()) found.add(n.trim()); } catch {}
+  }
+  const newNames = [...found].filter(n => !glossary.names[n]);
+  log(`Names found: ${found.size} (${newNames.length} new)`);
+
+  /* 2. Haiku: translate the new names (and the novel title, once) */
+  if (newNames.length || !glossary.title) {
+    const res = await runBatch([{
+      custom_id: "glossary",
+      params: {
+        model: HAIKU,
+        max_tokens: 16000,
+        messages: [{
+          role: "user",
+          content: "Translate this Vietnamese novel title and the names below into English renderings for a translated novel. Keep person names romanized (Vietnamese without diacritics, or pinyin-style if of Chinese origin); translate meaningful place/sect/technique names.\n\nTITLE: "
+            + title + "\n\nNAMES:\n" + newNames.join("\n"),
+        }],
+        output_config: jsonFormat({
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            names: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { original: { type: "string" }, english: { type: "string" } },
+                required: ["original", "english"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["title", "names"],
+          additionalProperties: false,
+        }),
+      },
+    }], "Translating names (Haiku)");
+    try {
+      const g = JSON.parse(res.get("glossary") ?? "");
+      if (!glossary.title) glossary.title = g.title;
+      /* existing entries win, so chapters translated earlier stay consistent */
+      for (const { original, english } of g.names)
+        if (!glossary.names[original]) glossary.names[original] = english;
+    } catch (e) {
+      throw new Error(`glossary translation returned no usable result (${errMsg(e)})`);
+    }
+    await sink.write(GLOSSARY_FILE, JSON.stringify(glossary, null, 2));
+    log(`Glossary saved: ${GLOSSARY_FILE} (${Object.keys(glossary.names).length} entries)`, "ok");
+  }
+
+  const trFolder = sanitize(glossary.title || `${title} (English)`);
+
+  /* 3. Sonnet: translate chapters that don't have a translated file yet */
+  const existing = await sink.listNames(trFolder);
+  const todo = chapters.filter(ch => {
+    const num = chapterNum(ch.filename);
+    return num == null || !existing.some(n => n === `Chapter ${num}.txt` || n.startsWith(`Chapter ${num} `));
+  });
+  log(`Translating ${todo.length} chapter(s) into "${trFolder}/" (${chapters.length - todo.length} already translated)`);
+  if (!todo.length) return;
+
+  const glossaryBlock = Object.entries(glossary.names).map(([o, e]) => `${o} = ${e}`).join("\n");
+  const system = [{
+    type: "text",
+    text: 'Translate the given Vietnamese web-novel chapter into natural, fluent English. Preserve paragraph breaks. Render every glossary term below with its given English form, exactly and consistently.\n\nGLOSSARY:\n'
+      + glossaryBlock
+      + '\n\nOutput exactly: a first line "TITLE: <chapter title in English>", a blank line, then the translated chapter text. No notes or commentary.',
+    cache_control: { type: "ephemeral" },
+  }];
+  const translated = await runBatch(todo.map((ch, i) => ({
+    custom_id: `t-${i}`,
+    params: {
+      model: SONNET,
+      max_tokens: 24000,
+      output_config: { effort: "medium" },
+      system,
+      messages: [{ role: "user", content: `${ch.filename.replace(/\.txt$/, "")}\n\n${ch.body}` }],
+    },
+  })), "Translating chapters (Sonnet)");
+
+  let saved = 0;
+  for (let i = 0; i < todo.length; i++) {
+    const out = translated.get(`t-${i}`);
+    if (!out) continue;
+    const m = out.match(/^TITLE:\s*(.*)$/m);
+    const body = out.replace(/^TITLE:.*\n+/, "").trim();
+    const fname = chapterFilename(chapterNum(todo[i].filename) ?? i + 1, m ? m[1].trim() : "");
+    try { await sink.write(fname, body, trFolder); saved++; log(`saved  ${trFolder}/${fname}`, "ok"); }
+    catch (e) { log(`SAVE FAILED ${trFolder}/${fname} — ${errMsg(e)}`, "err"); }
+  }
+  log(`Translation done: ${saved}/${todo.length} chapter(s) saved to "${trFolder}/".`, "ok");
 }
 
 /* ---------------- main flow ---------------- */
@@ -357,6 +565,11 @@ async function run(makeSink) {
   const concurrency = Math.max(1, Math.min(10, parseInt($("conc").value, 10) || 5));
   if (!NOVEL_URL_RE.test(novelUrl)) {
     setStatus("Enter a novel URL starting with https://truyenfull.today");
+    return;
+  }
+  const translate = $("translate").checked;
+  if (translate && !$("apikey").value.trim()) {
+    setStatus("Enter your Anthropic API key to translate.");
     return;
   }
 
@@ -372,7 +585,6 @@ async function run(makeSink) {
     if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
     const folderName = sanitize(title);
     log(`${title} — ${chapters.length} chapters, concurrency ${concurrency} (v${VERSION})`);
-    log(`Browser: ${navigator.userAgent}`);
 
     const sink = await makeSink(folderName);
     await sink.init();
@@ -383,11 +595,13 @@ async function run(makeSink) {
 
     const queue = [...chapters];
     const pendingSaves = [];
+    const collected = [];
     async function worker() {
       while (queue.length) {
         const ch = queue.shift();
         try {
           const { filename, body } = await downloadChapter(ch);
+          collected.push({ filename, body });
           if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); }
           else {
             try { await sink.write(filename, body); saved++; log(`saved  ${filename}`, "ok"); }
@@ -423,6 +637,12 @@ async function run(makeSink) {
       await saveAsZip(folderName, rescued, `${folderName} - rescued chapters.zip`);
       log(`\n${rescued.length} chapter(s) would not save to the folder — they were downloaded as "${folderName} - rescued chapters.zip" instead.`, "err");
       log(`If folder saving keeps failing: check Windows Security → Ransomware protection → "Controlled folder access" (it silently blocks Chrome from writing), and note that Desktop/Documents folders are often OneDrive-synced by default even when they look local.`);
+    }
+
+    if (translate && collected.length) {
+      collected.sort((a, b) => (chapterNum(a.filename) ?? 1e9) - (chapterNum(b.filename) ?? 1e9));
+      try { await translateNovel(sink, title, collected); }
+      catch (e) { log(`TRANSLATION FAILED — ${errMsg(e)}`, "err"); }
     }
 
     await sink.finish();
