@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Novel Downloader</title>
+<style>
+  :root { --bg:#111418; --card:#1b2026; --fg:#e8eaed; --muted:#9aa0a6;
+          --accent:#4f8cff; --ok:#3ddc84; --err:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg);
+         color:var(--fg); display:flex; justify-content:center; padding:32px 16px; }
+  main { width:100%; max-width:680px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 24px; font-size:13px; }
+  .card { background:var(--card); border-radius:12px; padding:20px; margin-bottom:16px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; }
+  label:first-child { margin-top:0; }
+  input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #333a42;
+          background:#12161b; color:var(--fg); font-size:14px; }
+  input:focus { outline:none; border-color:var(--accent); }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  .row > div.small { flex:0 0 140px; }
+  button { margin-top:16px; padding:11px 18px; border:none; border-radius:8px;
+           font-size:14px; font-weight:600; cursor:pointer; }
+  #btn-folder { background:var(--accent); color:#fff; margin-right:8px; }
+  #btn-zip { background:#2a313a; color:var(--fg); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  #status { font-size:13px; color:var(--muted); margin-top:14px; min-height:18px; }
+  progress { width:100%; height:8px; margin-top:10px; accent-color:var(--accent);
+             display:none; }
+  #log { font:12px/1.6 ui-monospace, monospace; background:#0d1013; border-radius:8px;
+         padding:12px; margin-top:12px; max-height:260px; overflow-y:auto;
+         white-space:pre-wrap; display:none; }
+  .ok { color:var(--ok); } .err { color:var(--err); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Novel Downloader</h1>
+  <p class="sub">Downloads every chapter of a truyenfull novel as text files.</p>
+
+  <div class="card">
+    <label for="url">Novel URL</label>
+    <input id="url" type="url" placeholder="https://truyenfull.today/ten-truyen/" spellcheck="false">
+    <div class="row">
+      <div class="small">
+        <label for="conc">Simultaneous downloads</label>
+        <input id="conc" type="number" min="1" max="20" value="5">
+      </div>
+      <div>
+        <label for="proxy">Proxy URL (your Cloudflare Worker)</label>
+        <input id="proxy" type="url" placeholder="https://your-worker.workers.dev" spellcheck="false">
+      </div>
+    </div>
+    <button id="btn-folder">Download to folder…</button>
+    <button id="btn-zip">Download as ZIP</button>
+    <div id="status"></div>
+    <progress id="bar" max="1" value="0"></progress>
+    <div id="log"></div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const statusEl = $("status"), logEl = $("log"), bar = $("bar");
+
+/* remember settings between visits */
+$("proxy").value = localStorage.getItem("proxy") || "";
+$("conc").value  = localStorage.getItem("conc")  || "5";
+$("proxy").addEventListener("change", e => localStorage.setItem("proxy", e.target.value.trim()));
+$("conc").addEventListener("change",  e => localStorage.setItem("conc",  e.target.value));
+
+if (!window.showDirectoryPicker) {
+  $("btn-folder").disabled = true;
+  $("btn-folder").title = "Folder saving needs Chrome or Edge; use ZIP instead.";
+}
+
+function log(msg, cls) {
+  logEl.style.display = "block";
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function setStatus(msg) { statusEl.textContent = msg; }
+
+/* ---------------- fetching & parsing ---------------- */
+
+const MAX_RETRIES = 4;
+
+function proxied(url) {
+  const base = $("proxy").value.trim().replace(/\/+$/, "");
+  return `${base}/?url=${encodeURIComponent(url)}`;
+}
+
+async function fetchDoc(url) {
+  let lastErr;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      const r = await fetch(proxied(url));
+      if (r.ok) {
+        const html = await r.text();
+        if (html.trim()) return new DOMParser().parseFromString(html, "text/html");
+      }
+      lastErr = new Error(`HTTP ${r.status}`);
+    } catch (e) { lastErr = e; }
+    await new Promise(res => setTimeout(res, 1000 * 2 ** i + Math.random() * 1000));
+  }
+  throw new Error(`failed after ${MAX_RETRIES} attempts: ${url} (${lastErr})`);
+}
+
+const slugOf = url => new URL(url).pathname.replace(/^\/|\/$/g, "").split("/")[0];
+
+function chapterLinks(doc, base, slug) {
+  const seen = new Set(), out = [];
+  for (const a of doc.querySelectorAll("a[href]")) {
+    let href;
+    try { href = new URL(a.getAttribute("href"), base).href.split("#")[0]; }
+    catch { continue; }
+    const path = new URL(href).pathname;
+    if (path.includes(`/${slug}/`) && /chuong-\d+/.test(path) && !seen.has(href)) {
+      seen.add(href);
+      out.push({ url: href, text: a.textContent.trim() });
+    }
+  }
+  return out;
+}
+
+function maxListingPage(doc, slug) {
+  let max = 1;
+  for (const a of doc.querySelectorAll("a[href]")) {
+    const m = (a.getAttribute("href") || "").match(new RegExp(`/${slug}/trang-(\\d+)`));
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return max;
+}
+
+async function listAllChapters(novelUrl) {
+  const base = novelUrl.replace(/\/+$/, "") + "/";
+  const slug = slugOf(base);
+  const doc = await fetchDoc(base);
+  const title = doc.querySelector('meta[property="og:title"]')?.content?.trim()
+             || doc.querySelector("h1")?.textContent.trim() || slug;
+
+  const seen = new Set(), chapters = [];
+  const add = items => { for (const c of items) if (!seen.has(c.url)) { seen.add(c.url); chapters.push(c); } };
+
+  add(chapterLinks(doc, base, slug));
+  let last = maxListingPage(doc, slug);
+  for (let page = 2; page <= last; page++) {
+    setStatus(`Listing chapters: page ${page}/${last}…`);
+    const p = await fetchDoc(`${base}trang-${page}/`);
+    add(chapterLinks(p, base, slug));
+    last = Math.max(last, maxListingPage(p, slug));
+  }
+
+  const num = u => { const m = u.match(/chuong-(\d+)/g); return m ? parseInt(m[m.length - 1].slice(7), 10) : 1e9; };
+  chapters.sort((a, b) => num(a.url) - num(b.url));
+  return { title, chapters };
+}
+
+/* ---------------- chapter extraction ---------------- */
+
+const CONTENT_SELECTORS = ["#chapter-c", ".chapter-c", "#chapter-content",
+  ".chapter-content", 'div[itemprop="articleBody"]', ".box-chap"];
+const AD_RE = /(CLICK\s*ADS|quảng cáo|mở khóa|truyenfull|đọc truyện online|ủng hộ dịch giả|Vui lòng|Mời bạn)/i;
+
+function parseHeading(text) {
+  const m = text.match(/Ch[ưu]ơ?ng\s*(\d+)\s*[:\-–]?\s*(.*)/i);
+  if (!m) return { num: null, title: text.trim() };
+  let title = m[2].trim();
+  if (/^Ch[ưu]ơ?ng\s*\d+$/i.test(title)) title = "";
+  return { num: parseInt(m[1], 10), title };
+}
+
+function extractContent(doc) {
+  let div = null;
+  for (const sel of CONTENT_SELECTORS) { div = doc.querySelector(sel); if (div) break; }
+  if (!div) {
+    doc.querySelectorAll("script,style,nav,header,footer,form").forEach(t => t.remove());
+    let best = 0;
+    for (const d of doc.querySelectorAll("div")) {
+      const len = d.textContent.length;
+      if (len > best) { best = len; div = d; }
+    }
+    if (!div) return "";
+  }
+  div.querySelectorAll("script,style,ins,iframe,button").forEach(t => t.remove());
+  div.querySelectorAll('[class*="ads"],[class*="banner"],[class*="lock"],[class*="notice"]')
+     .forEach(t => t.remove());
+  div.querySelectorAll("br").forEach(br => br.replaceWith("\n"));
+  div.querySelectorAll("p").forEach(p => { p.prepend("\n"); p.append("\n"); });
+
+  return div.textContent.split("\n")
+    .map(l => l.trim())
+    .filter(l => l && !(l.length < 200 && AD_RE.test(l)))
+    .join("\n\n");
+}
+
+const sanitize = name => name
+  .replace(/:/g, "：").replace(/\?/g, "？").replace(/"/g, "'")
+  .replace(/</g, "(").replace(/>/g, ")").replace(/[\/\\|]/g, "-").replace(/\*/g, "")
+  .replace(/\s+/g, " ").trim().replace(/[. ]+$/, "").slice(0, 180);
+
+const chapterFilename = (num, title) =>
+  sanitize(title ? `Chapter ${num}: ${title}` : `Chapter ${num}`) + ".txt";
+
+async function downloadChapter(ch) {
+  const m = ch.url.match(/chuong-(\d+)/g);
+  const urlNum = m ? parseInt(m[m.length - 1].slice(7), 10) : null;
+  const doc = await fetchDoc(ch.url);
+  const headEl = doc.querySelector("a.chapter-title, h2 a, .chapter-title");
+  const head = parseHeading(headEl ? headEl.textContent.trim() : ch.text);
+  const num = urlNum ?? head.num;
+  if (num == null) throw new Error("cannot determine chapter number");
+  const title = head.title || parseHeading(ch.text).title.replace(/^Ch[ưu]ơ?ng\s*\d+$/i, "");
+  const body = extractContent(doc);
+  if (!body.trim()) throw new Error("empty content");
+  return { filename: chapterFilename(num, title), body };
+}
+
+/* ---------------- output sinks ---------------- */
+
+function folderSink(rootHandle, folderName) {
+  let dir;
+  return {
+    async init() { dir = await rootHandle.getDirectoryHandle(folderName, { create: true }); },
+    async exists(name) {
+      try { return (await (await dir.getFileHandle(name)).getFile()).size > 0; }
+      catch { return false; }
+    },
+    async write(name, text) {
+      const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+      await w.write(text);
+      await w.close();
+    },
+    async finish() {},
+  };
+}
+
+function zipSink(folderName) {
+  const zip = new JSZip();
+  const folder = zip.folder(folderName);
+  return {
+    async init() {},
+    async exists() { return false; },
+    async write(name, text) { folder.file(name, text); },
+    async finish() {
+      setStatus("Building ZIP…");
+      const blob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${folderName}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    },
+  };
+}
+
+/* ---------------- main flow ---------------- */
+
+let running = false;
+
+async function run(makeSink) {
+  if (running) return;
+  const novelUrl = $("url").value.trim();
+  const concurrency = Math.max(1, Math.min(20, parseInt($("conc").value, 10) || 5));
+  if (!novelUrl) { setStatus("Enter a novel URL."); return; }
+  if (!$("proxy").value.trim()) { setStatus("Enter your proxy (Cloudflare Worker) URL."); return; }
+
+  running = true;
+  $("btn-folder").disabled = !window.showDirectoryPicker;
+  $("btn-zip").disabled = true;
+  logEl.textContent = "";
+  bar.style.display = "block";
+  bar.value = 0;
+
+  try {
+    setStatus("Listing chapters…");
+    const { title, chapters } = await listAllChapters(novelUrl);
+    if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
+    const folderName = sanitize(title);
+    log(`${title} — ${chapters.length} chapters, concurrency ${concurrency}`);
+
+    const sink = await makeSink(folderName);
+    await sink.init();
+
+    let done = 0, saved = 0, skipped = 0;
+    const failed = [];
+    bar.max = chapters.length;
+
+    const queue = [...chapters];
+    async function worker() {
+      while (queue.length) {
+        const ch = queue.shift();
+        try {
+          const { filename, body } = await downloadChapter(ch);
+          if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); }
+          else { await sink.write(filename, body); saved++; log(`saved  ${filename}`, "ok"); }
+        } catch (e) {
+          failed.push(ch.url);
+          log(`FAILED ${ch.url} — ${e.message}`, "err");
+        }
+        bar.value = ++done;
+        setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length} failed)`);
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, worker));
+
+    await sink.finish();
+    setStatus(`Done: ${saved} saved, ${skipped} skipped, ${failed.length} failed.`);
+    if (failed.length) log(`\nRe-run to retry the ${failed.length} failed chapter(s).`, "err");
+  } catch (e) {
+    setStatus(`Error: ${e.message}`);
+  } finally {
+    running = false;
+    $("btn-folder").disabled = !window.showDirectoryPicker;
+    $("btn-zip").disabled = false;
+  }
+}
+
+$("btn-folder").addEventListener("click", async () => {
+  let root;
+  try { root = await showDirectoryPicker({ mode: "readwrite" }); }
+  catch { return; /* user canceled */ }
+  run(folderName => folderSink(root, folderName));
+});
+
+$("btn-zip").addEventListener("click", () => run(folderName => zipSink(folderName)));
+</script>
+</body>
+</html>
