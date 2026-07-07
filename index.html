@@ -50,8 +50,8 @@
         <input id="conc" type="number" min="1" max="20" value="5">
       </div>
       <div>
-        <label for="proxy">Proxy URL (your Cloudflare Worker)</label>
-        <input id="proxy" type="url" placeholder="https://your-worker.workers.dev" spellcheck="false">
+        <label for="proxy">Proxy URL (Cloudflare Worker)</label>
+        <input id="proxy" type="url" placeholder="https://truyenfull.vtlinh87.workers.dev" spellcheck="false">
       </div>
     </div>
     <button id="btn-folder">Download to folder…</button>
@@ -70,7 +70,8 @@ const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 
 /* remember settings between visits */
-$("proxy").value = localStorage.getItem("proxy") || "";
+const DEFAULT_PROXY = "https://truyenfull.vtlinh87.workers.dev";
+$("proxy").value = localStorage.getItem("proxy") || DEFAULT_PROXY;
 $("conc").value  = localStorage.getItem("conc")  || "5";
 $("proxy").addEventListener("change", e => localStorage.setItem("proxy", e.target.value.trim()));
 $("conc").addEventListener("change",  e => localStorage.setItem("conc",  e.target.value));
