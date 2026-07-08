@@ -28,7 +28,8 @@
   button { margin-top:16px; padding:11px 18px; border:none; border-radius:8px;
            font-size:14px; font-weight:600; cursor:pointer; }
   #btn-folder { background:var(--accent); color:#fff; margin-right:8px; }
-  #btn-zip { background:#2a313a; color:var(--fg); }
+  #btn-zip { background:#2a313a; color:var(--fg); margin-right:8px; }
+  #btn-stop { background:var(--err); color:#fff; display:none; }
   button:disabled { opacity:.45; cursor:not-allowed; }
   #status { font-size:13px; color:var(--muted); margin-top:14px; min-height:18px; }
   progress { width:100%; height:8px; margin-top:10px; accent-color:var(--accent);
@@ -56,6 +57,7 @@
     </div>
     <button id="btn-folder">Download to folder…</button>
     <button id="btn-zip">Download as ZIP</button>
+    <button id="btn-stop">Stop</button>
     <div id="status"></div>
     <progress id="bar" max="1" value="0"></progress>
     <div id="log"></div>
@@ -66,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.8";
+const VERSION = "1.9";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -92,6 +94,17 @@ syncTrOpts();
 
 const NOVEL_URL_RE = /^https:\/\/truyenfull\.today(\/|$)/i;
 let running = false;
+let stopRequested = false;
+let aborter = null;
+
+class StopError extends Error {
+  constructor() { super("stopped by user"); this.stopped = true; }
+}
+const throwIfStopped = () => { if (stopRequested) throw new StopError(); };
+async function sleepUnlessStopped(ms) {
+  for (let t = 0; t < ms && !stopRequested; t += 500)
+    await new Promise(res => setTimeout(res, 500));
+}
 
 if (!window.showDirectoryPicker)
   $("btn-folder").title = "Folder saving needs Chrome or Edge; use ZIP instead.";
@@ -100,9 +113,18 @@ function updateButtons() {
   const ok = NOVEL_URL_RE.test($("url").value.trim());
   $("btn-folder").disabled = running || !ok || !window.showDirectoryPicker;
   $("btn-zip").disabled = running || !ok;
+  $("btn-stop").style.display = running ? "inline-block" : "none";
 }
 $("url").addEventListener("input", updateButtons);
 updateButtons();
+
+$("btn-stop").addEventListener("click", () => {
+  stopRequested = true;
+  aborter?.abort();
+  $("btn-stop").disabled = true;
+  setStatus("Stopping — finishing what's already in flight…");
+  log("Stop requested.", "err");
+});
 
 function log(msg, cls) {
   logEl.style.display = "block";
@@ -126,15 +148,19 @@ function proxied(url) {
 async function fetchDoc(url) {
   let lastErr;
   for (let i = 0; i < MAX_RETRIES; i++) {
+    throwIfStopped();
     try {
-      const r = await fetch(proxied(url));
+      const r = await fetch(proxied(url), { signal: aborter?.signal });
       if (r.ok) {
         const html = await r.text();
         if (html.trim()) return new DOMParser().parseFromString(html, "text/html");
       }
       lastErr = new Error(`HTTP ${r.status}`);
-    } catch (e) { lastErr = e; }
-    await new Promise(res => setTimeout(res, 1000 * 2 ** i + Math.random() * 1000));
+    } catch (e) {
+      throwIfStopped();
+      lastErr = e;
+    }
+    await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
   }
   throw new Error(`failed after ${MAX_RETRIES} attempts: ${url} (${lastErr})`);
 }
@@ -178,6 +204,7 @@ async function listAllChapters(novelUrl) {
   add(chapterLinks(doc, base, slug));
   let last = maxListingPage(doc, slug);
   for (let page = 2; page <= last; page++) {
+    throwIfStopped();
     setStatus(`Listing chapters: page ${page}/${last}…`);
     const p = await fetchDoc(`${base}trang-${page}/`);
     add(chapterLinks(p, base, slug));
@@ -441,12 +468,23 @@ async function llmMessage(model, maxTokens, prompt) {
   return messageText(j);
 }
 
-/* submit a Message Batch, poll until it ends, return Map(custom_id → message) */
+/* submit a Message Batch, poll until it ends, return Map(custom_id → message).
+   On Stop, the batch is canceled server-side; results that finished before
+   the cancellation are still returned so paid-for work is kept. */
 async function runBatch(requests, label) {
+  throwIfStopped();
   const batch = await (await apiFetch("/messages/batches", { requests })).json();
   log(`[${label}] batch submitted (${requests.length} request${requests.length > 1 ? "s" : ""}); polling…`);
+  let cancelSent = false;
   for (;;) {
-    await new Promise(res => setTimeout(res, BATCH_POLL_MS));
+    await sleepUnlessStopped(BATCH_POLL_MS);
+    if (stopRequested && !cancelSent) {
+      cancelSent = true;
+      try {
+        await apiFetch(`/messages/batches/${batch.id}/cancel`, {});
+        log(`[${label}] batch canceled — keeping results that already finished`, "err");
+      } catch (e) { log(`[${label}] cancel failed — ${errMsg(e)}`, "err"); }
+    }
     const b = await (await apiFetch(`/messages/batches/${batch.id}`)).json();
     const c = b.request_counts;
     setStatus(`[${label}] processing: ${c.processing}  ok: ${c.succeeded}  err: ${c.errored}`);
@@ -551,6 +589,7 @@ async function buildGlossary(sink, pending) {
   const newNames = [...names].filter(n => !(n in glossary)).sort();
   log(`${names.size} unique names, ${newNames.length} new`);
   if (!newNames.length) return glossary;
+  throwIfStopped();
 
   log("Phase 2: rendering new names into English");
   try {
@@ -584,6 +623,7 @@ async function translateNovel(sink, chapters) {
 
   log(`Translating ${pending.length} chapter(s) with ${SONNET} (effort=${TRANSLATE_EFFORT}, Batches API)`);
   const glossary = await buildGlossary(sink, pending);
+  throwIfStopped();
 
   log(`Phase 3: translating ${pending.length} chapter(s)`);
   const system = [{
@@ -645,6 +685,9 @@ async function run(makeSink, root = null) {
   }
 
   running = true;
+  stopRequested = false;
+  aborter = new AbortController();
+  $("btn-stop").disabled = false;
   updateButtons();
   logEl.textContent = "";
   bar.style.display = "block";
@@ -669,7 +712,7 @@ async function run(makeSink, root = null) {
     const pendingSaves = [];
     const collected = [];
     async function worker() {
-      while (queue.length) {
+      while (queue.length && !stopRequested) {
         const ch = queue.shift();
         try {
           /* skip the fetch entirely when a previous download exists — the
@@ -695,6 +738,7 @@ async function run(makeSink, root = null) {
             }
           }
         } catch (e) {
+          if (stopRequested) break;   /* aborted in-flight fetch, not a failure */
           failed.push(ch.url);
           log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err");
         }
@@ -723,20 +767,22 @@ async function run(makeSink, root = null) {
       log(`If folder saving keeps failing: check Windows Security → Ransomware protection → "Controlled folder access" (it silently blocks Chrome from writing), and note that Desktop/Documents folders are often OneDrive-synced by default even when they look local.`);
     }
 
-    if (translate && collected.length) {
+    if (translate && collected.length && !stopRequested) {
       collected.sort((a, b) => (chapterNum(a.filename) ?? 1e9) - (chapterNum(b.filename) ?? 1e9));
       try { await translateNovel(sink, collected); }
-      catch (e) { log(`TRANSLATION FAILED — ${errMsg(e)}`, "err"); }
+      catch (e) { log(e.stopped ? "Translation stopped by user." : `TRANSLATION FAILED — ${errMsg(e)}`, "err"); }
     }
 
     await sink.finish();
-    setStatus(`Done: ${saved} saved, ${skipped} skipped, ${failed.length} failed`
+    setStatus(`${stopRequested ? "Stopped" : "Done"}: ${saved} saved, ${skipped} skipped, ${failed.length} failed`
       + (rescued.length ? `, ${rescued.length} rescued to ZIP.` : "."));
+    if (stopRequested) log("Stopped — re-run to resume where you left off.", "err");
     if (failed.length) log(`\nRe-run to retry the ${failed.length} failed chapter(s).`, "err");
   } catch (e) {
-    setStatus(`Error: ${e.message}`);
+    setStatus(e.stopped ? "Stopped." : `Error: ${e.message}`);
   } finally {
     running = false;
+    stopRequested = false;
     updateButtons();
   }
 }
