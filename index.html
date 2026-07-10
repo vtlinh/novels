@@ -56,7 +56,6 @@
       <input id="apikey" type="password" placeholder="sk-ant-..." spellcheck="false">
     </div>
     <button id="btn-folder">Download to folder…</button>
-    <button id="btn-change" title="Pick a different download folder" style="display:none">Change folder…</button>
     <button id="btn-zip">Download as ZIP</button>
     <button id="btn-stop">Stop</button>
     <div id="status"></div>
@@ -69,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.12";
+const VERSION = "1.13";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -110,48 +109,9 @@ async function sleepUnlessStopped(ms) {
 if (!window.showDirectoryPicker)
   $("btn-folder").title = "Folder saving needs Chrome or Edge; use ZIP instead.";
 
-/* remember the picked download folder between visits — directory handles
-   can't go in localStorage, so they live in IndexedDB */
-let savedRoot;
-function handleStore(mode, op) {
-  return new Promise((resolve, reject) => {
-    const open = indexedDB.open("novels", 1);
-    open.onupgradeneeded = () => open.result.createObjectStore("handles");
-    open.onerror = () => reject(open.error);
-    open.onsuccess = () => {
-      const req = op(open.result.transaction("handles", mode).objectStore("handles"));
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    };
-  });
-}
-handleStore("readonly", s => s.get("root"))
-  .then(h => { if (h) { savedRoot = h; updateButtons(); } })
-  .catch(() => {});
-async function pickRoot() {
-  const root = await showDirectoryPicker({ id: "novels-root", mode: "readwrite" });
-  savedRoot = root;
-  handleStore("readwrite", s => s.put(root, "root")).catch(() => {});
-  updateButtons();
-  return root;
-}
-/* the saved handle needs per-visit permission, and goes stale if the folder
-   was moved or deleted — fall back to the picker in either case */
-async function reusableSavedRoot() {
-  if (!savedRoot) return undefined;
-  try {
-    if (await savedRoot.requestPermission({ mode: "readwrite" }) !== "granted") return undefined;
-    await savedRoot.keys().next();
-    return savedRoot;
-  } catch { return undefined; }
-}
-
 function updateButtons() {
   const ok = NOVEL_URL_RE.test($("url").value.trim());
   $("btn-folder").disabled = running || !ok || !window.showDirectoryPicker;
-  $("btn-folder").textContent = savedRoot ? `Download to "${savedRoot.name}"` : "Download to folder…";
-  $("btn-change").style.display = savedRoot && window.showDirectoryPicker ? "inline-block" : "none";
-  $("btn-change").disabled = running;
   $("btn-zip").disabled = running || !ok;
   $("btn-stop").style.display = running ? "inline-block" : "none";
 }
@@ -479,6 +439,7 @@ const HAIKU = "claude-haiku-4-5";
 const SONNET = "claude-sonnet-5";
 const TRANSLATE_EFFORT = "medium";
 const NAMES_CACHE_FILE = ".names_cache.json";
+const GLOSSARY_PROGRESS_FILE = ".glossary_progress.json";
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
 const BATCH_POLL_MS = 30000;
@@ -644,6 +605,29 @@ const glossaryPairs = map =>
 const saveGlossary = (sink, map) =>
   sink.write(NAMES_CACHE_FILE, JSON.stringify(glossaryPairs(map), null, 2));
 
+/* Which chapter filenames have already been folded into the glossary, so a
+   resumed run only extracts names from the chapters it hasn't reached yet. */
+async function loadGlossaryProgress(sink) {
+  try { const a = JSON.parse(await sink.read(GLOSSARY_PROGRESS_FILE) ?? "[]"); return new Set(Array.isArray(a) ? a : []); }
+  catch { return new Set(); }
+}
+const saveGlossaryProgress = (sink, set) =>
+  sink.write(GLOSSARY_PROGRESS_FILE, JSON.stringify([...set].sort(), null, 2));
+
+async function translateTitleBatch(title) {
+  const results = await runBatch([{
+    custom_id: "title",
+    params: {
+      model: HAIKU,
+      max_tokens: 100,
+      messages: [{ role: "user", content:
+        "Translate this Vietnamese novel title to natural English. Reply with ONLY the translated title, nothing else:\n" + title }],
+    },
+  }], "title");
+  const tm = results.get("title");
+  return tm ? messageText(tm) : null;
+}
+
 const PAIRS_SCHEMA = jsonFormat({
   type: "object",
   properties: {
@@ -674,12 +658,29 @@ const GLOSSARY_SYSTEM =
    each request is what lets Sino-Vietnamese names romanize properly
    (e.g. "Tiêu Viêm" -> "Xiao Yan") instead of just losing their accents.
    `wantTitle` (the raw Vietnamese title, or null) folds a one-shot title
-   translation into the first batch so it, too, goes through the Batch API. */
+   translation into the first batch so it, too, goes through the Batch API.
+
+   A batch that fails (after apiFetch's retries) is NOT skipped — it aborts the
+   whole build by throwing. Every completed batch is already saved, and the set
+   of glossary-covered chapters is persisted after each one, so the next run
+   resumes from the first chapter that hasn't been covered yet. */
 async function buildGlossary(sink, pending, wantTitle) {
   const glossary = await loadGlossary(sink);
-  const groups = chunkByTokens(pending, CHUNK_TOKEN_BUDGET);
-  log(`Building name glossary from ${pending.length} chapter(s) in ${groups.length} sequential batch(es)`);
+  const done = await loadGlossaryProgress(sink);
+  if (!glossary.size) done.clear();   // glossary was cleared/deleted -> rebuild from scratch
+  const todo = pending.filter(ch => !done.has(ch.filename));
+  const groups = chunkByTokens(todo, CHUNK_TOKEN_BUDGET);
   let englishTitle = null;
+
+  if (!groups.length) {
+    if (done.size) log(`Glossary already covers all ${pending.length} pending chapter(s)`, "ok");
+    if (wantTitle) englishTitle = await translateTitleBatch(wantTitle);
+    return { glossary, englishTitle };
+  }
+
+  log(`Building name glossary for ${todo.length} chapter(s)`
+    + (done.size ? ` (${done.size} already covered)` : "")
+    + ` in ${groups.length} sequential batch(es)`);
 
   for (let gi = 0; gi < groups.length; gi++) {
     throwIfStopped();
@@ -711,14 +712,10 @@ async function buildGlossary(sink, pending, wantTitle) {
       },
     });
 
-    let results;
-    try {
-      results = await runBatch(reqs, `glossary ${gi + 1}/${groups.length}`);
-    } catch (e) {
-      if (e.stopped) throw e;
-      log(`! glossary batch ${gi + 1}/${groups.length} failed (${errMsg(e)}); continuing with the glossary so far`, "err");
-      continue;
-    }
+    /* runBatch (via apiFetch) already retries network/429/5xx with backoff;
+       if it still fails, let it throw — earlier batches and the progress
+       record below are already saved, so a re-run resumes from here. */
+    const results = await runBatch(reqs, `glossary ${gi + 1}/${groups.length}`);
     if (gi === 0 && wantTitle) { const tm = results.get("title"); if (tm) englishTitle = messageText(tm); }
 
     let added = 0;
@@ -729,8 +726,9 @@ async function buildGlossary(sink, pending, wantTitle) {
       const vi = String(vietnamese ?? "").trim(), en = String(english ?? "").trim();
       if (vi && en && !glossary.has(vi)) { glossary.set(vi, en); added++; }
     }
-    /* persist after each batch so a Stop or a later failure keeps progress */
+    for (const ch of groups[gi]) done.add(ch.filename);
     await saveGlossary(sink, glossary);
+    await saveGlossaryProgress(sink, done);
     log(`Glossary batch ${gi + 1}/${groups.length}: +${added} names (${glossary.size} total)`, "ok");
   }
   return { glossary, englishTitle };
@@ -940,17 +938,10 @@ async function run(makeSink, root = null) {
 }
 
 $("btn-folder").addEventListener("click", async () => {
-  let root = await reusableSavedRoot();
-  if (!root) {
-    try { root = await pickRoot(); }
-    catch { return; /* user canceled */ }
-  }
+  let root;
+  try { root = await showDirectoryPicker({ mode: "readwrite" }); }
+  catch { return; /* user canceled */ }
   run(folderName => folderSink(root, folderName), rootOps(root));
-});
-
-$("btn-change").addEventListener("click", async () => {
-  try { await pickRoot(); }
-  catch { /* user canceled — keep the previous folder */ }
 });
 
 $("btn-zip").addEventListener("click", () => run(folderName => zipSink(folderName)));
