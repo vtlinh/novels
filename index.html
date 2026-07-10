@@ -56,6 +56,7 @@
       <input id="apikey" type="password" placeholder="sk-ant-..." spellcheck="false">
     </div>
     <button id="btn-folder">Download to folder…</button>
+    <button id="btn-change" title="Pick a different download folder" style="display:none">Change folder…</button>
     <button id="btn-zip">Download as ZIP</button>
     <button id="btn-stop">Stop</button>
     <div id="status"></div>
@@ -68,7 +69,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.11";
+const VERSION = "1.12";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -109,9 +110,48 @@ async function sleepUnlessStopped(ms) {
 if (!window.showDirectoryPicker)
   $("btn-folder").title = "Folder saving needs Chrome or Edge; use ZIP instead.";
 
+/* remember the picked download folder between visits — directory handles
+   can't go in localStorage, so they live in IndexedDB */
+let savedRoot;
+function handleStore(mode, op) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open("novels", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("handles");
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const req = op(open.result.transaction("handles", mode).objectStore("handles"));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    };
+  });
+}
+handleStore("readonly", s => s.get("root"))
+  .then(h => { if (h) { savedRoot = h; updateButtons(); } })
+  .catch(() => {});
+async function pickRoot() {
+  const root = await showDirectoryPicker({ id: "novels-root", mode: "readwrite" });
+  savedRoot = root;
+  handleStore("readwrite", s => s.put(root, "root")).catch(() => {});
+  updateButtons();
+  return root;
+}
+/* the saved handle needs per-visit permission, and goes stale if the folder
+   was moved or deleted — fall back to the picker in either case */
+async function reusableSavedRoot() {
+  if (!savedRoot) return undefined;
+  try {
+    if (await savedRoot.requestPermission({ mode: "readwrite" }) !== "granted") return undefined;
+    await savedRoot.keys().next();
+    return savedRoot;
+  } catch { return undefined; }
+}
+
 function updateButtons() {
   const ok = NOVEL_URL_RE.test($("url").value.trim());
   $("btn-folder").disabled = running || !ok || !window.showDirectoryPicker;
+  $("btn-folder").textContent = savedRoot ? `Download to "${savedRoot.name}"` : "Download to folder…";
+  $("btn-change").style.display = savedRoot && window.showDirectoryPicker ? "inline-block" : "none";
+  $("btn-change").disabled = running;
   $("btn-zip").disabled = running || !ok;
   $("btn-stop").style.display = running ? "inline-block" : "none";
 }
@@ -869,10 +909,17 @@ async function run(makeSink, root = null) {
 }
 
 $("btn-folder").addEventListener("click", async () => {
-  let root;
-  try { root = await showDirectoryPicker({ mode: "readwrite" }); }
-  catch { return; /* user canceled */ }
+  let root = await reusableSavedRoot();
+  if (!root) {
+    try { root = await pickRoot(); }
+    catch { return; /* user canceled */ }
+  }
   run(folderName => folderSink(root, folderName), rootOps(root));
+});
+
+$("btn-change").addEventListener("click", async () => {
+  try { await pickRoot(); }
+  catch { /* user canceled — keep the previous folder */ }
 });
 
 $("btn-zip").addEventListener("click", () => run(folderName => zipSink(folderName)));
