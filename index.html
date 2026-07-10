@@ -68,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.9";
+const VERSION = "1.10";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -442,6 +442,7 @@ const NAMES_CACHE_FILE = ".names_cache.json";
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
 const BATCH_POLL_MS = 30000;
+const NAMES_CHUNK = 50;   // chapters per glossary-building request
 
 async function apiFetch(path, body) {
   const r = await fetch(`https://api.anthropic.com/v1${path}`, {
@@ -504,10 +505,6 @@ async function runBatch(requests, label) {
 const messageText = msg =>
   msg.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
 
-/* parse JSON from an LLM reply, tolerating markdown code fences */
-const parseJsonReply = text =>
-  JSON.parse(text.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, ""));
-
 const jsonFormat = schema => ({ format: { type: "json_schema", schema } });
 const chapterNum = filename => {
   const m = filename.match(/^Chapter (\d+)/);
@@ -556,62 +553,83 @@ async function loadGlossary(sink) {
   catch { return {}; }
 }
 
-/* Phase 1+2: extract proper names from the pending chapters, render the new
-   ones into English, and merge into the per-novel glossary (existing entries
-   win, so chapters translated earlier stay consistent). */
+/* Build the per-novel proper-noun glossary. Haiku reads the chapters in
+   chunks of NAMES_CHUNK and, for each chunk, returns the names it finds with
+   their English renderings. Chunks run SEQUENTIALLY and each carries the
+   glossary built so far, so a name rendered in chunk 1 is reused verbatim in
+   every later chunk. Names are chosen with the actual chapter text in view,
+   which is what lets Sino-Vietnamese names romanize properly
+   (e.g. "Tiêu Viêm" -> "Xiao Yan") instead of just losing their accents. */
 async function buildGlossary(sink, pending) {
-  const glossary = await loadGlossary(sink);
+  let glossary = await loadGlossary(sink);
 
-  log(`Phase 1: extracting proper names from ${pending.length} chapter(s)`);
-  const extracted = await runBatch(pending.map((ch, i) => ({
-    custom_id: `names-${i}`,
-    params: {
-      model: HAIKU,
-      max_tokens: 2000,
-      system: [{
-        type: "text",
-        text: "Extract every proper name from the given Vietnamese novel chapter: characters, nicknames, places, organizations, company/brand names. List each unique name exactly as written in the chapter.",
-        cache_control: { type: "ephemeral" },
-      }],
-      messages: [{ role: "user", content: ch.body }],
-      output_config: jsonFormat({
-        type: "object",
-        properties: { names: { type: "array", items: { type: "string" } } },
-        required: ["names"],
-        additionalProperties: false,
-      }),
+  const chunks = [];
+  for (let i = 0; i < pending.length; i += NAMES_CHUNK)
+    chunks.push(pending.slice(i, i + NAMES_CHUNK));
+  log(`Building name glossary from ${pending.length} chapter(s) in ${chunks.length} chunk(s) of up to ${NAMES_CHUNK}`);
+
+  const namesSchema = jsonFormat({
+    type: "object",
+    properties: {
+      names: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { original: { type: "string" }, english: { type: "string" } },
+          required: ["original", "english"],
+          additionalProperties: false,
+        },
+      },
     },
-  })), "names");
-  const names = new Set();
-  for (const msg of extracted.values()) {
-    try { for (const n of JSON.parse(messageText(msg)).names) if (n.trim()) names.add(n.trim()); } catch {}
-  }
-  const newNames = [...names].filter(n => !(n in glossary)).sort();
-  log(`${names.size} unique names, ${newNames.length} new`);
-  if (!newNames.length) return glossary;
-  throwIfStopped();
+    required: ["names"],
+    additionalProperties: false,
+  });
 
-  log("Phase 2: rendering new names into English");
-  try {
-    const mapping = parseJsonReply(await llmMessage(HAIKU, 8000,
-      "These proper names appear in a Vietnamese web novel. Provide the English rendering to use consistently in a translation (romanize person names; translate meaningful place/organization names).\n"
-      + "Existing glossary, keep new entries stylistically consistent with it:\n"
-      + JSON.stringify(glossary) + "\n\n"
-      + "Reply with ONLY a JSON object mapping each of these names to its English form:\n"
-      + JSON.stringify(newNames)));
-    for (const [k, v] of Object.entries(mapping))
-      if (!(k in glossary)) glossary[k] = String(v);
-  } catch (e) {
-    log(`! name rendering failed (${errMsg(e)}); translating without new names`, "err");
+  for (let ci = 0; ci < chunks.length; ci++) {
+    throwIfStopped();
+    setStatus(`Building glossary: chunk ${ci + 1}/${chunks.length}…`);
+    const combined = chunks[ci]
+      .map(ch => `=== ${ch.filename.replace(/\.txt$/, "")} ===\n${ch.body}`)
+      .join("\n\n");
+    let names;
+    try {
+      const j = await (await apiFetch("/messages", {
+        model: HAIKU,
+        max_tokens: 8000,
+        system: [{
+          type: "text",
+          text: "You are building a proper-noun glossary for an English translation of a Vietnamese web novel. From the chapters given, find every proper name — characters, nicknames, places, sects/organizations, techniques, titles, brands — and give the English rendering to use consistently throughout the translation. Romanize person names in the conventional form for the name's likely origin: most are Sino-Vietnamese, so use the standard pinyin-style English rendering (e.g. \"Tiêu Viêm\" -> \"Xiao Yan\", \"Đấu Khí\" -> \"Dou Qi\"), not a diacritic-stripped copy. Translate meaningful place/organization/technique names. Reuse the existing glossary's renderings exactly and only return names that are NOT already in it.",
+          cache_control: { type: "ephemeral" },
+        }],
+        messages: [{
+          role: "user",
+          content: "EXISTING GLOSSARY (reuse exactly; do not repeat these in your answer):\n"
+            + JSON.stringify(glossary) + "\n\nCHAPTERS:\n" + combined,
+        }],
+        output_config: namesSchema,
+      })).json();
+      names = JSON.parse(messageText(j)).names;
+    } catch (e) {
+      log(`! glossary chunk ${ci + 1}/${chunks.length} failed (${errMsg(e)}); continuing`, "err");
+      continue;
+    }
+    let added = 0;
+    for (const { original, english } of names) {
+      const o = String(original ?? "").trim(), en = String(english ?? "").trim();
+      if (o && en && !(o in glossary)) { glossary[o] = en; added++; }
+    }
+    /* persist after every chunk so a Stop (or a later failure) keeps the
+       glossary built so far */
+    glossary = Object.fromEntries(Object.entries(glossary).sort(([a], [b]) => a.localeCompare(b)));
+    await sink.write(NAMES_CACHE_FILE, JSON.stringify(glossary, null, 2));
+    log(`Glossary chunk ${ci + 1}/${chunks.length}: +${added} names (${Object.keys(glossary).length} total)`, "ok");
   }
-  const sorted = Object.fromEntries(Object.entries(glossary).sort(([a], [b]) => a.localeCompare(b)));
-  await sink.write(NAMES_CACHE_FILE, JSON.stringify(sorted, null, 2));
-  log(`Glossary saved: ${NAMES_CACHE_FILE} (${Object.keys(sorted).length} entries)`, "ok");
-  return sorted;
+  return glossary;
 }
 
-/* Phase 3: translate pending chapters into translated/, keeping the same
-   filenames as their sources so re-runs can skip what's already done. */
+/* Translate pending chapters into translated/, keeping the same filenames as
+   their sources so re-runs can skip what's already done. Builds the glossary
+   first, then fans the chapters out as one parallel batch. */
 async function translateNovel(sink, chapters) {
   const pending = [];
   for (const ch of chapters) {
@@ -625,7 +643,7 @@ async function translateNovel(sink, chapters) {
   const glossary = await buildGlossary(sink, pending);
   throwIfStopped();
 
-  log(`Phase 3: translating ${pending.length} chapter(s)`);
+  log(`Translating ${pending.length} chapter(s) in one parallel batch`);
   const system = [{
     type: "text",
     text: "Translate this Vietnamese web novel chapter into natural, fluent English.\nRules:\n- Use EXACTLY these English renderings for proper names:\n"
