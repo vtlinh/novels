@@ -504,7 +504,8 @@ function chunkByTokens(chapters, budget) {
 }
 
 async function apiFetch(path, body) {
-  const r = await fetch(`https://api.anthropic.com/v1${path}`, {
+  const url = `https://api.anthropic.com/v1${path}`;
+  const opts = {
     method: body ? "POST" : "GET",
     headers: {
       "content-type": "application/json",
@@ -513,9 +514,25 @@ async function apiFetch(path, body) {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!r.ok) throw new Error(`Claude API ${r.status}: ${(await r.text()).slice(0, 300)}`);
-  return r;
+  };
+  let lastErr;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    let r;
+    try {
+      r = await fetch(url, opts);
+    } catch (e) {
+      /* network-level failure (offline, dropped connection, or a CORS block) —
+         "Failed to fetch" lands here; retry a few times before giving up */
+      lastErr = new Error(`network error calling ${path} — ${e.message}`);
+      await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
+      continue;
+    }
+    if (r.ok) return r;
+    lastErr = new Error(`Claude API ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    if (r.status !== 429 && r.status < 500) throw lastErr;   // client error — don't retry
+    await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
+  }
+  throw lastErr;
 }
 
 /* submit a Message Batch, poll until it ends, return Map(custom_id → message).
@@ -694,7 +711,14 @@ async function buildGlossary(sink, pending, wantTitle) {
       },
     });
 
-    const results = await runBatch(reqs, `glossary ${gi + 1}/${groups.length}`);
+    let results;
+    try {
+      results = await runBatch(reqs, `glossary ${gi + 1}/${groups.length}`);
+    } catch (e) {
+      if (e.stopped) throw e;
+      log(`! glossary batch ${gi + 1}/${groups.length} failed (${errMsg(e)}); continuing with the glossary so far`, "err");
+      continue;
+    }
     if (gi === 0 && wantTitle) { const tm = results.get("title"); if (tm) englishTitle = messageText(tm); }
 
     let added = 0;
@@ -891,7 +915,14 @@ async function run(makeSink, root = null) {
     if (translate && collected.length && !stopRequested) {
       collected.sort((a, b) => (chapterNum(a.filename) ?? 1e9) - (chapterNum(b.filename) ?? 1e9));
       try { await translateNovel(sink, collected, { root, slug, title }); }
-      catch (e) { log(e.stopped ? "Translation stopped by user." : `TRANSLATION FAILED — ${errMsg(e)}`, "err"); }
+      catch (e) {
+        if (e.stopped) { log("Translation stopped by user.", "err"); }
+        else {
+          log(`TRANSLATION FAILED — ${errMsg(e)}`, "err");
+          if (/network error|Failed to fetch/i.test(e.message))
+            log("A network error reached the Claude API. Downloaded chapters and any glossary/translations so far are saved — re-run to resume. If it keeps failing, open DevTools (F12) → Console: a line mentioning \"CORS policy\" means the Batches endpoint is blocking direct browser calls, anything else is a plain network drop.", "err");
+        }
+      }
     }
 
     await sink.finish();
