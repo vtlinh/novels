@@ -68,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.16";
+const VERSION = "1.17";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -76,6 +76,8 @@ $("ver").textContent = `v${VERSION}`;
 const PROXY = "https://truyenfull.vtlinh87.workers.dev";
 
 /* remember settings between visits */
+$("url").value = localStorage.getItem("url") || "";
+$("url").addEventListener("input", e => localStorage.setItem("url", e.target.value.trim()));
 $("conc").value = localStorage.getItem("conc") || "5";
 $("conc-val").textContent = $("conc").value;
 $("conc").addEventListener("input", e => {
