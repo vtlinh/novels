@@ -70,7 +70,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.25";
+const VERSION = "1.26";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -329,23 +329,25 @@ const sanitize = name => name
   .replace(/[^\x20-\x7E]/g, " ")
   .replace(/\s+/g, " ").trim().replace(/[. ]+$/, "").slice(0, 180);
 
-const chapterFilename = (num, title) =>
-  sanitize(title ? `Chapter ${num}: ${title}` : `Chapter ${num}`) + ".txt";
+/* Files are named just "Chapter N" — the chapter's name/title lives inside the
+   body (first line) instead, so it gets translated along with the text. */
+const chapterFilename = num => `Chapter ${num}.txt`;
 
 const chapterUrlNum = ch => {
   const m = ch.url.match(/chuong-(\d+)/g);
   return m ? parseInt(m[m.length - 1].slice(7), 10) : null;
 };
 
-/* the filename we can predict from the URL number + link text, used to skip a
+/* the filename we can predict from the URL number alone, used to skip a
    chapter that's already downloaded without fetching it */
 const predictedName = ch => {
   const urlNum = chapterUrlNum(ch);
-  const linkTitle = parseHeading(ch.text).title;
-  return urlNum != null && linkTitle ? chapterFilename(urlNum, linkTitle) : null;
+  return urlNum != null ? chapterFilename(urlNum) : null;
 };
 
-/* parse an already-fetched chapter document into { filename, body } */
+/* parse an already-fetched chapter document into { filename, body }. The
+   Vietnamese chapter heading ("Chương N: <name>") is prepended to the body so
+   the chapter name is translated together with the chapter text. */
 function parseChapter(doc, ch) {
   const urlNum = chapterUrlNum(ch);
   const headEl = doc.querySelector("a.chapter-title, h2 a, .chapter-title");
@@ -353,9 +355,10 @@ function parseChapter(doc, ch) {
   const num = urlNum ?? head.num;
   if (num == null) throw new Error("cannot determine chapter number");
   const title = head.title || parseHeading(ch.text).title.replace(/^Ch[ưu]ơ?ng\s*\d+$/i, "");
-  const body = extractContent(doc);
-  if (!body.trim()) throw new Error("empty content");
-  return { filename: chapterFilename(num, title), body };
+  const content = extractContent(doc);
+  if (!content.trim()) throw new Error("empty content");
+  const heading = title ? `Chương ${num}: ${title}` : `Chương ${num}`;
+  return { filename: chapterFilename(num), body: `${heading}\n\n${content}` };
 }
 
 /* ---------------- output sinks ---------------- */
@@ -514,20 +517,23 @@ function rootOps(rootHandle) {
 const HAIKU = "claude-haiku-4-5";
 const OPUS = "claude-opus-4-8";               // translates chapter + names together, one bundle at a time
 const TRANSLATE_EFFORT = "medium";
-const TRANSLATE_MAX_TOKENS = 128000;          // Opus 4.8 max output; the whole bundle's translation must fit under this
+const TRANSLATE_MAX_TOKENS = 128000;          // Opus 4.8 max output; a bundle's whole translation must fit under this
 const NAMES_CACHE_FILE = ".names_cache.json";
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
 const FETCH_BATCH = 50;                        // chapters fetched per Worker call (free-tier subrequest limit)
-/* Consecutive chapters are packed into a bundle up to this many estimated INPUT
-   tokens. The binding limit is OUTPUT: the bundle's combined English translation
-   (plus the names JSON) must stay under TRANSLATE_MAX_TOKENS, and English output
-   runs well under the Vietnamese input estimate, so this budget leaves ample
-   headroom. Bigger bundles = fewer boundaries = less name drift, so keep it as
-   large as safely fits Opus 4.8's output ceiling. */
-const BUNDLE_TOKEN_BUDGET = 70000;
-/* Conservative token estimate for Vietnamese text (~2 chars/token). Over-
-   estimating keeps bundles safely below the output limit. */
+/* A bundle's combined output (all its chapter translations + the names JSON)
+   must stay under TRANSLATE_MAX_TOKENS or the batch truncates and the whole
+   bundle is lost. We pack consecutive chapters up to this many estimated OUTPUT
+   tokens — deliberately well below the 128K ceiling to leave headroom for the
+   names JSON and for estimate error. Bigger bundles = fewer boundaries = less
+   name drift, so keep it as large as safely fits. If a bundle still truncates,
+   translateNovel splits it in half and retries (down to one chapter), so we
+   never exceed the ceiling even when the estimate is wrong. */
+const BUNDLE_OUTPUT_BUDGET = 80000;
+/* Conservative token estimate for Vietnamese text (~2 chars/token). English
+   output for a chapter runs BELOW its Vietnamese input estimate, so using this
+   figure as the per-chapter output estimate over-counts — a safe direction. */
 const estTokens = s => Math.ceil(s.length / 2);
 
 /* Split chapters into sequential bundles whose combined body stays within a
@@ -812,7 +818,7 @@ const BUNDLE_SCHEMA = {
 const BUNDLE_SYSTEM =
   "You are translating a Vietnamese web novel into natural, fluent English. You receive a bundle of consecutive chapters to translate together as one continuous whole, plus a glossary of proper-name renderings already fixed in earlier chapters.\n"
   + "Translation rules:\n"
-  + "- Translate each labelled chapter into natural, fluent English. Preserve paragraph breaks (a blank line between paragraphs). Output ONLY the translated prose for each chapter — no chapter title, no headers, no notes, no commentary.\n"
+  + "- Translate each labelled chapter into natural, fluent English, EVERYTHING it contains — including its first line, the chapter heading (e.g. \"Chương 5: Tiêu Viêm\" -> \"Chapter 5: Xiao Yan\"). Keep that heading as the translated chapter's first line, followed by a blank line, then the prose. Preserve paragraph breaks (a blank line between paragraphs). Do not add or drop any heading, note, or commentary of your own — translate exactly what is given.\n"
   + "- Keep every proper name — characters, nicknames, places, sects/organizations, techniques, titles, brands — rendered CONSISTENTLY: identical English for the same name everywhere it appears, both across the chapters in this bundle and with the glossary. If a name is in the glossary, reuse that English rendering EXACTLY. For a name not in the glossary, pick the single best English rendering and reuse it for every occurrence in this bundle.\n"
   + "- Romanize person names in the conventional form for the name's likely origin: most are Sino-Vietnamese, so use the standard pinyin-style English rendering (e.g. \"Tiêu Viêm\" -> \"Xiao Yan\", \"Đấu Khí\" -> \"Dou Qi\"), not a diacritic-stripped copy. Translate meaningful place/organization/technique names.\n"
   + "Name-list rules (the `names` array):\n"
@@ -945,7 +951,7 @@ async function recoverPendingBatches(sink, ctx) {
 /* Translate pending chapters into translated/, keeping the same filenames as
    their sources so re-runs can skip what's already done.
 
-   Chapters are sent in sequential bundles (up to BUNDLE_TOKEN_BUDGET each). One
+   Chapters are sent in sequential bundles (up to BUNDLE_OUTPUT_BUDGET each). One
    Opus 4.8 request per bundle translates the whole bundle AND returns the new
    proper-name renderings, as one structured object — so names stay consistent
    across every chapter in the bundle instead of drifting between separate
@@ -986,14 +992,19 @@ async function translateNovel(sink, chapters, ctx = {}) {
   }
 
   const glossary = await loadGlossary(sink);
-  const bundles = chunkByTokens(pending, BUNDLE_TOKEN_BUDGET);
-  log(`Translating ${pending.length} chapter(s) with ${OPUS} (effort=${TRANSLATE_EFFORT}, Batches API) in ${bundles.length} sequential bundle(s)`);
+  /* Work queue of bundles, processed in order so names propagate forward. A
+     bundle that truncates is split in half and its halves pushed back to the
+     FRONT (first half first), so we retry smaller without ever exceeding the
+     output ceiling. */
+  const queue = chunkByTokens(pending, BUNDLE_OUTPUT_BUDGET);
+  log(`Translating ${pending.length} chapter(s) with ${OPUS} (effort=${TRANSLATE_EFFORT}, Batches API) in ${queue.length} sequential bundle(s)`);
 
-  let saved = 0, failed = 0;
-  for (let gi = 0; gi < bundles.length && !stopRequested; gi++) {
+  let saved = 0, failed = 0, bundleNo = 0, titleSent = false;
+  while (queue.length && !stopRequested) {
     throwIfStopped();
-    const group = bundles[gi];
-    setStatus(`Translating bundle ${gi + 1}/${bundles.length} (${group.length} chapter${group.length > 1 ? "s" : ""})…`);
+    const group = queue.shift();
+    bundleNo++;
+    setStatus(`Translating bundle ${bundleNo} (${group.length} chapter${group.length > 1 ? "s" : ""})…`);
 
     /* chapters are labelled 1..N; the model echoes each number back in `n` */
     const blob = group
@@ -1005,6 +1016,8 @@ async function translateNovel(sink, chapters, ctx = {}) {
       + `\n\nTranslate the following ${group.length} chapter(s) together as one continuous whole. Return every chapter's full translation in \`chapters\` (echo each CHAPTER number in \`n\`), and any proper names NOT already in the glossary in \`names\`.\n\n`
       + blob;
 
+    /* only the first batch we submit carries the one-shot title translation */
+    const withTitle = !titleSent && !!wantTitle;
     const reqs = [{
       custom_id: "bundle",
       params: {
@@ -1015,14 +1028,16 @@ async function translateNovel(sink, chapters, ctx = {}) {
         output_config: { effort: TRANSLATE_EFFORT, ...jsonFormat(BUNDLE_SCHEMA) },
       },
     }];
-    if (gi === 0 && wantTitle) reqs.push(titleRequest(wantTitle));
+    if (withTitle) reqs.push(titleRequest(wantTitle));
 
-    const results = await runBatch(reqs,
-      bundles.length > 1 ? `translate ${gi + 1}/${bundles.length}` : "translate",
+    const results = await runBatch(reqs, `translate ${bundleNo}`,
       { kind: "bundle", slug: ctx.slug, files: group.map(ch => ch.filename),
-        wantTitle: gi === 0 && wantTitle ? wantTitle : null });
+        wantTitle: withTitle ? wantTitle : null });
 
-    if (gi === 0 && wantTitle) {
+    /* the short title request succeeds independently of the bundle, so collect
+       it even if the bundle itself truncated */
+    if (withTitle) {
+      titleSent = true;
       const tm = results.get("title");
       if (tm && ctx.root) {
         const eng = await saveEnglishTitle(ctx.root, ctx.slug, ctx.title, messageText(tm));
@@ -1031,17 +1046,24 @@ async function translateNovel(sink, chapters, ctx = {}) {
     }
 
     const msg = results.get("bundle");
-    /* a truncated bundle is unparseable structured JSON — leave it all unsaved
-       so the next run retries (with the same, safely-sized bundle) */
+    /* a truncated bundle is unparseable structured JSON — split and retry the
+       halves so its total output fits under the ceiling */
     if (!msg || msg.stop_reason === "max_tokens") {
-      failed += group.length;
-      log(`! bundle ${gi + 1}/${bundles.length}: ${msg ? "output truncated (max_tokens)" : "no result"}; not saved`, "err");
+      if (msg && group.length > 1) {
+        const mid = Math.ceil(group.length / 2);
+        queue.unshift(group.slice(mid));
+        queue.unshift(group.slice(0, mid));
+        log(`! bundle ${bundleNo}: output truncated (max_tokens); splitting ${group.length} → ${mid}+${group.length - mid} and retrying`, "err");
+      } else {
+        failed += group.length;
+        log(`! bundle ${bundleNo}: ${msg ? "output truncated (max_tokens) even for a single chapter" : "no result"}; not saved`, "err");
+      }
       continue;
     }
     let parsed = null;
     try { parsed = JSON.parse(messageText(msg)); } catch (e) {
       failed += group.length;
-      log(`! bundle ${gi + 1}/${bundles.length}: could not parse structured output (${errMsg(e)}); not saved`, "err");
+      log(`! bundle ${bundleNo}: could not parse structured output (${errMsg(e)}); not saved`, "err");
       continue;
     }
 
@@ -1063,7 +1085,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
         log(`SAVE FAILED ${TRANSLATED_DIR}/${ch.filename} — ${errMsg(e)}`, "err");
       }
     }
-    log(`Bundle ${gi + 1}/${bundles.length}: +${added} names (${glossary.size} total)`, "ok");
+    log(`Bundle ${bundleNo}: +${added} names (${glossary.size} total)`, "ok");
   }
   log(`Translation ${stopRequested ? "stopped" : "done"}: ${saved} ok, ${failed} failed`
     + (failed || stopRequested ? " (re-run to resume the rest)" : ""), failed ? "err" : "ok");
