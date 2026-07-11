@@ -68,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.13";
+const VERSION = "1.14";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -464,15 +464,18 @@ function chunkByTokens(chapters, budget) {
   return groups;
 }
 
+/* The Message Batches endpoint is not CORS-enabled, so browser calls to
+   api.anthropic.com are blocked. Route Claude API calls through the same
+   Cloudflare Worker used for chapter fetching (server-to-server, no CORS) at
+   the /anthropic/* path — see worker.js. */
 async function apiFetch(path, body) {
-  const url = `https://api.anthropic.com/v1${path}`;
+  const url = `${PROXY}/anthropic/v1${path}`;
   const opts = {
     method: body ? "POST" : "GET",
     headers: {
       "content-type": "application/json",
       "x-api-key": $("apikey").value.trim(),
       "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
     },
     body: body ? JSON.stringify(body) : undefined,
   };
