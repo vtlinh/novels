@@ -70,7 +70,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.24";
+const VERSION = "1.25";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -512,23 +512,27 @@ function rootOps(rootHandle) {
 /* ---------------- translation (Claude API) ---------------- */
 
 const HAIKU = "claude-haiku-4-5";
-const SONNET = "claude-sonnet-5";
+const OPUS = "claude-opus-4-8";               // translates chapter + names together, one bundle at a time
 const TRANSLATE_EFFORT = "medium";
+const TRANSLATE_MAX_TOKENS = 128000;          // Opus 4.8 max output; the whole bundle's translation must fit under this
 const NAMES_CACHE_FILE = ".names_cache.json";
-const GLOSSARY_PROGRESS_FILE = ".glossary_progress.json";
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
-const FETCH_BATCH = 50;                       // chapters fetched per Worker call (free-tier subrequest limit)
-const TRANSLATE_MAX_BYTES = 50 * 1024 * 1024; // cap a translation batch's request body at ~50MB
-/* Chapters are packed into each request up to this many estimated input tokens,
-   so a combined-chapters request stays well under the model's 200K context. */
-const CHUNK_TOKEN_BUDGET = 120000;
+const FETCH_BATCH = 50;                        // chapters fetched per Worker call (free-tier subrequest limit)
+/* Consecutive chapters are packed into a bundle up to this many estimated INPUT
+   tokens. The binding limit is OUTPUT: the bundle's combined English translation
+   (plus the names JSON) must stay under TRANSLATE_MAX_TOKENS, and English output
+   runs well under the Vietnamese input estimate, so this budget leaves ample
+   headroom. Bigger bundles = fewer boundaries = less name drift, so keep it as
+   large as safely fits Opus 4.8's output ceiling. */
+const BUNDLE_TOKEN_BUDGET = 70000;
 /* Conservative token estimate for Vietnamese text (~2 chars/token). Over-
-   estimating keeps chunks safely below the context limit. */
+   estimating keeps bundles safely below the output limit. */
 const estTokens = s => Math.ceil(s.length / 2);
 
-/* Split chapters into groups whose combined body stays within a token budget.
-   A single oversized chapter still forms its own group. */
+/* Split chapters into sequential bundles whose combined body stays within a
+   token budget, preserving order. A single oversized chapter still forms its
+   own bundle. */
 function chunkByTokens(chapters, budget) {
   const groups = [];
   let cur = [], curTok = 0;
@@ -756,15 +760,6 @@ const saveGlossary = (sink, map) =>
   sink.write(NAMES_CACHE_FILE,
     "[\n" + glossaryPairs(map).map(p => "  " + JSON.stringify(p)).join(",\n") + "\n]");
 
-/* Which chapter filenames have already been folded into the glossary, so a
-   resumed run only extracts names from the chapters it hasn't reached yet. */
-async function loadGlossaryProgress(sink) {
-  try { const a = JSON.parse(await sink.read(GLOSSARY_PROGRESS_FILE) ?? "[]"); return new Set(Array.isArray(a) ? a : []); }
-  catch { return new Set(); }
-}
-const saveGlossaryProgress = (sink, set) =>
-  sink.write(GLOSSARY_PROGRESS_FILE, JSON.stringify([...set].sort(), null, 2));
-
 const titleRequest = title => ({
   custom_id: "title",
   params: {
@@ -777,15 +772,30 @@ const titleRequest = title => ({
 
 async function translateTitleBatch(title, slug) {
   const results = await runBatch([titleRequest(title)], "title",
-    { kind: "glossary", slug, covered: [], wantTitle: title });
+    { kind: "bundle", slug, files: [], wantTitle: title });
   const tm = results.get("title");
   return tm ? messageText(tm) : null;
 }
 
-const PAIRS_SCHEMA = jsonFormat({
+/* The bundle request returns BOTH the chapter translations and the new proper-
+   name renderings in one structured object, so a single Opus call keeps names
+   consistent across the whole bundle and we can parse each half cleanly. */
+const BUNDLE_SCHEMA = {
   type: "object",
   properties: {
-    pairs: {
+    chapters: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          n: { type: "integer" },          // the CHAPTER number as labelled in the prompt
+          text: { type: "string" },        // that chapter's full English translation
+        },
+        required: ["n", "text"],
+        additionalProperties: false,
+      },
+    },
+    names: {
       type: "array",
       items: {
         type: "object",
@@ -795,12 +805,19 @@ const PAIRS_SCHEMA = jsonFormat({
       },
     },
   },
-  required: ["pairs"],
+  required: ["chapters", "names"],
   additionalProperties: false,
-});
+};
 
-const GLOSSARY_SYSTEM =
-  "You are building a proper-noun glossary for an English translation of a Vietnamese web novel. From the chapters given, find every proper name — characters, nicknames, places, sects/organizations, techniques, titles, brands — and give the English rendering to use consistently throughout the translation. Romanize person names in the conventional form for the name's likely origin: most are Sino-Vietnamese, so use the standard pinyin-style English rendering (e.g. \"Tiêu Viêm\" -> \"Xiao Yan\", \"Đấu Khí\" -> \"Dou Qi\"), not a diacritic-stripped copy. Translate meaningful place/organization/technique names. Each pair must be a NAME ONLY, on both sides. The vietnamese value is the bare name exactly as written in the text — a noun phrase, never a clause or sentence containing it (from \"Giang Minh Kỳ thật đến rồi\" extract only \"Giang Minh Kỳ\"; ordinary words like \"thật\", \"đến rồi\" translate normally and never belong in the glossary). Each English rendering must be exactly the name as it should appear in the translated text, nothing else: no surrounding words, no parenthetical notes or qualifiers (write \"Si He Yuan\", never \"Si He Yuan (restaurant)\") and no alternatives — never use \"/\" to offer two versions (write \"Peak Villas\", never \"Bantian/Peak Villas\"); commit to the single best rendering. Reuse the existing glossary's renderings exactly and only return names that are NOT already in it. Return an array of {vietnamese, english} pairs; each Vietnamese term appears once.";
+const BUNDLE_SYSTEM =
+  "You are translating a Vietnamese web novel into natural, fluent English. You receive a bundle of consecutive chapters to translate together as one continuous whole, plus a glossary of proper-name renderings already fixed in earlier chapters.\n"
+  + "Translation rules:\n"
+  + "- Translate each labelled chapter into natural, fluent English. Preserve paragraph breaks (a blank line between paragraphs). Output ONLY the translated prose for each chapter — no chapter title, no headers, no notes, no commentary.\n"
+  + "- Keep every proper name — characters, nicknames, places, sects/organizations, techniques, titles, brands — rendered CONSISTENTLY: identical English for the same name everywhere it appears, both across the chapters in this bundle and with the glossary. If a name is in the glossary, reuse that English rendering EXACTLY. For a name not in the glossary, pick the single best English rendering and reuse it for every occurrence in this bundle.\n"
+  + "- Romanize person names in the conventional form for the name's likely origin: most are Sino-Vietnamese, so use the standard pinyin-style English rendering (e.g. \"Tiêu Viêm\" -> \"Xiao Yan\", \"Đấu Khí\" -> \"Dou Qi\"), not a diacritic-stripped copy. Translate meaningful place/organization/technique names.\n"
+  + "Name-list rules (the `names` array):\n"
+  + "- Return every proper name that appears in these chapters and is NOT already in the glossary, as {vietnamese, english} pairs; each Vietnamese term appears once, and its english must be exactly the rendering you used in the translation.\n"
+  + "- Each pair is a NAME ONLY on both sides. The vietnamese value is the bare name exactly as written — a noun phrase, never a clause or sentence containing it (from \"Giang Minh Kỳ thật đến rồi\" extract only \"Giang Minh Kỳ\"; ordinary words like \"thật\", \"đến rồi\" are not names). The english is the name as it appears in the translation, nothing else: no surrounding words, no parenthetical notes or qualifiers (write \"Si He Yuan\", never \"Si He Yuan (restaurant)\"), and no alternatives — never use \"/\" to offer two versions (write \"Peak Villas\", never \"Bantian/Peak Villas\").";
 
 /* Enforce the glossary rules on the English side even if the model slips (or
    an older cache file already contains offenders): drop parenthetical notes,
@@ -829,85 +846,6 @@ function isNamePair(vi, en) {
   return true;
 }
 
-/* Build the per-novel proper-noun glossary via the Batch API. Chapters are
-   packed into groups by estimated token count (so a group's combined text
-   stays under the model's 200K context), and each group is sent as one big
-   text blob in its own single-request batch. The batches run SEQUENTIALLY and
-   each one is given the pairs accumulated from all earlier batches — so a name
-   rendered in the first group is reused verbatim for every later group. Pairs
-   are merged with unique-Vietnamese dedup (existing wins). Full chapter text in
-   each request is what lets Sino-Vietnamese names romanize properly
-   (e.g. "Tiêu Viêm" -> "Xiao Yan") instead of just losing their accents.
-   `wantTitle` (the raw Vietnamese title, or null) folds a one-shot title
-   translation into the first batch so it, too, goes through the Batch API.
-
-   A batch that fails (after apiFetch's retries) is NOT skipped — it aborts the
-   whole build by throwing. Every completed batch is already saved, and the set
-   of glossary-covered chapters is persisted after each one, so the next run
-   resumes from the first chapter that hasn't been covered yet. */
-async function buildGlossary(sink, pending, wantTitle, ctx = {}) {
-  const glossary = await loadGlossary(sink);
-  const done = await loadGlossaryProgress(sink);
-  if (!glossary.size) done.clear();   // glossary was cleared/deleted -> rebuild from scratch
-  const todo = pending.filter(ch => !done.has(ch.filename));
-  const groups = chunkByTokens(todo, CHUNK_TOKEN_BUDGET);
-  let englishTitle = null;
-
-  if (!groups.length) {
-    if (done.size) log(`Glossary already covers all ${pending.length} pending chapter(s)`, "ok");
-    if (wantTitle) englishTitle = await translateTitleBatch(wantTitle, ctx.slug);
-    return { glossary, englishTitle };
-  }
-
-  log(`Building name glossary for ${todo.length} chapter(s)`
-    + (done.size ? ` (${done.size} already covered)` : "")
-    + ` in ${groups.length} sequential batch(es)`);
-
-  for (let gi = 0; gi < groups.length; gi++) {
-    throwIfStopped();
-    setStatus(`Building glossary: batch ${gi + 1}/${groups.length}…`);
-    const blob = groups[gi]
-      .map(ch => `=== ${ch.filename.replace(/\.txt$/, "")} ===\n${ch.body}`)
-      .join("\n\n");
-    const reqs = [{
-      custom_id: "glossary",
-      params: {
-        model: HAIKU,
-        max_tokens: 8000,
-        system: [{ type: "text", text: GLOSSARY_SYSTEM, cache_control: { type: "ephemeral" } }],
-        messages: [{
-          role: "user",
-          content: "EXISTING GLOSSARY, as [Vietnamese, English] pairs (reuse exactly; do not repeat these in your answer):\n"
-            + JSON.stringify(glossaryPairs(glossary)) + "\n\nCHAPTERS:\n" + blob,
-        }],
-        output_config: PAIRS_SCHEMA,
-      },
-    }];
-    if (gi === 0 && wantTitle) reqs.push(titleRequest(wantTitle));
-
-    /* runBatch (via apiFetch) already retries network/429/5xx with backoff;
-       if it still fails, let it throw — earlier batches and the progress
-       record below are already saved, so a re-run resumes from here. */
-    const results = await runBatch(reqs, `glossary ${gi + 1}/${groups.length}`, {
-      kind: "glossary",
-      slug: ctx.slug,
-      covered: groups[gi].map(ch => ch.filename),
-      wantTitle: gi === 0 && wantTitle ? wantTitle : null,
-    });
-    if (gi === 0 && wantTitle) { const tm = results.get("title"); if (tm) englishTitle = messageText(tm); }
-
-    const gm = results.get("glossary");
-    let pairs = [];
-    if (gm) { try { pairs = JSON.parse(messageText(gm)).pairs; } catch {} }
-    const added = mergePairs(glossary, pairs);
-    for (const ch of groups[gi]) done.add(ch.filename);
-    await saveGlossary(sink, glossary);
-    await saveGlossaryProgress(sink, done);
-    log(`Glossary batch ${gi + 1}/${groups.length}: +${added} names (${glossary.size} total)`, "ok");
-  }
-  return { glossary, englishTitle };
-}
-
 /* Recover batches submitted by a previous page session that were never
    collected (tab discarded, phone slept, crash): wait for each one to end,
    fetch its results — Anthropic keeps them 29 days — and save them exactly as
@@ -928,7 +866,36 @@ async function recoverPendingBatches(sink, ctx) {
         if (b.processing_status === "ended") break;
       }
       const results = await fetchBatchResults(rec.id, "recover");
-      if (rec.kind === "translate") {
+      if (rec.kind === "bundle") {
+        /* one bundle: a single "bundle" request carrying {chapters, names},
+           optionally plus a "title" request on the very first bundle */
+        const msg = results.get("bundle");
+        if (msg && msg.stop_reason !== "max_tokens") {
+          let parsed = null;
+          try { parsed = JSON.parse(messageText(msg)); } catch {}
+          if (parsed) {
+            const glossary = await loadGlossary(sink);
+            const added = mergePairs(glossary, parsed.names);
+            await saveGlossary(sink, glossary);
+            let n = 0;
+            for (const item of parsed.chapters || []) {
+              const fn = (rec.files || [])[parseInt(item.n, 10) - 1];
+              if (!fn || !item.text || !item.text.trim()) continue;
+              if (await sink.exists(fn, TRANSLATED_DIR)) continue;
+              await sink.write(fn, item.text, TRANSLATED_DIR);
+              n++;
+              log(`saved  ${TRANSLATED_DIR}/${fn} (recovered)`, "ok");
+            }
+            log(`Recovered bundle: ${n} chapter(s), +${added} names`, "ok");
+          }
+        }
+        const tm = rec.wantTitle ? results.get("title") : null;
+        if (tm && ctx.root) {
+          const eng = await saveEnglishTitle(ctx.root, ctx.slug, rec.wantTitle, messageText(tm));
+          log(`Title recovered — folder will be renamed to "${eng}" on the next run.`, "ok");
+        }
+      } else if (rec.kind === "translate") {
+        /* legacy per-chapter parallel batch from an older app version */
         let n = 0;
         for (let i = 0; i < (rec.files || []).length; i++) {
           const msg = results.get(`ch-${i}`);
@@ -940,18 +907,13 @@ async function recoverPendingBatches(sink, ctx) {
           log(`saved  ${TRANSLATED_DIR}/${rec.files[i]} (recovered)`, "ok");
         }
         log(`Recovered ${n} translated chapter(s)`, "ok");
-      } else {   /* glossary batch (optionally carrying the title) */
+      } else {   /* legacy glossary batch (optionally carrying the title) */
         const gm = results.get("glossary");
         let pairs = [];
         if (gm) { try { pairs = JSON.parse(messageText(gm)).pairs; } catch {} }
         const glossary = await loadGlossary(sink);
         const added = mergePairs(glossary, pairs);
         await saveGlossary(sink, glossary);
-        if (rec.covered?.length) {
-          const done = await loadGlossaryProgress(sink);
-          for (const f of rec.covered) done.add(f);
-          await saveGlossaryProgress(sink, done);
-        }
         const tm = rec.wantTitle ? results.get("title") : null;
         if (tm && ctx.root) {
           const eng = await saveEnglishTitle(ctx.root, ctx.slug, rec.wantTitle, messageText(tm));
@@ -981,12 +943,18 @@ async function recoverPendingBatches(sink, ctx) {
 }
 
 /* Translate pending chapters into translated/, keeping the same filenames as
-   their sources so re-runs can skip what's already done. Recovers any batches
-   orphaned by a previous session, builds the glossary (sequential batches),
-   then translates all pending chapters in one parallel batch with the glossary
-   pairs included. Each chapter is written as the batch results are read, so
-   re-running resumes from the first missing chapter. `ctx` carries
-   {root, slug, title} for recovery and the batched title translation. */
+   their sources so re-runs can skip what's already done.
+
+   Chapters are sent in sequential bundles (up to BUNDLE_TOKEN_BUDGET each). One
+   Opus 4.8 request per bundle translates the whole bundle AND returns the new
+   proper-name renderings, as one structured object — so names stay consistent
+   across every chapter in the bundle instead of drifting between separate
+   per-chapter calls. Each bundle carries the glossary accumulated from all
+   earlier bundles (and earlier runs), so a name fixed early is reused verbatim
+   later. Bundles run one at a time over the Batch API; after each, the glossary
+   is saved and every translated chapter written, so a re-run resumes from the
+   first missing chapter. `ctx` carries {root, slug, title} for recovery and the
+   batched title translation. */
 async function translateNovel(sink, chapters, ctx = {}) {
   await recoverPendingBatches(sink, ctx);
 
@@ -996,85 +964,106 @@ async function translateNovel(sink, chapters, ctx = {}) {
     const body = ch.body ?? await sink.read(ch.filename);
     if (body) pending.push({ filename: ch.filename, body });
   }
-  if (!pending.length) { log("Translation: everything already translated.", "ok"); return; }
 
-  /* translate the folder title (via the Batch API, folded into the glossary)
-     only if we have a writable root and it isn't already translated */
+  /* translate the folder title (via the Batch API, folded into the first
+     bundle) only if we have a writable root and it isn't already translated */
   let wantTitle = null;
   if (ctx.root && ctx.title) {
     const entry = titleEntry(await readTitleCache(ctx.root), ctx.slug, sanitize(ctx.title));
     if (!entry.english) wantTitle = ctx.title;
   }
 
-  log(`Translating ${pending.length} chapter(s) with ${SONNET} (effort=${TRANSLATE_EFFORT}, Batches API)`);
-  const { glossary, englishTitle } = await buildGlossary(sink, pending, wantTitle, ctx);
-  if (englishTitle && ctx.root) {
-    const eng = await saveEnglishTitle(ctx.root, ctx.slug, ctx.title, englishTitle);
-    log(`Title translated — folder will be renamed to "${eng}" on the next run.`, "ok");
-  }
-  throwIfStopped();
-
-  const system = [{
-    type: "text",
-    text: "Translate this Vietnamese web novel chapter into natural, fluent English.\nRules:\n- Use EXACTLY these English renderings for proper names (array of [Vietnamese, English] pairs):\n"
-      + JSON.stringify(glossaryPairs(glossary))
-      + "\n- Preserve paragraph breaks (blank line between paragraphs).\n- Output ONLY the translated chapter text: no chapter title, no headers, no notes, no commentary.",
-    cache_control: { type: "ephemeral" },
-  }];
-
-  /* pack chapters into batches so each batch's request body stays under
-     TRANSLATE_MAX_BYTES (the glossary system prompt is repeated per request);
-     for a normal-size novel this is a single batch, splitting only when huge */
-  const enc = new TextEncoder();
-  const sysBytes = enc.encode(JSON.stringify(system)).length;
-  const batches = [];
-  {
-    let cur = [], curB = 0;
-    for (const ch of pending) {
-      const b = sysBytes + enc.encode(ch.body).length + 400;
-      if (cur.length && curB + b > TRANSLATE_MAX_BYTES) { batches.push(cur); cur = []; curB = 0; }
-      cur.push(ch); curB += b;
+  if (!pending.length) {
+    log("Translation: everything already translated.", "ok");
+    if (wantTitle) {   /* nothing left to bundle it into — send it on its own */
+      const eng0 = await translateTitleBatch(wantTitle, ctx.slug);
+      if (eng0 && ctx.root) {
+        const eng = await saveEnglishTitle(ctx.root, ctx.slug, ctx.title, eng0);
+        log(`Title translated — folder will be renamed to "${eng}" on the next run.`, "ok");
+      }
     }
-    if (cur.length) batches.push(cur);
+    return;
   }
-  log(`Translating ${pending.length} chapter(s) in ${batches.length} batch(es)`
-    + (batches.length > 1 ? ` (≤ ${Math.round(TRANSLATE_MAX_BYTES / 1048576)}MB each)` : ""));
+
+  const glossary = await loadGlossary(sink);
+  const bundles = chunkByTokens(pending, BUNDLE_TOKEN_BUDGET);
+  log(`Translating ${pending.length} chapter(s) with ${OPUS} (effort=${TRANSLATE_EFFORT}, Batches API) in ${bundles.length} sequential bundle(s)`);
 
   let saved = 0, failed = 0;
-  for (let bi = 0; bi < batches.length && !stopRequested; bi++) {
-    const group = batches[bi];
-    const results = await runBatch(group.map((ch, i) => ({
-      custom_id: `ch-${i}`,
-      params: {
-        model: SONNET,
-        max_tokens: 32000,
-        output_config: { effort: TRANSLATE_EFFORT },
-        system,
-        messages: [{ role: "user", content: ch.body }],
-      },
-    })), batches.length > 1 ? `translate ${bi + 1}/${batches.length}` : "translate",
-      { kind: "translate", slug: ctx.slug, files: group.map(ch => ch.filename) });
+  for (let gi = 0; gi < bundles.length && !stopRequested; gi++) {
+    throwIfStopped();
+    const group = bundles[gi];
+    setStatus(`Translating bundle ${gi + 1}/${bundles.length} (${group.length} chapter${group.length > 1 ? "s" : ""})…`);
 
-    for (let i = 0; i < group.length; i++) {
-      const msg = results.get(`ch-${i}`);
-      /* a truncated translation is incomplete — leave it unsaved so the next
-         run retries it */
-      if (msg && msg.stop_reason === "max_tokens") {
-        log(`! ${group[i].filename}: output truncated (max_tokens); not saved`, "err");
-        failed++;
-        continue;
-      }
-      const text = msg ? messageText(msg) : "";
-      if (!text) { failed++; continue; }
-      try {
-        await sink.write(group[i].filename, text, TRANSLATED_DIR);
-        saved++;
-        log(`saved  ${TRANSLATED_DIR}/${group[i].filename}`, "ok");
-      } catch (e) {
-        failed++;
-        log(`SAVE FAILED ${TRANSLATED_DIR}/${group[i].filename} — ${errMsg(e)}`, "err");
+    /* chapters are labelled 1..N; the model echoes each number back in `n` */
+    const blob = group
+      .map((ch, i) => `=== CHAPTER ${i + 1} ===\n${ch.body}`)
+      .join("\n\n");
+    const userContent =
+      "GLOSSARY of proper-name renderings already fixed in earlier chapters, as [Vietnamese, English] pairs — reuse each EXACTLY wherever that name appears:\n"
+      + JSON.stringify(glossaryPairs(glossary))
+      + `\n\nTranslate the following ${group.length} chapter(s) together as one continuous whole. Return every chapter's full translation in \`chapters\` (echo each CHAPTER number in \`n\`), and any proper names NOT already in the glossary in \`names\`.\n\n`
+      + blob;
+
+    const reqs = [{
+      custom_id: "bundle",
+      params: {
+        model: OPUS,
+        max_tokens: TRANSLATE_MAX_TOKENS,
+        system: [{ type: "text", text: BUNDLE_SYSTEM, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: userContent }],
+        output_config: { effort: TRANSLATE_EFFORT, ...jsonFormat(BUNDLE_SCHEMA) },
+      },
+    }];
+    if (gi === 0 && wantTitle) reqs.push(titleRequest(wantTitle));
+
+    const results = await runBatch(reqs,
+      bundles.length > 1 ? `translate ${gi + 1}/${bundles.length}` : "translate",
+      { kind: "bundle", slug: ctx.slug, files: group.map(ch => ch.filename),
+        wantTitle: gi === 0 && wantTitle ? wantTitle : null });
+
+    if (gi === 0 && wantTitle) {
+      const tm = results.get("title");
+      if (tm && ctx.root) {
+        const eng = await saveEnglishTitle(ctx.root, ctx.slug, ctx.title, messageText(tm));
+        log(`Title translated — folder will be renamed to "${eng}" on the next run.`, "ok");
       }
     }
+
+    const msg = results.get("bundle");
+    /* a truncated bundle is unparseable structured JSON — leave it all unsaved
+       so the next run retries (with the same, safely-sized bundle) */
+    if (!msg || msg.stop_reason === "max_tokens") {
+      failed += group.length;
+      log(`! bundle ${gi + 1}/${bundles.length}: ${msg ? "output truncated (max_tokens)" : "no result"}; not saved`, "err");
+      continue;
+    }
+    let parsed = null;
+    try { parsed = JSON.parse(messageText(msg)); } catch (e) {
+      failed += group.length;
+      log(`! bundle ${gi + 1}/${bundles.length}: could not parse structured output (${errMsg(e)}); not saved`, "err");
+      continue;
+    }
+
+    /* fold the new names in first, so later bundles stay consistent even if a
+       chapter write below fails */
+    const added = mergePairs(glossary, parsed.names);
+    await saveGlossary(sink, glossary);
+
+    for (const item of parsed.chapters || []) {
+      const ch = group[parseInt(item.n, 10) - 1];
+      if (!ch || !item.text || !item.text.trim()) continue;
+      if (await sink.exists(ch.filename, TRANSLATED_DIR)) continue;
+      try {
+        await sink.write(ch.filename, item.text, TRANSLATED_DIR);
+        saved++;
+        log(`saved  ${TRANSLATED_DIR}/${ch.filename}`, "ok");
+      } catch (e) {
+        failed++;
+        log(`SAVE FAILED ${TRANSLATED_DIR}/${ch.filename} — ${errMsg(e)}`, "err");
+      }
+    }
+    log(`Bundle ${gi + 1}/${bundles.length}: +${added} names (${glossary.size} total)`, "ok");
   }
   log(`Translation ${stopRequested ? "stopped" : "done"}: ${saved} ok, ${failed} failed`
     + (failed || stopRequested ? " (re-run to resume the rest)" : ""), failed ? "err" : "ok");
