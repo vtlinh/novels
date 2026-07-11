@@ -68,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.15";
+const VERSION = "1.16";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -166,9 +166,11 @@ async function fetchDoc(url) {
 }
 
 /* Fetch many chapter URLs in a SINGLE Worker call (up to FETCH_BATCH, the
-   free-tier subrequest limit). Returns Map(url -> html) for the ones that
-   came back non-empty. Retries the whole call on a network error. */
-async function fetchMany(urls) {
+   free-tier subrequest limit). `concurrency` caps how many requests the
+   Worker keeps in flight against the site at once, so we don't hammer
+   truyenfull. Returns Map(url -> html) for the ones that came back
+   non-empty. Retries the whole call on a network error. */
+async function fetchMany(urls, concurrency) {
   let lastErr;
   for (let i = 0; i < MAX_RETRIES; i++) {
     throwIfStopped();
@@ -176,7 +178,7 @@ async function fetchMany(urls) {
       const r = await fetch(`${PROXY}/fetch-many`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ urls }),
+        body: JSON.stringify({ urls, concurrency }),
         signal: aborter?.signal,
       });
       if (r.ok) {
@@ -932,7 +934,7 @@ async function run(makeSink, root = null) {
     setStatus("Listing chapters…");
     const { title, chapters } = await listAllChapters(novelUrl);
     if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
-    log(`${title} — ${chapters.length} chapters (v${VERSION})`);
+    log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency} (v${VERSION})`);
     const slug = slugOf(novelUrl.replace(/\/+$/, "") + "/");
     const folderName = await resolveFolderName(root, slug, title);
     log(`Saving to: ${folderName}/`);
@@ -968,7 +970,7 @@ async function run(makeSink, root = null) {
       const group = toFetch.slice(i, i + FETCH_BATCH);
       setStatus(`Fetching chapters ${i + 1}-${Math.min(i + FETCH_BATCH, toFetch.length)} of ${toFetch.length}…`);
       let htmls;
-      try { htmls = await fetchMany(group.map(c => c.url)); }
+      try { htmls = await fetchMany(group.map(c => c.url), concurrency); }
       catch (e) {
         if (stopRequested) break;
         for (const ch of group) { failed.push(ch.url); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); bar.value = ++done; }
