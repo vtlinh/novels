@@ -39,6 +39,8 @@
          padding:12px; margin-top:12px; max-height:260px; overflow-y:auto;
          white-space:pre-wrap; display:none; }
   .ok { color:var(--ok); } .err { color:var(--err); }
+  p.hint { color:var(--muted); font-size:12px; margin:16px 0 0; }
+  p.hint code { word-break:break-all; }
 </style>
 </head>
 <body>
@@ -56,6 +58,7 @@
       <label for="apikey">Anthropic API key (kept in this browser only)</label>
       <input id="apikey" type="password" placeholder="sk-ant-..." spellcheck="false">
     </div>
+    <p class="hint">For the @Voice app, use the <code>/storage/emulated/0/Android/data/com.hyperionics.avar/files</code> folder.</p>
     <button id="btn-folder">Download to folder…</button>
     <button id="btn-zip">Download as ZIP</button>
     <button id="btn-stop">Stop</button>
@@ -70,7 +73,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.27";
+const VERSION = "1.28";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
