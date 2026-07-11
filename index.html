@@ -70,7 +70,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.23";
+const VERSION = "1.24";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -115,6 +115,14 @@ function releaseWakeLock() {
 }
 document.addEventListener("visibilitychange", () => {
   if (running && document.visibilityState === "visible") acquireWakeLock();
+});
+
+/* warn before navigating away / closing the tab while a run is in progress
+   (browsers show their own generic "Leave site?" dialog) */
+window.addEventListener("beforeunload", e => {
+  if (!running) return;
+  e.preventDefault();
+  e.returnValue = "";   // required by Chrome to trigger the dialog
 });
 
 class StopError extends Error {
