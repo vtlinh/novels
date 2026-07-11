@@ -68,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.18";
+const VERSION = "1.19";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -672,11 +672,11 @@ async function loadGlossary(sink) {
     const raw = JSON.parse(await sink.read(NAMES_CACHE_FILE) ?? "null");
     if (Array.isArray(raw)) {
       for (const p of raw) {
-        if (Array.isArray(p) && p.length >= 2) map.set(String(p[0]), String(p[1]));
-        else if (p && p.vietnamese) map.set(String(p.vietnamese), String(p.english ?? ""));  // legacy objects
+        if (Array.isArray(p) && p.length >= 2) map.set(String(p[0]), cleanEnglish(p[1]));
+        else if (p && p.vietnamese) map.set(String(p.vietnamese), cleanEnglish(p.english ?? ""));  // legacy objects
       }
     } else if (raw && typeof raw === "object") {           // legacy {vi: en} object
-      for (const [k, v] of Object.entries(raw)) map.set(k, String(v));
+      for (const [k, v] of Object.entries(raw)) map.set(k, cleanEnglish(v));
     }
   } catch {}
   return map;
@@ -728,7 +728,17 @@ const PAIRS_SCHEMA = jsonFormat({
 });
 
 const GLOSSARY_SYSTEM =
-  "You are building a proper-noun glossary for an English translation of a Vietnamese web novel. From the chapters given, find every proper name — characters, nicknames, places, sects/organizations, techniques, titles, brands — and give the English rendering to use consistently throughout the translation. Romanize person names in the conventional form for the name's likely origin: most are Sino-Vietnamese, so use the standard pinyin-style English rendering (e.g. \"Tiêu Viêm\" -> \"Xiao Yan\", \"Đấu Khí\" -> \"Dou Qi\"), not a diacritic-stripped copy. Translate meaningful place/organization/technique names. Reuse the existing glossary's renderings exactly and only return names that are NOT already in it. Return an array of {vietnamese, english} pairs; each Vietnamese term appears once.";
+  "You are building a proper-noun glossary for an English translation of a Vietnamese web novel. From the chapters given, find every proper name — characters, nicknames, places, sects/organizations, techniques, titles, brands — and give the English rendering to use consistently throughout the translation. Romanize person names in the conventional form for the name's likely origin: most are Sino-Vietnamese, so use the standard pinyin-style English rendering (e.g. \"Tiêu Viêm\" -> \"Xiao Yan\", \"Đấu Khí\" -> \"Dou Qi\"), not a diacritic-stripped copy. Translate meaningful place/organization/technique names. Each English rendering must be exactly the name as it should appear in the translated text, nothing else: no parenthetical notes or qualifiers (write \"Si He Yuan\", never \"Si He Yuan (restaurant)\") and no alternatives — never use \"/\" to offer two versions (write \"Peak Villas\", never \"Bantian/Peak Villas\"); commit to the single best rendering. Reuse the existing glossary's renderings exactly and only return names that are NOT already in it. Return an array of {vietnamese, english} pairs; each Vietnamese term appears once.";
+
+/* Enforce the glossary rules on the English side even if the model slips (or
+   an older cache file already contains offenders): drop parenthetical notes,
+   and when alternatives are offered with "/", keep the longest one. */
+const cleanEnglish = en => {
+  en = String(en).replace(/\s*\([^)]*\)/g, "");
+  if (en.includes("/"))
+    en = en.split("/").map(s => s.trim()).reduce((a, b) => (b.length > a.length ? b : a), "");
+  return en.replace(/\s+/g, " ").trim();
+};
 
 /* Build the per-novel proper-noun glossary via the Batch API. Chapters are
    packed into groups by estimated token count (so a group's combined text
@@ -805,7 +815,7 @@ async function buildGlossary(sink, pending, wantTitle) {
     let pairs = [];
     if (gm) { try { pairs = JSON.parse(messageText(gm)).pairs; } catch {} }
     for (const { vietnamese, english } of pairs) {
-      const vi = String(vietnamese ?? "").trim(), en = String(english ?? "").trim();
+      const vi = String(vietnamese ?? "").trim(), en = cleanEnglish(english ?? "");
       if (vi && en && !glossary.has(vi)) { glossary.set(vi, en); added++; }
     }
     for (const ch of groups[gi]) done.add(ch.filename);
