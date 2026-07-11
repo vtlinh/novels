@@ -77,16 +77,27 @@ export default {
     }
 
     // Batched chapter fetch: fetch up to 50 URLs in one call (free-tier
-    // subrequest limit).  POST <worker>/fetch-many  { "urls": [...] }
+    // subrequest limit), holding at most `concurrency` requests in flight
+    // against the site at a time so it doesn't get hammered.
+    //   POST <worker>/fetch-many  { "urls": [...], "concurrency": 5 }
     if (url.pathname === "/fetch-many" && request.method === "POST") {
-      let urls = [];
-      try { ({ urls } = await request.json()); } catch {}
-      const results = await Promise.all((urls || []).slice(0, 50).map(async u => {
-        try {
-          const r = await fetch(u, { headers: PAGE_HEADERS });
-          return { url: u, ok: r.ok, status: r.status, html: r.ok ? await r.text() : "" };
-        } catch (e) {
-          return { url: u, ok: false, status: 0, html: "", error: String(e) };
+      let urls = [], concurrency;
+      try { ({ urls, concurrency } = await request.json()); } catch {}
+      const list = (urls || []).slice(0, 50);
+      const conc = Math.max(1, Math.min(10, Number(concurrency) || 5));
+      const results = new Array(list.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(conc, list.length) }, async () => {
+        for (;;) {
+          const i = next++;
+          if (i >= list.length) return;
+          const u = list[i];
+          try {
+            const r = await fetch(u, { headers: PAGE_HEADERS });
+            results[i] = { url: u, ok: r.ok, status: r.status, html: r.ok ? await r.text() : "" };
+          } catch (e) {
+            results[i] = { url: u, ok: false, status: 0, html: "", error: String(e) };
+          }
         }
       }));
       return withCors(Response.json({ results }));
