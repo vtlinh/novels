@@ -68,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.17";
+const VERSION = "1.18";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -663,24 +663,29 @@ async function saveEnglishTitle(root, slug, title, englishRaw) {
 
 /* ---- chapter translation into the translated/ subfolder ---- */
 
-/* The glossary is an array of {vietnamese, english} pairs on disk; in memory
-   it's a Map keyed by the (unique) Vietnamese term. English may repeat. */
+/* The glossary is an array of [Vietnamese, English] pairs on disk (one pair
+   per line); in memory it's a Map keyed by the (unique) Vietnamese term.
+   English may repeat. */
 async function loadGlossary(sink) {
   const map = new Map();
   try {
     const raw = JSON.parse(await sink.read(NAMES_CACHE_FILE) ?? "null");
     if (Array.isArray(raw)) {
-      for (const p of raw) if (p && p.vietnamese) map.set(String(p.vietnamese), String(p.english ?? ""));
+      for (const p of raw) {
+        if (Array.isArray(p) && p.length >= 2) map.set(String(p[0]), String(p[1]));
+        else if (p && p.vietnamese) map.set(String(p.vietnamese), String(p.english ?? ""));  // legacy objects
+      }
     } else if (raw && typeof raw === "object") {           // legacy {vi: en} object
       for (const [k, v] of Object.entries(raw)) map.set(k, String(v));
     }
   } catch {}
   return map;
 }
-const glossaryPairs = map =>
-  [...map].sort((a, b) => a[0].localeCompare(b[0])).map(([vietnamese, english]) => ({ vietnamese, english }));
+/* sorted alphabetically by the Vietnamese term (vi locale for diacritics) */
+const glossaryPairs = map => [...map].sort((a, b) => a[0].localeCompare(b[0], "vi"));
 const saveGlossary = (sink, map) =>
-  sink.write(NAMES_CACHE_FILE, JSON.stringify(glossaryPairs(map), null, 2));
+  sink.write(NAMES_CACHE_FILE,
+    "[\n" + glossaryPairs(map).map(p => "  " + JSON.stringify(p)).join(",\n") + "\n]");
 
 /* Which chapter filenames have already been folded into the glossary, so a
    resumed run only extracts names from the chapters it hasn't reached yet. */
@@ -773,7 +778,7 @@ async function buildGlossary(sink, pending, wantTitle) {
         system: [{ type: "text", text: GLOSSARY_SYSTEM, cache_control: { type: "ephemeral" } }],
         messages: [{
           role: "user",
-          content: "EXISTING GLOSSARY (reuse exactly; do not repeat these in your answer):\n"
+          content: "EXISTING GLOSSARY, as [Vietnamese, English] pairs (reuse exactly; do not repeat these in your answer):\n"
             + JSON.stringify(glossaryPairs(glossary)) + "\n\nCHAPTERS:\n" + blob,
         }],
         output_config: PAIRS_SCHEMA,
@@ -844,7 +849,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
 
   const system = [{
     type: "text",
-    text: "Translate this Vietnamese web novel chapter into natural, fluent English.\nRules:\n- Use EXACTLY these English renderings for proper names (array of {vietnamese, english} pairs):\n"
+    text: "Translate this Vietnamese web novel chapter into natural, fluent English.\nRules:\n- Use EXACTLY these English renderings for proper names (array of [Vietnamese, English] pairs):\n"
       + JSON.stringify(glossaryPairs(glossary))
       + "\n- Preserve paragraph breaks (blank line between paragraphs).\n- Output ONLY the translated chapter text: no chapter title, no headers, no notes, no commentary.",
     cache_control: { type: "ephemeral" },
