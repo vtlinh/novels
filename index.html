@@ -30,6 +30,7 @@
   #btn-folder { background:var(--accent); color:#fff; margin-right:8px; }
   #btn-zip { background:#2a313a; color:var(--fg); margin-right:8px; }
   #btn-stop { background:var(--err); color:#fff; display:none; }
+  #btn-restart { background:var(--accent); color:#fff; display:none; margin-right:8px; }
   button:disabled { opacity:.45; cursor:not-allowed; }
   #status { font-size:13px; color:var(--muted); margin-top:14px; min-height:18px; }
   progress { width:100%; height:8px; margin-top:10px; accent-color:var(--accent);
@@ -58,6 +59,7 @@
     <button id="btn-folder">Download to folder…</button>
     <button id="btn-zip">Download as ZIP</button>
     <button id="btn-stop">Stop</button>
+    <button id="btn-restart">Restart</button>
     <div id="status"></div>
     <progress id="bar" max="1" value="0"></progress>
     <div id="log"></div>
@@ -68,7 +70,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.20";
+const VERSION = "1.21";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -98,6 +100,8 @@ const NOVEL_URL_RE = /^https:\/\/truyenfull\.today(\/|$)/i;
 let running = false;
 let stopRequested = false;
 let aborter = null;
+let lastRun = null;      // {makeSink, root} of the current/most recent run
+let wasStopped = false;  // last run ended via the Stop button
 
 class StopError extends Error {
   constructor() { super("stopped by user"); this.stopped = true; }
@@ -116,9 +120,16 @@ function updateButtons() {
   $("btn-folder").disabled = running || !ok || !window.showDirectoryPicker;
   $("btn-zip").disabled = running || !ok;
   $("btn-stop").style.display = running ? "inline-block" : "none";
+  /* a stopped run leaves a Restart button in the Stop button's place — it
+     reuses the already-granted folder handle, so no re-picking */
+  $("btn-restart").style.display = !running && wasStopped && lastRun ? "inline-block" : "none";
 }
 $("url").addEventListener("input", updateButtons);
 updateButtons();
+
+$("btn-restart").addEventListener("click", () => {
+  if (lastRun && !running) run(lastRun.makeSink, lastRun.root);
+});
 
 $("btn-stop").addEventListener("click", () => {
   stopRequested = true;
@@ -961,6 +972,8 @@ async function run(makeSink, root = null) {
 
   running = true;
   stopRequested = false;
+  wasStopped = false;
+  lastRun = { makeSink, root };
   aborter = new AbortController();
   $("btn-stop").disabled = false;
   updateButtons();
@@ -1079,6 +1092,7 @@ async function run(makeSink, root = null) {
     setStatus(e.stopped ? "Stopped." : `Error: ${e.message}`);
   } finally {
     running = false;
+    wasStopped = stopRequested;
     stopRequested = false;
     updateButtons();
   }
