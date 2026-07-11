@@ -70,7 +70,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.21";
+const VERSION = "1.22";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -102,6 +102,20 @@ let stopRequested = false;
 let aborter = null;
 let lastRun = null;      // {makeSink, root} of the current/most recent run
 let wasStopped = false;  // last run ended via the Stop button
+
+/* keep the screen awake during a run so mobile Chrome doesn't freeze the tab;
+   the lock is dropped when the tab hides, so re-acquire when it's visible again */
+let wakeLock = null;
+async function acquireWakeLock() {
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+}
+function releaseWakeLock() {
+  try { wakeLock?.release(); } catch {}
+  wakeLock = null;
+}
+document.addEventListener("visibilitychange", () => {
+  if (running && document.visibilityState === "visible") acquireWakeLock();
+});
 
 class StopError extends Error {
   constructor() { super("stopped by user"); this.stopped = true; }
@@ -577,12 +591,38 @@ async function pollBatch(batchId, useSignal) {
   throw lastErr;
 }
 
+/* ---- pending-batch registry (localStorage) ----
+   Every submitted batch is recorded with the metadata needed to save its
+   results later (custom_id -> filename mapping, or glossary coverage). If the
+   page dies while a batch is processing — tab discarded, phone slept, crash —
+   the next run detects the orphaned batch, fetches its results (Anthropic
+   keeps them for 29 days), and saves them instead of paying to redo them. */
+const PENDING_KEY = "pendingBatches";
+const loadPending = () => { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]") || []; } catch { return []; } };
+const savePending = list => { try { localStorage.setItem(PENDING_KEY, JSON.stringify(list)); } catch {} };
+const addPending = rec => savePending([...loadPending().filter(r => r.id !== rec.id), rec]);
+const removePending = id => savePending(loadPending().filter(r => r.id !== id));
+
+async function fetchBatchResults(id, label) {
+  const results = new Map();
+  const text = await (await apiFetch(`/messages/batches/${id}/results`)).text();
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    const item = JSON.parse(line);
+    if (item.result.type === "succeeded") results.set(item.custom_id, item.result.message);
+    else log(`[${label}] ${item.custom_id}: ${item.result.type}`, "err");
+  }
+  return results;
+}
+
 /* submit a Message Batch, long-poll until it ends, return Map(custom_id → message).
    On Stop, the batch is canceled server-side; results that finished before the
-   cancellation are still returned so paid-for work is kept. */
-async function runBatch(requests, label) {
+   cancellation are still returned so paid-for work is kept. `meta` is the
+   recovery record for the pending-batch registry. */
+async function runBatch(requests, label, meta) {
   throwIfStopped();
   const batch = await (await apiFetch("/messages/batches", { requests })).json();
+  if (meta) addPending({ ...meta, id: batch.id, created: Date.now() });
   log(`[${label}] batch submitted (${requests.length} request${requests.length > 1 ? "s" : ""}); polling…`);
   let cancelSent = false;
   for (;;) {
@@ -606,14 +646,8 @@ async function runBatch(requests, label) {
     setStatus(`[${label}] processing: ${c.processing}  ok: ${c.succeeded}  err: ${c.errored}`);
     if (b.processing_status === "ended") break;
   }
-  const results = new Map();
-  const text = await (await apiFetch(`/messages/batches/${batch.id}/results`)).text();
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    const item = JSON.parse(line);
-    if (item.result.type === "succeeded") results.set(item.custom_id, item.result.message);
-    else log(`[${label}] ${item.custom_id}: ${item.result.type}`, "err");
-  }
+  const results = await fetchBatchResults(batch.id, label);
+  removePending(batch.id);
   return results;
 }
 
@@ -698,6 +732,16 @@ async function loadGlossary(sink) {
 }
 /* sorted alphabetically by the Vietnamese term (vi locale for diacritics) */
 const glossaryPairs = map => [...map].sort((a, b) => a[0].localeCompare(b[0], "vi"));
+/* merge model-returned pairs into the map (cleaned + name-checked; existing
+   entries win). Returns how many were added. */
+function mergePairs(map, pairs) {
+  let added = 0;
+  for (const { vietnamese, english } of pairs || []) {
+    const vi = String(vietnamese ?? "").trim(), en = cleanEnglish(english ?? "");
+    if (vi && en && isNamePair(vi, en) && !map.has(vi)) { map.set(vi, en); added++; }
+  }
+  return added;
+}
 const saveGlossary = (sink, map) =>
   sink.write(NAMES_CACHE_FILE,
     "[\n" + glossaryPairs(map).map(p => "  " + JSON.stringify(p)).join(",\n") + "\n]");
@@ -711,16 +755,19 @@ async function loadGlossaryProgress(sink) {
 const saveGlossaryProgress = (sink, set) =>
   sink.write(GLOSSARY_PROGRESS_FILE, JSON.stringify([...set].sort(), null, 2));
 
-async function translateTitleBatch(title) {
-  const results = await runBatch([{
-    custom_id: "title",
-    params: {
-      model: HAIKU,
-      max_tokens: 100,
-      messages: [{ role: "user", content:
-        "Translate this Vietnamese novel title to natural English. Reply with ONLY the translated title, nothing else:\n" + title }],
-    },
-  }], "title");
+const titleRequest = title => ({
+  custom_id: "title",
+  params: {
+    model: HAIKU,
+    max_tokens: 100,
+    messages: [{ role: "user", content:
+      "Translate this Vietnamese novel title to natural English. Reply with ONLY the translated title, nothing else:\n" + title }],
+  },
+});
+
+async function translateTitleBatch(title, slug) {
+  const results = await runBatch([titleRequest(title)], "title",
+    { kind: "glossary", slug, covered: [], wantTitle: title });
   const tm = results.get("title");
   return tm ? messageText(tm) : null;
 }
@@ -788,7 +835,7 @@ function isNamePair(vi, en) {
    whole build by throwing. Every completed batch is already saved, and the set
    of glossary-covered chapters is persisted after each one, so the next run
    resumes from the first chapter that hasn't been covered yet. */
-async function buildGlossary(sink, pending, wantTitle) {
+async function buildGlossary(sink, pending, wantTitle, ctx = {}) {
   const glossary = await loadGlossary(sink);
   const done = await loadGlossaryProgress(sink);
   if (!glossary.size) done.clear();   // glossary was cleared/deleted -> rebuild from scratch
@@ -798,7 +845,7 @@ async function buildGlossary(sink, pending, wantTitle) {
 
   if (!groups.length) {
     if (done.size) log(`Glossary already covers all ${pending.length} pending chapter(s)`, "ok");
-    if (wantTitle) englishTitle = await translateTitleBatch(wantTitle);
+    if (wantTitle) englishTitle = await translateTitleBatch(wantTitle, ctx.slug);
     return { glossary, englishTitle };
   }
 
@@ -826,30 +873,23 @@ async function buildGlossary(sink, pending, wantTitle) {
         output_config: PAIRS_SCHEMA,
       },
     }];
-    if (gi === 0 && wantTitle) reqs.push({
-      custom_id: "title",
-      params: {
-        model: HAIKU,
-        max_tokens: 100,
-        messages: [{ role: "user", content:
-          "Translate this Vietnamese novel title to natural English. Reply with ONLY the translated title, nothing else:\n" + wantTitle }],
-      },
-    });
+    if (gi === 0 && wantTitle) reqs.push(titleRequest(wantTitle));
 
     /* runBatch (via apiFetch) already retries network/429/5xx with backoff;
        if it still fails, let it throw — earlier batches and the progress
        record below are already saved, so a re-run resumes from here. */
-    const results = await runBatch(reqs, `glossary ${gi + 1}/${groups.length}`);
+    const results = await runBatch(reqs, `glossary ${gi + 1}/${groups.length}`, {
+      kind: "glossary",
+      slug: ctx.slug,
+      covered: groups[gi].map(ch => ch.filename),
+      wantTitle: gi === 0 && wantTitle ? wantTitle : null,
+    });
     if (gi === 0 && wantTitle) { const tm = results.get("title"); if (tm) englishTitle = messageText(tm); }
 
-    let added = 0;
     const gm = results.get("glossary");
     let pairs = [];
     if (gm) { try { pairs = JSON.parse(messageText(gm)).pairs; } catch {} }
-    for (const { vietnamese, english } of pairs) {
-      const vi = String(vietnamese ?? "").trim(), en = cleanEnglish(english ?? "");
-      if (vi && en && isNamePair(vi, en) && !glossary.has(vi)) { glossary.set(vi, en); added++; }
-    }
+    const added = mergePairs(glossary, pairs);
     for (const ch of groups[gi]) done.add(ch.filename);
     await saveGlossary(sink, glossary);
     await saveGlossaryProgress(sink, done);
@@ -858,13 +898,80 @@ async function buildGlossary(sink, pending, wantTitle) {
   return { glossary, englishTitle };
 }
 
+/* Recover batches submitted by a previous page session that were never
+   collected (tab discarded, phone slept, crash): wait for each one to end,
+   fetch its results — Anthropic keeps them 29 days — and save them exactly as
+   the original run would have, instead of paying to redo the work. */
+async function recoverPendingBatches(sink, ctx) {
+  const fresh = loadPending().filter(r => r.id && Date.now() - (r.created || 0) < 29 * 864e5);
+  savePending(fresh);
+  const mine = fresh.filter(r => r.slug === ctx.slug);
+  if (!mine.length) return;
+  log(`Found ${mine.length} unfinished batch(es) from a previous session — recovering…`);
+  for (const rec of mine) {
+    throwIfStopped();
+    try {
+      for (;;) {
+        const b = await pollBatch(rec.id, true);
+        const c = b.request_counts;
+        setStatus(`[recover] processing: ${c.processing}  ok: ${c.succeeded}  err: ${c.errored}`);
+        if (b.processing_status === "ended") break;
+      }
+      const results = await fetchBatchResults(rec.id, "recover");
+      if (rec.kind === "translate") {
+        let n = 0;
+        for (let i = 0; i < (rec.files || []).length; i++) {
+          const msg = results.get(`ch-${i}`);
+          if (!msg || msg.stop_reason === "max_tokens") continue;
+          const text = messageText(msg);
+          if (!text || await sink.exists(rec.files[i], TRANSLATED_DIR)) continue;
+          await sink.write(rec.files[i], text, TRANSLATED_DIR);
+          n++;
+          log(`saved  ${TRANSLATED_DIR}/${rec.files[i]} (recovered)`, "ok");
+        }
+        log(`Recovered ${n} translated chapter(s)`, "ok");
+      } else {   /* glossary batch (optionally carrying the title) */
+        const gm = results.get("glossary");
+        let pairs = [];
+        if (gm) { try { pairs = JSON.parse(messageText(gm)).pairs; } catch {} }
+        const glossary = await loadGlossary(sink);
+        const added = mergePairs(glossary, pairs);
+        await saveGlossary(sink, glossary);
+        if (rec.covered?.length) {
+          const done = await loadGlossaryProgress(sink);
+          for (const f of rec.covered) done.add(f);
+          await saveGlossaryProgress(sink, done);
+        }
+        const tm = rec.wantTitle ? results.get("title") : null;
+        if (tm && ctx.root) {
+          const eng = await saveEnglishTitle(ctx.root, ctx.slug, rec.wantTitle, messageText(tm));
+          log(`Title recovered — folder will be renamed to "${eng}" on the next run.`, "ok");
+        }
+        log(`Recovered glossary batch: +${added} names`, "ok");
+      }
+      removePending(rec.id);
+    } catch (e) {
+      if (e.stopped || e.name === "AbortError") throw e;
+      if (/HTTP 4\d\d/.test(e.message)) {
+        log(`! batch …${rec.id.slice(-8)} is no longer available (${errMsg(e)}); dropping it`, "err");
+        removePending(rec.id);
+      } else {
+        log(`! could not recover batch …${rec.id.slice(-8)} (${errMsg(e)}); will retry next run`, "err");
+      }
+    }
+  }
+}
+
 /* Translate pending chapters into translated/, keeping the same filenames as
-   their sources so re-runs can skip what's already done. Builds the glossary
-   (sequential batches) first, then translates all pending chapters in one
-   parallel batch with the glossary pairs included. Each chapter is written as
-   the batch results are read, so re-running resumes from the first missing
-   chapter. `ctx` carries {root, slug, title} for the batched title translation. */
+   their sources so re-runs can skip what's already done. Recovers any batches
+   orphaned by a previous session, builds the glossary (sequential batches),
+   then translates all pending chapters in one parallel batch with the glossary
+   pairs included. Each chapter is written as the batch results are read, so
+   re-running resumes from the first missing chapter. `ctx` carries
+   {root, slug, title} for recovery and the batched title translation. */
 async function translateNovel(sink, chapters, ctx = {}) {
+  await recoverPendingBatches(sink, ctx);
+
   const pending = [];
   for (const ch of chapters) {
     if (await sink.exists(ch.filename, TRANSLATED_DIR)) continue;
@@ -882,7 +989,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
   }
 
   log(`Translating ${pending.length} chapter(s) with ${SONNET} (effort=${TRANSLATE_EFFORT}, Batches API)`);
-  const { glossary, englishTitle } = await buildGlossary(sink, pending, wantTitle);
+  const { glossary, englishTitle } = await buildGlossary(sink, pending, wantTitle, ctx);
   if (englishTitle && ctx.root) {
     const eng = await saveEnglishTitle(ctx.root, ctx.slug, ctx.title, englishTitle);
     log(`Title translated — folder will be renamed to "${eng}" on the next run.`, "ok");
@@ -927,7 +1034,8 @@ async function translateNovel(sink, chapters, ctx = {}) {
         system,
         messages: [{ role: "user", content: ch.body }],
       },
-    })), batches.length > 1 ? `translate ${bi + 1}/${batches.length}` : "translate");
+    })), batches.length > 1 ? `translate ${bi + 1}/${batches.length}` : "translate",
+      { kind: "translate", slug: ctx.slug, files: group.map(ch => ch.filename) });
 
     for (let i = 0; i < group.length; i++) {
       const msg = results.get(`ch-${i}`);
@@ -976,6 +1084,7 @@ async function run(makeSink, root = null) {
   lastRun = { makeSink, root };
   aborter = new AbortController();
   $("btn-stop").disabled = false;
+  await acquireWakeLock();
   updateButtons();
   logEl.textContent = "";
   bar.style.display = "block";
@@ -1094,6 +1203,7 @@ async function run(makeSink, root = null) {
     running = false;
     wasStopped = stopRequested;
     stopRequested = false;
+    releaseWakeLock();
     updateButtons();
   }
 }
