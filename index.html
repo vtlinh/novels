@@ -70,7 +70,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.22";
+const VERSION = "1.23";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -602,6 +602,8 @@ const loadPending = () => { try { return JSON.parse(localStorage.getItem(PENDING
 const savePending = list => { try { localStorage.setItem(PENDING_KEY, JSON.stringify(list)); } catch {} };
 const addPending = rec => savePending([...loadPending().filter(r => r.id !== rec.id), rec]);
 const removePending = id => savePending(loadPending().filter(r => r.id !== id));
+/* startup hygiene: drop records whose results Anthropic no longer retains */
+savePending(loadPending().filter(r => r.id && Date.now() - (r.created || 0) < 29 * 864e5));
 
 async function fetchBatchResults(id, label) {
   const results = new Map();
@@ -956,7 +958,15 @@ async function recoverPendingBatches(sink, ctx) {
         log(`! batch …${rec.id.slice(-8)} is no longer available (${errMsg(e)}); dropping it`, "err");
         removePending(rec.id);
       } else {
-        log(`! could not recover batch …${rec.id.slice(-8)} (${errMsg(e)}); will retry next run`, "err");
+        /* transient failure — retry on the next run, but never forever */
+        rec.tries = (rec.tries || 0) + 1;
+        if (rec.tries >= 5) {
+          log(`! batch …${rec.id.slice(-8)} failed recovery ${rec.tries} times (${errMsg(e)}); giving up on it`, "err");
+          removePending(rec.id);
+        } else {
+          addPending(rec);   // persist the attempt counter
+          log(`! could not recover batch …${rec.id.slice(-8)} (${errMsg(e)}); will retry next run (attempt ${rec.tries}/5)`, "err");
+        }
       }
     }
   }
