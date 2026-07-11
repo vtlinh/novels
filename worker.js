@@ -31,12 +31,66 @@ const withCors = resp => {
   return out;
 };
 
+const PAGE_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+  "Accept-Language": "vi,en;q=0.8",
+};
+
+// how long a status long-poll holds the connection, and how often it checks
+const POLL_WINDOW_MS = 90000;
+const POLL_INTERVAL_MS = 10000;
+const sleep = ms => new Promise(res => setTimeout(res, ms));
+
 export default {
   async fetch(request) {
     // CORS preflight for any route
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
 
     const url = new URL(request.url);
+
+    // Batch status long-poll: check every ~10s for up to ~90s, return the
+    // moment the batch ends — so the browser makes far fewer status calls.
+    //   GET <worker>/anthropic-poll/<batchId>
+    if (url.pathname.startsWith("/anthropic-poll/")) {
+      const batchId = url.pathname.slice("/anthropic-poll/".length);
+      const headers = {
+        "x-api-key": request.headers.get("x-api-key") || "",
+        "anthropic-version": request.headers.get("anthropic-version") || "2023-06-01",
+      };
+      const deadline = Date.now() + POLL_WINDOW_MS;
+      let last = "{}";
+      for (;;) {
+        const r = await fetch(`https://api.anthropic.com/v1/messages/batches/${batchId}`, { headers });
+        if (!r.ok) {
+          return withCors(new Response(await r.text(), {
+            status: r.status, headers: { "content-type": "application/json" },
+          }));
+        }
+        last = await r.text();
+        let status;
+        try { status = JSON.parse(last).processing_status; } catch {}
+        if (status === "ended" || Date.now() + POLL_INTERVAL_MS >= deadline) break;
+        await sleep(POLL_INTERVAL_MS);
+      }
+      return withCors(new Response(last, { headers: { "content-type": "application/json" } }));
+    }
+
+    // Batched chapter fetch: fetch up to 50 URLs in one call (free-tier
+    // subrequest limit).  POST <worker>/fetch-many  { "urls": [...] }
+    if (url.pathname === "/fetch-many" && request.method === "POST") {
+      let urls = [];
+      try { ({ urls } = await request.json()); } catch {}
+      const results = await Promise.all((urls || []).slice(0, 50).map(async u => {
+        try {
+          const r = await fetch(u, { headers: PAGE_HEADERS });
+          return { url: u, ok: r.ok, status: r.status, html: r.ok ? await r.text() : "" };
+        } catch (e) {
+          return { url: u, ok: false, status: 0, html: "", error: String(e) };
+        }
+      }));
+      return withCors(Response.json({ results }));
+    }
 
     // 2. Claude API proxy
     if (url.pathname.startsWith("/anthropic/")) {
@@ -58,14 +112,7 @@ export default {
     // 1. Chapter fetching
     const targetUrl = url.searchParams.get("url");
     if (targetUrl) {
-      const resp = await fetch(targetUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-          "Accept-Language": "vi,en;q=0.8",
-        },
-      });
-      return withCors(resp);
+      return withCors(await fetch(targetUrl, { headers: PAGE_HEADERS }));
     }
 
     return new Response("Novel Downloader proxy: /?url=... or /anthropic/v1/...", { headers: CORS });

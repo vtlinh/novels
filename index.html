@@ -68,7 +68,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.14";
+const VERSION = "1.15";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -163,6 +163,33 @@ async function fetchDoc(url) {
     await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
   }
   throw new Error(`failed after ${MAX_RETRIES} attempts: ${url} (${lastErr})`);
+}
+
+/* Fetch many chapter URLs in a SINGLE Worker call (up to FETCH_BATCH, the
+   free-tier subrequest limit). Returns Map(url -> html) for the ones that
+   came back non-empty. Retries the whole call on a network error. */
+async function fetchMany(urls) {
+  let lastErr;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    throwIfStopped();
+    try {
+      const r = await fetch(`${PROXY}/fetch-many`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ urls }),
+        signal: aborter?.signal,
+      });
+      if (r.ok) {
+        const { results } = await r.json();
+        const map = new Map();
+        for (const res of results || []) if (res.ok && res.html && res.html.trim()) map.set(res.url, res.html);
+        return map;
+      }
+      lastErr = new Error(`proxy /fetch-many HTTP ${r.status}`);
+    } catch (e) { throwIfStopped(); lastErr = e; }
+    await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
+  }
+  throw lastErr;
 }
 
 const slugOf = url => new URL(url).pathname.replace(/^\/|\/$/g, "").split("/")[0];
@@ -268,10 +295,22 @@ const sanitize = name => name
 const chapterFilename = (num, title) =>
   sanitize(title ? `Chapter ${num}: ${title}` : `Chapter ${num}`) + ".txt";
 
-async function downloadChapter(ch) {
+const chapterUrlNum = ch => {
   const m = ch.url.match(/chuong-(\d+)/g);
-  const urlNum = m ? parseInt(m[m.length - 1].slice(7), 10) : null;
-  const doc = await fetchDoc(ch.url);
+  return m ? parseInt(m[m.length - 1].slice(7), 10) : null;
+};
+
+/* the filename we can predict from the URL number + link text, used to skip a
+   chapter that's already downloaded without fetching it */
+const predictedName = ch => {
+  const urlNum = chapterUrlNum(ch);
+  const linkTitle = parseHeading(ch.text).title;
+  return urlNum != null && linkTitle ? chapterFilename(urlNum, linkTitle) : null;
+};
+
+/* parse an already-fetched chapter document into { filename, body } */
+function parseChapter(doc, ch) {
+  const urlNum = chapterUrlNum(ch);
   const headEl = doc.querySelector("a.chapter-title, h2 a, .chapter-title");
   const head = parseHeading(headEl ? headEl.textContent.trim() : ch.text);
   const num = urlNum ?? head.num;
@@ -442,7 +481,8 @@ const NAMES_CACHE_FILE = ".names_cache.json";
 const GLOSSARY_PROGRESS_FILE = ".glossary_progress.json";
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
-const BATCH_POLL_MS = 30000;
+const FETCH_BATCH = 50;                       // chapters fetched per Worker call (free-tier subrequest limit)
+const TRANSLATE_MAX_BYTES = 50 * 1024 * 1024; // cap a translation batch's request body at ~50MB
 /* Chapters are packed into each request up to this many estimated input tokens,
    so a combined-chapters request stays well under the model's 200K context. */
 const CHUNK_TOKEN_BUDGET = 120000;
@@ -499,37 +539,67 @@ async function apiFetch(path, body) {
   throw lastErr;
 }
 
-/* submit a Message Batch, poll until it ends, return Map(custom_id → message).
-   On Stop, the batch is canceled server-side; results that finished before
-   the cancellation are still returned so paid-for work is kept. */
+/* One long-poll: the Worker checks the batch every ~10s for up to ~90s and
+   returns the moment it ends, so the browser makes ~1 status call per 90s of
+   batch time instead of one every 30s. `useSignal` lets a Stop abort the
+   in-flight wait immediately. */
+async function pollBatch(batchId, useSignal) {
+  let lastErr;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      const r = await fetch(`${PROXY}/anthropic-poll/${batchId}`, {
+        headers: { "x-api-key": $("apikey").value.trim(), "anthropic-version": "2023-06-01" },
+        signal: useSignal ? aborter?.signal : undefined,
+      });
+      if (r.ok) return r.json();
+      lastErr = new Error(`poll HTTP ${r.status}`);
+    } catch (e) {
+      if (e.name === "AbortError") throw e;   // Stop pressed — don't retry
+      lastErr = e;
+    }
+    await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
+  }
+  throw lastErr;
+}
+
+/* submit a Message Batch, long-poll until it ends, return Map(custom_id → message).
+   On Stop, the batch is canceled server-side; results that finished before the
+   cancellation are still returned so paid-for work is kept. */
 async function runBatch(requests, label) {
   throwIfStopped();
   const batch = await (await apiFetch("/messages/batches", { requests })).json();
   log(`[${label}] batch submitted (${requests.length} request${requests.length > 1 ? "s" : ""}); polling…`);
   let cancelSent = false;
   for (;;) {
-    await sleepUnlessStopped(BATCH_POLL_MS);
-    if (stopRequested && !cancelSent) {
-      cancelSent = true;
-      try {
-        await apiFetch(`/messages/batches/${batch.id}/cancel`, {});
-        log(`[${label}] batch canceled — keeping results that already finished`, "err");
-      } catch (e) { log(`[${label}] cancel failed — ${errMsg(e)}`, "err"); }
+    let b;
+    try {
+      b = await pollBatch(batch.id, !cancelSent);
+    } catch (e) {
+      if (e.name === "AbortError" && stopRequested) {
+        if (!cancelSent) {
+          cancelSent = true;
+          try {
+            await apiFetch(`/messages/batches/${batch.id}/cancel`, {});
+            log(`[${label}] batch canceled — keeping results that already finished`, "err");
+          } catch (ce) { log(`[${label}] cancel failed — ${errMsg(ce)}`, "err"); }
+        }
+        continue;   // keep polling (no abort signal) until the canceled batch ends
+      }
+      throw e;
     }
-    const b = await (await apiFetch(`/messages/batches/${batch.id}`)).json();
     const c = b.request_counts;
     setStatus(`[${label}] processing: ${c.processing}  ok: ${c.succeeded}  err: ${c.errored}`);
-    if (b.processing_status !== "ended") continue;
-    const results = new Map();
-    const text = await (await apiFetch(`/messages/batches/${batch.id}/results`)).text();
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      const item = JSON.parse(line);
-      if (item.result.type === "succeeded") results.set(item.custom_id, item.result.message);
-      else log(`[${label}] ${item.custom_id}: ${item.result.type}`, "err");
-    }
-    return results;
+    if (b.processing_status === "ended") break;
   }
+  const results = new Map();
+  const text = await (await apiFetch(`/messages/batches/${batch.id}/results`)).text();
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    const item = JSON.parse(line);
+    if (item.result.type === "succeeded") results.set(item.custom_id, item.result.message);
+    else log(`[${label}] ${item.custom_id}: ${item.result.type}`, "err");
+  }
+  return results;
 }
 
 const messageText = msg =>
@@ -776,37 +846,57 @@ async function translateNovel(sink, chapters, ctx = {}) {
     cache_control: { type: "ephemeral" },
   }];
 
-  log(`Translating ${pending.length} chapter(s) in one parallel batch`);
-  const results = await runBatch(pending.map((ch, i) => ({
-    custom_id: `ch-${i}`,
-    params: {
-      model: SONNET,
-      max_tokens: 32000,
-      output_config: { effort: TRANSLATE_EFFORT },
-      system,
-      messages: [{ role: "user", content: ch.body }],
-    },
-  })), "translate");
+  /* pack chapters into batches so each batch's request body stays under
+     TRANSLATE_MAX_BYTES (the glossary system prompt is repeated per request);
+     for a normal-size novel this is a single batch, splitting only when huge */
+  const enc = new TextEncoder();
+  const sysBytes = enc.encode(JSON.stringify(system)).length;
+  const batches = [];
+  {
+    let cur = [], curB = 0;
+    for (const ch of pending) {
+      const b = sysBytes + enc.encode(ch.body).length + 400;
+      if (cur.length && curB + b > TRANSLATE_MAX_BYTES) { batches.push(cur); cur = []; curB = 0; }
+      cur.push(ch); curB += b;
+    }
+    if (cur.length) batches.push(cur);
+  }
+  log(`Translating ${pending.length} chapter(s) in ${batches.length} batch(es)`
+    + (batches.length > 1 ? ` (≤ ${Math.round(TRANSLATE_MAX_BYTES / 1048576)}MB each)` : ""));
 
   let saved = 0, failed = 0;
-  for (let i = 0; i < pending.length; i++) {
-    const msg = results.get(`ch-${i}`);
-    /* a truncated translation is incomplete — leave it unsaved so the next
-       run retries it */
-    if (msg && msg.stop_reason === "max_tokens") {
-      log(`! ${pending[i].filename}: output truncated (max_tokens); not saved`, "err");
-      failed++;
-      continue;
-    }
-    const text = msg ? messageText(msg) : "";
-    if (!text) { failed++; continue; }
-    try {
-      await sink.write(pending[i].filename, text, TRANSLATED_DIR);
-      saved++;
-      log(`saved  ${TRANSLATED_DIR}/${pending[i].filename}`, "ok");
-    } catch (e) {
-      failed++;
-      log(`SAVE FAILED ${TRANSLATED_DIR}/${pending[i].filename} — ${errMsg(e)}`, "err");
+  for (let bi = 0; bi < batches.length && !stopRequested; bi++) {
+    const group = batches[bi];
+    const results = await runBatch(group.map((ch, i) => ({
+      custom_id: `ch-${i}`,
+      params: {
+        model: SONNET,
+        max_tokens: 32000,
+        output_config: { effort: TRANSLATE_EFFORT },
+        system,
+        messages: [{ role: "user", content: ch.body }],
+      },
+    })), batches.length > 1 ? `translate ${bi + 1}/${batches.length}` : "translate");
+
+    for (let i = 0; i < group.length; i++) {
+      const msg = results.get(`ch-${i}`);
+      /* a truncated translation is incomplete — leave it unsaved so the next
+         run retries it */
+      if (msg && msg.stop_reason === "max_tokens") {
+        log(`! ${group[i].filename}: output truncated (max_tokens); not saved`, "err");
+        failed++;
+        continue;
+      }
+      const text = msg ? messageText(msg) : "";
+      if (!text) { failed++; continue; }
+      try {
+        await sink.write(group[i].filename, text, TRANSLATED_DIR);
+        saved++;
+        log(`saved  ${TRANSLATED_DIR}/${group[i].filename}`, "ok");
+      } catch (e) {
+        failed++;
+        log(`SAVE FAILED ${TRANSLATED_DIR}/${group[i].filename} — ${errMsg(e)}`, "err");
+      }
     }
   }
   log(`Translation ${stopRequested ? "stopped" : "done"}: ${saved} ok, ${failed} failed`
@@ -842,7 +932,7 @@ async function run(makeSink, root = null) {
     setStatus("Listing chapters…");
     const { title, chapters } = await listAllChapters(novelUrl);
     if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
-    log(`${title} — ${chapters.length} chapters, concurrency ${concurrency} (v${VERSION})`);
+    log(`${title} — ${chapters.length} chapters (v${VERSION})`);
     const slug = slugOf(novelUrl.replace(/\/+$/, "") + "/");
     const folderName = await resolveFolderName(root, slug, title);
     log(`Saving to: ${folderName}/`);
@@ -854,45 +944,59 @@ async function run(makeSink, root = null) {
     const failed = [];
     bar.max = chapters.length;
 
-    const queue = [...chapters];
     const pendingSaves = [];
     const collected = [];
-    async function worker() {
-      while (queue.length && !stopRequested) {
-        const ch = queue.shift();
+    const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)`);
+
+    /* skip already-downloaded chapters without any fetch (filename predicted
+       from the URL number + link text) */
+    const toFetch = [];
+    for (const ch of chapters) {
+      const preName = predictedName(ch);
+      if (preName && await sink.exists(preName)) {
+        collected.push({ filename: preName, body: null });
+        skipped++; bar.value = ++done;
+        log(`skip   ${preName}`);
+      } else {
+        toFetch.push(ch);
+      }
+    }
+    status();
+
+    /* fetch the rest in groups of up to FETCH_BATCH via one Worker call each */
+    for (let i = 0; i < toFetch.length && !stopRequested; i += FETCH_BATCH) {
+      const group = toFetch.slice(i, i + FETCH_BATCH);
+      setStatus(`Fetching chapters ${i + 1}-${Math.min(i + FETCH_BATCH, toFetch.length)} of ${toFetch.length}…`);
+      let htmls;
+      try { htmls = await fetchMany(group.map(c => c.url)); }
+      catch (e) {
+        if (stopRequested) break;
+        for (const ch of group) { failed.push(ch.url); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); bar.value = ++done; }
+        status();
+        continue;
+      }
+      for (const ch of group) {
         try {
-          /* skip the fetch entirely when a previous download exists — the
-             filename is predictable from the URL number + the link text */
-          const m = ch.url.match(/chuong-(\d+)/g);
-          const urlNum = m ? parseInt(m[m.length - 1].slice(7), 10) : null;
-          const linkTitle = parseHeading(ch.text).title;
-          const preName = urlNum != null && linkTitle ? chapterFilename(urlNum, linkTitle) : null;
-          if (preName && await sink.exists(preName)) {
-            collected.push({ filename: preName, body: null });
-            skipped++;
-            log(`skip   ${preName}`);
-          } else {
-            const { filename, body } = await downloadChapter(ch);
-            collected.push({ filename, body });
-            if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); }
-            else {
-              try { await sink.write(filename, body); saved++; log(`saved  ${filename}`, "ok"); }
-              catch (e) {
-                pendingSaves.push({ url: ch.url, filename, body });
-                log(`SAVE FAILED ${filename} — ${errMsg(e)} (will retry at the end)`, "err");
-              }
+          const html = htmls.get(ch.url);
+          if (!html) throw new Error("fetch failed");
+          const { filename, body } = parseChapter(new DOMParser().parseFromString(html, "text/html"), ch);
+          collected.push({ filename, body });
+          if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); }
+          else {
+            try { await sink.write(filename, body); saved++; log(`saved  ${filename}`, "ok"); }
+            catch (e) {
+              pendingSaves.push({ url: ch.url, filename, body });
+              log(`SAVE FAILED ${filename} — ${errMsg(e)} (will retry at the end)`, "err");
             }
           }
         } catch (e) {
-          if (stopRequested) break;   /* aborted in-flight fetch, not a failure */
           failed.push(ch.url);
           log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err");
         }
         bar.value = ++done;
-        setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)`);
+        status();
       }
     }
-    await Promise.all(Array.from({ length: concurrency }, worker));
 
     /* chapters that downloaded but would not save: retry one by one now
        that no other writes are in flight */
