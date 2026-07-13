@@ -37,6 +37,14 @@ const PAGE_HEADERS = {
   "Accept-Language": "vi,en;q=0.8",
 };
 
+// Page fetching is restricted to truyenfull hosts (any TLD, so the site can
+// hop domains) — without this the Worker is an open proxy anyone could abuse.
+const ALLOWED_PAGE_HOST_RE = /^(www\.)?truyenfull\.[a-z]{2,10}$/i;
+const allowedPage = u => {
+  try { const t = new URL(u); return t.protocol === "https:" && ALLOWED_PAGE_HOST_RE.test(t.hostname); }
+  catch { return false; }
+};
+
 // how long a status long-poll holds the connection, and how often it checks
 const POLL_WINDOW_MS = 90000;
 const POLL_INTERVAL_MS = 10000;
@@ -92,6 +100,10 @@ export default {
           const i = next++;
           if (i >= list.length) return;
           const u = list[i];
+          if (!allowedPage(u)) {
+            results[i] = { url: u, ok: false, status: 403, html: "", error: "host not allowed" };
+            continue;
+          }
           try {
             const r = await fetch(u, { headers: PAGE_HEADERS });
             results[i] = { url: u, ok: r.ok, status: r.status, html: r.ok ? await r.text() : "" };
@@ -123,6 +135,8 @@ export default {
     // 1. Chapter fetching
     const targetUrl = url.searchParams.get("url");
     if (targetUrl) {
+      if (!allowedPage(targetUrl))
+        return new Response("host not allowed", { status: 403, headers: CORS });
       return withCors(await fetch(targetUrl, { headers: PAGE_HEADERS }));
     }
 

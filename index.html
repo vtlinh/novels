@@ -69,11 +69,13 @@
   </div>
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
+        integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=="
+        crossorigin="anonymous"></script>
 <script>
 "use strict";
 
-const VERSION = "1.31";
+const VERSION = "1.32";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -258,7 +260,7 @@ function maxListingPage(doc, slug) {
   return max;
 }
 
-async function listAllChapters(novelUrl) {
+async function listAllChapters(novelUrl, concurrency) {
   const base = novelUrl.replace(/\/+$/, "") + "/";
   const slug = slugOf(base);
   const doc = await fetchDoc(base);
@@ -267,19 +269,44 @@ async function listAllChapters(novelUrl) {
 
   const seen = new Set(), chapters = [];
   const add = items => { for (const c of items) if (!seen.has(c.url)) { seen.add(c.url); chapters.push(c); } };
+  const pageUrl = p => `${base}trang-${p}/`;
 
   add(chapterLinks(doc, base, slug));
   let last = maxListingPage(doc, slug);
-  for (let page = 2; page <= last; page++) {
+
+  /* fetch listing pages in batches via one Worker call each, instead of one
+     round trip per page — this is what lets the download start quickly on
+     long novels. Pages the batch missed fall back to per-page fetching. */
+  let fetched = 1;
+  while (fetched < last) {
     throwIfStopped();
-    setStatus(`Listing chapters: page ${page}/${last}…`);
-    const p = await fetchDoc(`${base}trang-${page}/`);
-    add(chapterLinks(p, base, slug));
-    last = Math.max(last, maxListingPage(p, slug));
+    const batch = [];
+    for (let p = fetched + 1; p <= last && batch.length < FETCH_BATCH; p++) batch.push(p);
+    setStatus(`Listing chapters: pages ${batch[0]}-${batch[batch.length - 1]} of ${last}…`);
+    const htmls = await fetchMany(batch.map(pageUrl), concurrency);
+    for (const p of batch) {
+      const html = htmls.get(pageUrl(p));
+      const d = html ? new DOMParser().parseFromString(html, "text/html")
+                     : await fetchDoc(pageUrl(p));
+      add(chapterLinks(d, base, slug));
+      last = Math.max(last, maxListingPage(d, slug));
+    }
+    fetched = batch[batch.length - 1];
   }
 
-  const num = u => { const m = u.match(/chuong-(\d+)/g); return m ? parseInt(m[m.length - 1].slice(7), 10) : 1e9; };
-  chapters.sort((a, b) => num(a.url) - num(b.url));
+  for (const ch of chapters) ch.num = chapterUrlNum(ch) ?? parseHeading(ch.text).num;
+  chapters.sort((a, b) => (a.num ?? 1e9) - (b.num ?? 1e9));
+
+  /* assign filenames once, here: different chapters that map to the same
+     number (e.g. /chuong-12-1/ and /chuong-12-2/ both -> 12) get a
+     deterministic suffix so one doesn't overwrite or shadow the other */
+  const counts = new Map();
+  for (const ch of chapters) {
+    if (ch.num == null) { ch.filename = null; continue; }
+    const c = (counts.get(ch.num) || 0) + 1;
+    counts.set(ch.num, c);
+    ch.filename = `Chapter ${ch.num}${c > 1 ? `-${c}` : ""}.txt`;
+  }
   return { title, chapters };
 }
 
@@ -332,36 +359,26 @@ const sanitize = name => name
   .replace(/[^\x20-\x7E]/g, " ")
   .replace(/\s+/g, " ").trim().replace(/[. ]+$/, "").slice(0, 180);
 
-/* Files are named just "Chapter N" — the chapter's name/title lives inside the
+/* Files are named just "Chapter N" (with a -2/-3 suffix on duplicate numbers;
+   assigned in listAllChapters) — the chapter's name/title lives inside the
    body (first line) instead, so it gets translated along with the text. */
-const chapterFilename = num => `Chapter ${num}.txt`;
-
 const chapterUrlNum = ch => {
   const m = ch.url.match(/chuong-(\d+)/g);
   return m ? parseInt(m[m.length - 1].slice(7), 10) : null;
-};
-
-/* the filename we can predict from the URL number alone, used to skip a
-   chapter that's already downloaded without fetching it */
-const predictedName = ch => {
-  const urlNum = chapterUrlNum(ch);
-  return urlNum != null ? chapterFilename(urlNum) : null;
 };
 
 /* parse an already-fetched chapter document into { filename, body }. The
    Vietnamese chapter heading ("Chương N: <name>") is prepended to the body so
    the chapter name is translated together with the chapter text. */
 function parseChapter(doc, ch) {
-  const urlNum = chapterUrlNum(ch);
+  if (!ch.filename) throw new Error("cannot determine chapter number");
   const headEl = doc.querySelector("a.chapter-title, h2 a, .chapter-title");
   const head = parseHeading(headEl ? headEl.textContent.trim() : ch.text);
-  const num = urlNum ?? head.num;
-  if (num == null) throw new Error("cannot determine chapter number");
-  const title = head.title || parseHeading(ch.text).title.replace(/^Ch[ưu]ơ?ng\s*\d+$/i, "");
+  const title = head.title || parseHeading(ch.text).title;
   const content = extractContent(doc);
   if (!content.trim()) throw new Error("empty content");
-  const heading = title ? `Chương ${num}: ${title}` : `Chương ${num}`;
-  return { filename: chapterFilename(num), body: `${heading}\n\n${content}` };
+  const heading = title ? `Chương ${ch.num}: ${title}` : `Chương ${ch.num}`;
+  return { filename: ch.filename, body: `${heading}\n\n${content}` };
 }
 
 /* ---------------- output sinks ---------------- */
@@ -399,6 +416,22 @@ function folderSink(rootHandle, folderName) {
 
   return {
     async init() { dir = await openDir(); },
+    /* all non-empty filenames in one directory listing — vastly faster than
+       per-file exists() when checking thousands of chapters on a resume */
+    list(sub) {
+      return locked(async () => {
+        const out = new Set();
+        try {
+          const d = await dirFor(sub);
+          const entries = [];
+          for await (const [n, h] of d.entries()) if (h.kind === "file") entries.push([n, h]);
+          await Promise.all(entries.map(async ([n, h]) => {
+            try { if ((await h.getFile()).size > 0) out.add(n); } catch {}
+          }));
+        } catch {}
+        return out;
+      });
+    },
     exists(name, sub) {
       return locked(async () => {
         try { return (await (await (await dirFor(sub)).getFileHandle(name)).getFile()).size > 0; }
@@ -466,8 +499,11 @@ function zipSink(folderName) {
   const path = (name, sub) => (sub ? `${sub}/${name}` : name);
   return {
     async init() {},
+    async list() { return new Set(); },
     async exists() { return false; },
-    async read(name, sub) { return files.find(f => f.filename === path(name, sub))?.body ?? null; },
+    /* findLast: re-writes append, so the newest entry is authoritative
+       (JSZip likewise keeps the last file added under a given name) */
+    async read(name, sub) { return files.findLast(f => f.filename === path(name, sub))?.body ?? null; },
     async write(name, text, sub) { files.push({ filename: path(name, sub), body: text }); },
     async finish() {
       setStatus("Building ZIP…");
@@ -525,6 +561,7 @@ const NAMES_CACHE_FILE = ".names_cache.json";
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
 const FETCH_BATCH = 50;                        // chapters fetched per Worker call (free-tier subrequest limit)
+const FIRST_FETCH_BATCH = 10;                  // small first group so files start appearing within seconds
 /* A bundle's combined output (all its chapter translations + the names JSON)
    must stay under TRANSLATE_MAX_TOKENS or the batch truncates and the whole
    bundle is lost. We pack consecutive chapters up to this many estimated OUTPUT
@@ -614,7 +651,7 @@ async function pollBatch(batchId, useSignal) {
 
 /* ---- pending-batch registry (localStorage) ----
    Every submitted batch is recorded with the metadata needed to save its
-   results later (custom_id -> filename mapping, or glossary coverage). If the
+   results later (the custom_id -> filename mapping). If the
    page dies while a batch is processing — tab discarded, phone slept, crash —
    the next run detects the orphaned batch, fetches its results (Anthropic
    keeps them for 29 days), and saves them instead of paying to redo them. */
@@ -797,8 +834,11 @@ const BUNDLE_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          n: { type: "integer" },          // the CHAPTER number as labelled in the prompt
-          text: { type: "string" },        // that chapter's full English translation
+          n: {
+            type: "integer",
+            description: "The number from this chapter's '=== CHAPTER n ===' delimiter — its 1-based position in the bundle. NEVER the chapter number that appears inside the heading text.",
+          },
+          text: { type: "string", description: "This chapter's complete English translation." },
         },
         required: ["n", "text"],
         additionalProperties: false,
@@ -821,6 +861,7 @@ const BUNDLE_SCHEMA = {
 const BUNDLE_SYSTEM =
   "You are translating a Vietnamese web novel into natural, fluent English. You receive a bundle of consecutive chapters to translate TOGETHER as one continuous work — not as independent, isolated chapters — plus a glossary of proper-name renderings already fixed in earlier chapters.\n"
   + "Before writing any translation, read ALL the chapters in the bundle and decide one English rendering for every proper name that appears anywhere in them (reusing the glossary for names already in it). Then translate every chapter using that single shared set of renderings.\n"
+  + "In your `chapters` output, `n` is the number from that chapter's `=== CHAPTER n ===` delimiter — its 1-based position in this bundle — NEVER the chapter number that appears inside the heading text.\n"
   + "Translation rules:\n"
   + "- Translate each labelled chapter into natural, fluent English, EVERYTHING it contains — including its first line, the chapter heading (e.g. \"Chương 5: Tiêu Viêm\" -> \"Chapter 5: Xiao Yan\"). Keep that heading as the translated chapter's first line, followed by a blank line, then the prose. Preserve paragraph breaks (a blank line between paragraphs). Do not add or drop any heading, note, or commentary of your own — translate exactly what is given.\n"
   + "- NAME CONSISTENCY IS CRITICAL. Every proper name — characters, nicknames, places, sects/organizations, techniques, titles, brands — must use ONE identical English rendering in EVERY chapter it appears in across this bundle. If a name appears in Chapter 1 and again in Chapter 5 of this bundle, both must read exactly the same. Never render the same name two different ways between chapters. If a name is in the glossary, reuse that rendering EXACTLY; for a name not in the glossary, commit to the single best rendering once and apply it identically everywhere in the bundle.\n"
@@ -968,9 +1009,11 @@ async function recoverPendingBatches(sink, ctx) {
 async function translateNovel(sink, chapters, ctx = {}) {
   await recoverPendingBatches(sink, ctx);
 
+  /* one directory listing instead of a per-chapter exists() check */
+  const doneSet = await sink.list(TRANSLATED_DIR);
   const pending = [];
   for (const ch of chapters) {
-    if (await sink.exists(ch.filename, TRANSLATED_DIR)) continue;
+    if (doneSet.has(ch.filename)) continue;
     const body = ch.body ?? await sink.read(ch.filename);
     if (body) pending.push({ filename: ch.filename, body });
   }
@@ -1017,7 +1060,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
     const userContent =
       "GLOSSARY of proper-name renderings already fixed in earlier chapters, as [Vietnamese, English] pairs — reuse each EXACTLY wherever that name appears:\n"
       + JSON.stringify(glossaryPairs(glossary))
-      + `\n\nTranslate the following ${group.length} chapter(s) together as one continuous whole, using ONE identical English rendering for each proper name across every chapter below (a name in CHAPTER 1 must match the same name in CHAPTER ${group.length}). Return every chapter's full translation in \`chapters\` (echo each CHAPTER number in \`n\`), and in \`names\` ONLY the proper names that are NEW — not already in the glossary above.\n\n`
+      + `\n\nTranslate the following ${group.length} chapter(s) together as one continuous whole, using ONE identical English rendering for each proper name across every chapter below (a name in CHAPTER 1 must match the same name in CHAPTER ${group.length}). Return every chapter's full translation in \`chapters\`, setting \`n\` to the delimiter number (1-${group.length}) — not the heading's own chapter number — and in \`names\` ONLY the proper names that are NEW, not already in the glossary above.\n\n`
       + blob;
 
     /* only the first batch we submit carries the one-shot title translation */
@@ -1027,7 +1070,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
       params: {
         model: OPUS,
         max_tokens: TRANSLATE_MAX_TOKENS,
-        system: [{ type: "text", text: BUNDLE_SYSTEM, cache_control: { type: "ephemeral" } }],
+        system: BUNDLE_SYSTEM,
         messages: [{ role: "user", content: userContent }],
         output_config: { effort: TRANSLATE_EFFORT, ...jsonFormat(BUNDLE_SCHEMA) },
       },
@@ -1076,18 +1119,41 @@ async function translateNovel(sink, chapters, ctx = {}) {
     const added = mergePairs(glossary, parsed.names);
     await saveGlossary(sink, glossary);
 
-    for (const item of parsed.chapters || []) {
+    /* `n` must be the 1..N delimiter number; if the model echoed the novel's
+       own chapter numbers instead but still returned one entry per chapter,
+       recover by mapping positionally */
+    let items = parsed.chapters || [];
+    const ns = items.map(it => parseInt(it.n, 10));
+    const validNs = items.length > 0
+      && ns.every(v => v >= 1 && v <= group.length)
+      && new Set(ns).size === ns.length;
+    if (!validNs && items.length === group.length) {
+      items = items.map((it, idx) => ({ ...it, n: idx + 1 }));
+      log(`! bundle ${bundleNo}: response chapter numbering was off — mapped by position`, "err");
+    }
+
+    const handled = new Set();
+    for (const item of items) {
       const ch = group[parseInt(item.n, 10) - 1];
-      if (!ch || !item.text || !item.text.trim()) continue;
-      if (await sink.exists(ch.filename, TRANSLATED_DIR)) continue;
+      if (!ch || handled.has(ch.filename) || !item.text || !item.text.trim()) continue;
+      handled.add(ch.filename);
+      if (doneSet.has(ch.filename)) continue;
       try {
         await sink.write(ch.filename, item.text, TRANSLATED_DIR);
+        doneSet.add(ch.filename);
         saved++;
         log(`saved  ${TRANSLATED_DIR}/${ch.filename}`, "ok");
       } catch (e) {
         failed++;
         log(`SAVE FAILED ${TRANSLATED_DIR}/${ch.filename} — ${errMsg(e)}`, "err");
       }
+    }
+    /* chapters the response skipped entirely: count and surface them instead
+       of silently reporting success (a re-run picks them up) */
+    const missing = group.filter(ch => !handled.has(ch.filename));
+    if (missing.length) {
+      failed += missing.length;
+      log(`! bundle ${bundleNo}: ${missing.length} chapter(s) missing from the response (${missing.map(c => c.filename.replace(/\.txt$/, "")).join(", ")})`, "err");
     }
     log(`Bundle ${bundleNo}: +${added} names (${glossary.size} total)`, "ok");
   }
@@ -1125,7 +1191,7 @@ async function run(makeSink, root = null) {
 
   try {
     setStatus("Listing chapters…");
-    const { title, chapters } = await listAllChapters(novelUrl);
+    const { title, chapters } = await listAllChapters(novelUrl, concurrency);
     if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
     log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency} (v${VERSION})`);
     const slug = slugOf(novelUrl.replace(/\/+$/, "") + "/");
@@ -1143,25 +1209,30 @@ async function run(makeSink, root = null) {
     const collected = [];
     const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)`);
 
-    /* skip already-downloaded chapters without any fetch (filename predicted
-       from the URL number + link text) */
+    /* skip already-downloaded chapters without any fetch: one directory
+       listing checked in memory, instead of a filesystem call per chapter */
+    setStatus("Checking already-downloaded chapters…");
+    const existing = await sink.list();
     const toFetch = [];
     for (const ch of chapters) {
-      const preName = predictedName(ch);
-      if (preName && await sink.exists(preName)) {
-        collected.push({ filename: preName, body: null });
+      if (ch.filename && existing.has(ch.filename)) {
+        collected.push({ filename: ch.filename, body: null });
         skipped++; bar.value = ++done;
-        log(`skip   ${preName}`);
       } else {
         toFetch.push(ch);
       }
     }
+    if (skipped) log(`skip   ${skipped} already-downloaded chapter(s)`);
     status();
 
-    /* fetch the rest in groups of up to FETCH_BATCH via one Worker call each */
-    for (let i = 0; i < toFetch.length && !stopRequested; i += FETCH_BATCH) {
-      const group = toFetch.slice(i, i + FETCH_BATCH);
-      setStatus(`Fetching chapters ${i + 1}-${Math.min(i + FETCH_BATCH, toFetch.length)} of ${toFetch.length}…`);
+    /* fetch the rest via one Worker call per group — a small first group so
+       files start appearing right away, then FETCH_BATCH at a time */
+    let i = 0;
+    while (i < toFetch.length && !stopRequested) {
+      const group = toFetch.slice(i, i + (i === 0 ? FIRST_FETCH_BATCH : FETCH_BATCH));
+      const from = i + 1;
+      i += group.length;
+      setStatus(`Fetching chapters ${from}-${i} of ${toFetch.length}…`);
       let htmls;
       try { htmls = await fetchMany(group.map(c => c.url), concurrency); }
       catch (e) {
