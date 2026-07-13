@@ -73,7 +73,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.28";
+const VERSION = "1.29";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -142,7 +142,7 @@ if (!window.showDirectoryPicker)
 
 function updateButtons() {
   const ok = NOVEL_URL_RE.test($("url").value.trim());
-  $("btn-folder").disabled = running || !ok || !window.showDirectoryPicker;
+  $("btn-folder").disabled = false;   // always enabled
   $("btn-zip").disabled = running || !ok;
   $("btn-stop").style.display = running ? "inline-block" : "none";
   /* a stopped run leaves a Restart button in the Stop button's place — it
