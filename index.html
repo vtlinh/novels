@@ -31,6 +31,7 @@
   #btn-zip { background:#2a313a; color:var(--fg); margin-right:8px; }
   #btn-stop { background:var(--err); color:#fff; display:none; }
   #btn-restart { background:var(--accent); color:#fff; display:none; margin-right:8px; }
+  #btn-retry { background:#e0a33e; color:#1b2026; display:none; margin-right:8px; }
   button:disabled { opacity:.45; cursor:not-allowed; }
   #status { font-size:13px; color:var(--muted); margin-top:14px; min-height:18px; }
   progress { width:100%; height:8px; margin-top:10px; accent-color:var(--accent);
@@ -63,6 +64,7 @@
     <button id="btn-zip">Download as ZIP</button>
     <button id="btn-stop">Stop</button>
     <button id="btn-restart">Restart</button>
+    <button id="btn-retry">Retry failed</button>
     <div id="status"></div>
     <progress id="bar" max="1" value="0"></progress>
     <div id="log"></div>
@@ -75,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.32";
+const VERSION = "1.33";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -107,6 +109,7 @@ let stopRequested = false;
 let aborter = null;
 let lastRun = null;      // {makeSink, root} of the current/most recent run
 let wasStopped = false;  // last run ended via the Stop button
+let lastFailed = null;   // {makeSink, root, title, chapters} of chapters that failed to download
 
 /* keep the screen awake during a run so mobile Chrome doesn't freeze the tab;
    the lock is dropped when the tab hides, so re-acquire when it's visible again */
@@ -150,12 +153,20 @@ function updateButtons() {
   /* a stopped run leaves a Restart button in the Stop button's place — it
      reuses the already-granted folder handle, so no re-picking */
   $("btn-restart").style.display = !running && wasStopped && lastRun ? "inline-block" : "none";
+  /* a finished run with download failures offers a Retry that re-fetches only
+     those chapters, reusing the same folder handle / sink */
+  $("btn-retry").style.display = !running && lastFailed && lastFailed.chapters.length ? "inline-block" : "none";
 }
 $("url").addEventListener("input", updateButtons);
 updateButtons();
 
 $("btn-restart").addEventListener("click", () => {
   if (lastRun && !running) run(lastRun.makeSink, lastRun.root);
+});
+
+$("btn-retry").addEventListener("click", () => {
+  if (lastFailed && !running)
+    run(lastFailed.makeSink, lastFailed.root, { title: lastFailed.title, chapters: lastFailed.chapters });
 });
 
 $("btn-stop").addEventListener("click", () => {
@@ -1163,7 +1174,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
 
 /* ---------------- main flow ---------------- */
 
-async function run(makeSink, root = null) {
+async function run(makeSink, root = null, only = null) {
   if (running) return;
   const novelUrl = $("url").value.trim();
   const concurrency = Math.max(1, Math.min(10, parseInt($("conc").value, 10) || 5));
@@ -1180,6 +1191,7 @@ async function run(makeSink, root = null) {
   running = true;
   stopRequested = false;
   wasStopped = false;
+  lastFailed = null;
   lastRun = { makeSink, root };
   aborter = new AbortController();
   $("btn-stop").disabled = false;
@@ -1189,11 +1201,23 @@ async function run(makeSink, root = null) {
   bar.style.display = "block";
   bar.value = 0;
 
+  /* kept at function scope so `finally` can offer a Retry of what failed */
+  const failed = [];
+  let runTitle = null;
+
   try {
-    setStatus("Listing chapters…");
-    const { title, chapters } = await listAllChapters(novelUrl, concurrency);
-    if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
-    log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency} (v${VERSION})`);
+    let title, chapters;
+    if (only) {
+      ({ title, chapters } = only);
+      runTitle = title;
+      log(`Retrying ${chapters.length} failed chapter(s)… (v${VERSION})`);
+    } else {
+      setStatus("Listing chapters…");
+      ({ title, chapters } = await listAllChapters(novelUrl, concurrency));
+      if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
+      runTitle = title;
+      log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency} (v${VERSION})`);
+    }
     const slug = slugOf(novelUrl.replace(/\/+$/, "") + "/");
     const folderName = await resolveFolderName(root, slug, title);
     log(`Saving to: ${folderName}/`);
@@ -1202,7 +1226,6 @@ async function run(makeSink, root = null) {
     await sink.init();
 
     let done = 0, saved = 0, skipped = 0;
-    const failed = [];
     bar.max = chapters.length;
 
     const pendingSaves = [];
@@ -1237,7 +1260,7 @@ async function run(makeSink, root = null) {
       try { htmls = await fetchMany(group.map(c => c.url), concurrency); }
       catch (e) {
         if (stopRequested) break;
-        for (const ch of group) { failed.push(ch.url); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); bar.value = ++done; }
+        for (const ch of group) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); bar.value = ++done; }
         status();
         continue;
       }
@@ -1256,7 +1279,7 @@ async function run(makeSink, root = null) {
             }
           }
         } catch (e) {
-          failed.push(ch.url);
+          failed.push(ch);
           log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err");
         }
         bar.value = ++done;
@@ -1300,13 +1323,18 @@ async function run(makeSink, root = null) {
     setStatus(`${stopRequested ? "Stopped" : "Done"}: ${saved} saved, ${skipped} skipped, ${failed.length} failed`
       + (rescued.length ? `, ${rescued.length} rescued to ZIP.` : "."));
     if (stopRequested) log("Stopped — re-run to resume where you left off.", "err");
-    if (failed.length) log(`\nRe-run to retry the ${failed.length} failed chapter(s).`, "err");
+    if (failed.length) log(`\n${failed.length} chapter(s) failed to download — click “Retry failed” to try just those again.`, "err");
   } catch (e) {
     setStatus(e.stopped ? "Stopped." : `Error: ${e.message}`);
   } finally {
     running = false;
     wasStopped = stopRequested;
     stopRequested = false;
+    /* offer a Retry of only the chapters that failed to download, reusing the
+       same sink (folder handle) so no re-picking and no re-listing */
+    lastFailed = (failed.length && runTitle)
+      ? { makeSink, root, title: runTitle, chapters: failed.slice() }
+      : null;
     releaseWakeLock();
     updateButtons();
   }
