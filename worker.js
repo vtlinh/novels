@@ -142,6 +142,10 @@ export default {
       return withCors(await fetch(targetUrl, { headers: PAGE_HEADERS }));
     }
 
-    return new Response("Novel Downloader proxy: /?url=... or /anthropic/v1/...", { headers: CORS });
+    return new Response(
+      "Novel Downloader proxy. Routes: GET /?url=<truyenfull page>, " +
+      "POST /fetch-many, ANY /anthropic/v1/..., GET /anthropic-poll/<batchId>",
+      { headers: CORS },
+    );
   },
 };
