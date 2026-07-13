@@ -73,7 +73,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.29";
+const VERSION = "1.30";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1242,6 +1242,16 @@ async function run(makeSink, root = null) {
 }
 
 $("btn-folder").addEventListener("click", async () => {
+  /* the button is always enabled, so guard here: give clear feedback instead
+     of making the user pick a folder for a run that will silently no-op */
+  if (!NOVEL_URL_RE.test($("url").value.trim())) {
+    setStatus("Enter a novel URL starting with https://truyenfull.today");
+    return;
+  }
+  if (!window.showDirectoryPicker) {
+    setStatus("Folder saving needs Chrome or Edge — use “Download as ZIP” instead.");
+    return;
+  }
   let root;
   try { root = await showDirectoryPicker({ mode: "readwrite" }); }
   catch { return; /* user canceled */ }
