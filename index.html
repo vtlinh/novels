@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.35";
+const VERSION = "1.36";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1267,6 +1267,22 @@ async function run(makeSink, root = null, only = null) {
     const collected = [];
     const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)`);
 
+    /* Parse a freshly-fetched chapter, keep it for translation, and write it
+       to the folder (falling back to the pendingSaves rescue path on a write
+       error). Throws when the HTML is missing/unparseable so the caller can
+       mark the chapter failed. Shared by the main loop and the retry pass. */
+    const absorb = async (ch, html, retry = false) => {
+      if (!html) throw new Error("fetch failed");
+      const { filename, body } = parseChapter(new DOMParser().parseFromString(html, "text/html"), ch);
+      collected.push({ filename, body });
+      if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); return; }
+      try { await sink.write(filename, body); saved++; log(`saved  ${filename}${retry ? " (retry)" : ""}`, "ok"); }
+      catch (e) {
+        pendingSaves.push({ url: ch.url, filename, body });
+        log(`SAVE FAILED ${filename} — ${errMsg(e)} (will retry at the end)`, "err");
+      }
+    };
+
     /* skip already-downloaded chapters without any fetch: one directory
        listing checked in memory, instead of a filesystem call per chapter */
     setStatus("Checking already-downloaded chapters…");
@@ -1300,24 +1316,36 @@ async function run(makeSink, root = null, only = null) {
         continue;
       }
       for (const ch of group) {
-        try {
-          const html = htmls.get(ch.url);
-          if (!html) throw new Error("fetch failed");
-          const { filename, body } = parseChapter(new DOMParser().parseFromString(html, "text/html"), ch);
-          collected.push({ filename, body });
-          if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); }
-          else {
-            try { await sink.write(filename, body); saved++; log(`saved  ${filename}`, "ok"); }
-            catch (e) {
-              pendingSaves.push({ url: ch.url, filename, body });
-              log(`SAVE FAILED ${filename} — ${errMsg(e)} (will retry at the end)`, "err");
-            }
-          }
-        } catch (e) {
-          failed.push(ch);
-          log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err");
-        }
+        try { await absorb(ch, htmls.get(ch.url)); }
+        catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); }
         bar.value = ++done;
+        status();
+      }
+    }
+
+    /* End-of-run retry: once every other chapter is downloaded, take all the
+       chapters that failed above — pooled across every batch — and re-fetch
+       them in fresh FETCH_BATCH-sized Worker calls. Survivors drop out of
+       `failed`; whatever still fails is left for the manual "Retry failed"
+       button. Runs before the save-retry so recovered chapters that then fail
+       to write still get the pendingSaves rescue + ZIP fallback. */
+    if (failed.length && !stopRequested) {
+      const toRetry = failed.splice(0);
+      log(`\nRetrying ${toRetry.length} failed chapter(s)…`);
+      for (let j = 0; j < toRetry.length && !stopRequested; j += FETCH_BATCH) {
+        const group = toRetry.slice(j, j + FETCH_BATCH);
+        setStatus(`Retrying failed downloads… ${Math.min(j + group.length, toRetry.length)}/${toRetry.length}`);
+        let htmls;
+        try { htmls = await fetchMany(group.map(c => c.url), concurrency); }
+        catch (e) {
+          for (const ch of group) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); }
+          status();
+          continue;
+        }
+        for (const ch of group) {
+          try { await absorb(ch, htmls.get(ch.url), true); }
+          catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)} (retry)`, "err"); }
+        }
         status();
       }
     }
