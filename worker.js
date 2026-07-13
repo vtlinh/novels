@@ -1,23 +1,3 @@
-/*
- * Cloudflare Worker for the Novel Downloader.
- *
- * Two jobs, both CORS-enabled so the browser page can call them:
- *
- *   1. Chapter fetching:  GET  <worker>/?url=<encoded truyenfull URL>
- *      Fetches the page server-side and returns its HTML.
- *
- *   2. Claude API proxy:  ANY  <worker>/anthropic/v1/...   ->   https://api.anthropic.com/v1/...
- *      Forwards the request (method, body, x-api-key, anthropic-version,
- *      anthropic-beta) to Anthropic and returns the response. This exists
- *      because Anthropic's Message Batches endpoint does NOT send CORS
- *      headers, so the browser can't call it directly — but a Worker can,
- *      since server-to-server requests aren't subject to CORS.
- *
- * Deploy: paste into your Worker at dash.cloudflare.com (Quick edit) and Save.
- * The API key travels browser -> your Worker -> Anthropic; it only ever
- * touches infrastructure you control.
- */
-
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
@@ -37,29 +17,22 @@ const PAGE_HEADERS = {
   "Accept-Language": "vi,en;q=0.8",
 };
 
-// Page fetching is restricted to truyenfull hosts (any TLD, so the site can
-// hop domains) — without this the Worker is an open proxy anyone could abuse.
 const ALLOWED_PAGE_HOST_RE = /^(www\.)?truyenfull\.[a-z]{2,10}$/i;
 const allowedPage = u => {
   try { const t = new URL(u); return t.protocol === "https:" && ALLOWED_PAGE_HOST_RE.test(t.hostname); }
   catch { return false; }
 };
 
-// how long a status long-poll holds the connection, and how often it checks
 const POLL_WINDOW_MS = 90000;
 const POLL_INTERVAL_MS = 10000;
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 
 export default {
   async fetch(request) {
-    // CORS preflight for any route
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
 
     const url = new URL(request.url);
 
-    // Batch status long-poll: check every ~10s for up to ~90s, return the
-    // moment the batch ends — so the browser makes far fewer status calls.
-    //   GET <worker>/anthropic-poll/<batchId>
     if (url.pathname.startsWith("/anthropic-poll/")) {
       const batchId = url.pathname.slice("/anthropic-poll/".length);
       const headers = {
@@ -84,10 +57,6 @@ export default {
       return withCors(new Response(last, { headers: { "content-type": "application/json" } }));
     }
 
-    // Batched chapter fetch: fetch up to 50 URLs in one call (free-tier
-    // subrequest limit), holding at most `concurrency` requests in flight
-    // against the site at a time so it doesn't get hammered.
-    //   POST <worker>/fetch-many  { "urls": [...], "concurrency": 5 }
     if (url.pathname === "/fetch-many" && request.method === "POST") {
       let urls = [], concurrency;
       try { ({ urls, concurrency } = await request.json()); } catch {}
@@ -115,7 +84,6 @@ export default {
       return withCors(Response.json({ results }));
     }
 
-    // 2. Claude API proxy
     if (url.pathname.startsWith("/anthropic/")) {
       const target = "https://api.anthropic.com/" + url.pathname.slice("/anthropic/".length) + url.search;
       const headers = new Headers();
@@ -132,7 +100,6 @@ export default {
       return withCors(resp);
     }
 
-    // 1. Chapter fetching
     const targetUrl = url.searchParams.get("url");
     if (targetUrl) {
       if (!allowedPage(targetUrl))
