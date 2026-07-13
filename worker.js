@@ -1,7 +1,8 @@
 /*
  * Cloudflare Worker for the Novel Downloader.
  *
- * Two jobs, both CORS-enabled so the browser page can call them:
+ * Two jobs, both callable only from our own front-end origin (see
+ * ALLOWED_ORIGINS) via CORS:
  *
  *   1. Chapter fetching:  GET  <worker>/?url=<encoded truyenfull URL>
  *      Fetches the page server-side and returns its HTML.
@@ -20,31 +21,26 @@
  * touches infrastructure you control.
  */
 
-const CORS = {
-  "access-control-allow-origin": "*",
+// Requests are limited to our own front-end origin(s). Note this is a CORS
+// (browser-enforced) gate only: it stops other websites from using the Worker
+// inside a visitor's browser, but a scripted client can forge the Origin
+// header, so it is not a hard lock against a determined caller.
+const ALLOWED_ORIGINS = new Set([
+  "https://vtlinh.github.io",
+]);
+
+const corsHeaders = origin => ({
+  "access-control-allow-origin": origin,
   "access-control-allow-methods": "GET, POST, OPTIONS",
   "access-control-allow-headers": "x-api-key, anthropic-version, anthropic-beta, content-type",
   "access-control-max-age": "600",
-};
-
-const withCors = resp => {
-  const out = new Response(resp.body, resp);
-  for (const [k, v] of Object.entries(CORS)) out.headers.set(k, v);
-  return out;
-};
+  "vary": "Origin",
+});
 
 const PAGE_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
   "Accept-Language": "vi,en;q=0.8",
-};
-
-// Page fetching is restricted to truyenfull hosts (any TLD, so the site can
-// hop domains) — without this the Worker is an open proxy anyone could abuse.
-const ALLOWED_PAGE_HOST_RE = /^(www\.)?truyenfull\.[a-z]{2,10}$/i;
-const allowedPage = u => {
-  try { const t = new URL(u); return t.protocol === "https:" && ALLOWED_PAGE_HOST_RE.test(t.hostname); }
-  catch { return false; }
 };
 
 // how long a status long-poll holds the connection, and how often it checks
@@ -54,8 +50,22 @@ const sleep = ms => new Promise(res => setTimeout(res, ms));
 
 export default {
   async fetch(request) {
-    // CORS preflight for any route
-    if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
+    const origin = request.headers.get("Origin") || "";
+    const allowed = ALLOWED_ORIGINS.has(origin);
+
+    // CORS preflight for any route — only answered for allowed origins.
+    if (request.method === "OPTIONS")
+      return new Response(null, { headers: allowed ? corsHeaders(origin) : {} });
+
+    // Only our own front-end may use the Worker.
+    if (!allowed) return new Response("origin not allowed", { status: 403 });
+
+    const CORS = corsHeaders(origin);
+    const withCors = resp => {
+      const out = new Response(resp.body, resp);
+      for (const [k, v] of Object.entries(CORS)) out.headers.set(k, v);
+      return out;
+    };
 
     const url = new URL(request.url);
 
@@ -102,10 +112,6 @@ export default {
           const i = next++;
           if (i >= list.length) return;
           const u = list[i];
-          if (!allowedPage(u)) {
-            results[i] = { url: u, ok: false, status: 403, html: "", error: "host not allowed" };
-            continue;
-          }
           try {
             const r = await fetch(u, { headers: PAGE_HEADERS });
             results[i] = { url: u, ok: r.ok, status: r.status, html: r.ok ? await r.text() : "" };
@@ -137,8 +143,6 @@ export default {
     // 1. Chapter fetching
     const targetUrl = url.searchParams.get("url");
     if (targetUrl) {
-      if (!allowedPage(targetUrl))
-        return new Response("host not allowed", { status: 403, headers: CORS });
       return withCors(await fetch(targetUrl, { headers: PAGE_HEADERS }));
     }
 
