@@ -137,9 +137,10 @@ class StopError extends Error {
   constructor() { super("stopped by user"); this.stopped = true; }
 }
 const throwIfStopped = () => { if (stopRequested) throw new StopError(); };
+const sleep = ms => new Promise(res => setTimeout(res, ms));
 async function sleepUnlessStopped(ms) {
   for (let t = 0; t < ms && !stopRequested; t += 500)
-    await new Promise(res => setTimeout(res, 500));
+    await sleep(500);
 }
 
 if (!window.showDirectoryPicker)
@@ -385,8 +386,23 @@ function parseChapter(doc, ch) {
   if (!ch.filename) throw new Error("cannot determine chapter number");
   const headEl = doc.querySelector("a.chapter-title, h2 a, .chapter-title");
   const head = parseHeading(headEl ? headEl.textContent.trim() : ch.text);
-  const title = head.title || parseHeading(ch.text).title;
-  const content = extractContent(doc);
+  let title = head.title || parseHeading(ch.text).title;
+  let content = extractContent(doc);
+
+  /* some layouts repeat the chapter heading as the content's first line —
+     drop it there (and keep its title if it's the richer one) so the
+     prepended heading isn't duplicated. Guarded to short, anchored,
+     same-number lines so narrative text is never touched. */
+  const nl = content.indexOf("\n");
+  const firstLine = (nl === -1 ? content : content.slice(0, nl)).trim();
+  if (firstLine.length < 120 && /^Ch[ưu]ơ?ng\s*\d+/i.test(firstLine)) {
+    const fh = parseHeading(firstLine);
+    if (fh.num === ch.num) {
+      if (!title && fh.title) title = fh.title;
+      content = nl === -1 ? "" : content.slice(nl).replace(/^\n+/, "");
+    }
+  }
+
   if (!content.trim()) throw new Error("empty content");
   const heading = title ? `Chương ${ch.num}: ${title}` : `Chương ${ch.num}`;
   return { filename: ch.filename, body: `${heading}\n\n${content}` };
@@ -606,7 +622,10 @@ function chunkByTokens(chapters, budget) {
    api.anthropic.com are blocked. Route Claude API calls through the same
    Cloudflare Worker used for chapter fetching (server-to-server, no CORS) at
    the /anthropic/* path — see worker.js. */
-async function apiFetch(path, body) {
+/* `ignoreStop` is for the post-Stop calls (batch cancel, results collection)
+   that must complete to keep paid-for work — they never abort and keep their
+   retry backoff. Everything else aborts the moment Stop is pressed. */
+async function apiFetch(path, body, { ignoreStop = false } = {}) {
   const url = `${PROXY}/anthropic/v1${path}`;
   const opts = {
     method: body ? "POST" : "GET",
@@ -616,23 +635,27 @@ async function apiFetch(path, body) {
       "anthropic-version": "2023-06-01",
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal: ignoreStop ? undefined : aborter?.signal,
   };
+  const backoff = i => (ignoreStop ? sleep : sleepUnlessStopped)(1000 * 2 ** i + Math.random() * 1000);
   let lastErr;
   for (let i = 0; i < MAX_RETRIES; i++) {
+    if (!ignoreStop) throwIfStopped();
     let r;
     try {
       r = await fetch(url, opts);
     } catch (e) {
+      if (e.name === "AbortError") throwIfStopped();   // Stop pressed mid-flight
       /* network-level failure (offline, dropped connection, or a CORS block) —
          "Failed to fetch" lands here; retry a few times before giving up */
       lastErr = new Error(`network error calling ${path} — ${e.message}`);
-      await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
+      await backoff(i);
       continue;
     }
     if (r.ok) return r;
     lastErr = new Error(`Claude API ${r.status}: ${(await r.text()).slice(0, 300)}`);
     if (r.status !== 429 && r.status < 500) throw lastErr;   // client error — don't retry
-    await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
+    await backoff(i);
   }
   throw lastErr;
 }
@@ -655,7 +678,9 @@ async function pollBatch(batchId, useSignal) {
       if (e.name === "AbortError") throw e;   // Stop pressed — don't retry
       lastErr = e;
     }
-    await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
+    /* without a signal we're in the post-Stop path — keep real backoff
+       (sleepUnlessStopped returns immediately once Stop is pressed) */
+    await (useSignal ? sleepUnlessStopped : sleep)(1000 * 2 ** i + Math.random() * 1000);
   }
   throw lastErr;
 }
@@ -676,12 +701,15 @@ savePending(loadPending().filter(r => r.id && Date.now() - (r.created || 0) < 29
 
 async function fetchBatchResults(id, label) {
   const results = new Map();
-  const text = await (await apiFetch(`/messages/batches/${id}/results`)).text();
+  const text = await (await apiFetch(`/messages/batches/${id}/results`, null, { ignoreStop: true })).text();
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     const item = JSON.parse(line);
     if (item.result.type === "succeeded") results.set(item.custom_id, item.result.message);
-    else log(`[${label}] ${item.custom_id}: ${item.result.type}`, "err");
+    /* after a user Stop the unfinished requests come back "canceled" —
+       expected, so don't spam the log with them */
+    else if (!(item.result.type === "canceled" && stopRequested))
+      log(`[${label}] ${item.custom_id}: ${item.result.type}`, "err");
   }
   return results;
 }
@@ -705,7 +733,7 @@ async function runBatch(requests, label, meta) {
         if (!cancelSent) {
           cancelSent = true;
           try {
-            await apiFetch(`/messages/batches/${batch.id}/cancel`, {});
+            await apiFetch(`/messages/batches/${batch.id}/cancel`, {}, { ignoreStop: true });
             log(`[${label}] batch canceled — keeping results that already finished`, "err");
           } catch (ce) { log(`[${label}] cancel failed — ${errMsg(ce)}`, "err"); }
         }
@@ -1025,8 +1053,15 @@ async function translateNovel(sink, chapters, ctx = {}) {
   const pending = [];
   for (const ch of chapters) {
     if (doneSet.has(ch.filename)) continue;
-    const body = ch.body ?? await sink.read(ch.filename);
-    if (body) pending.push({ filename: ch.filename, body });
+    let body = ch.body ?? await sink.read(ch.filename);
+    if (!body) continue;
+    /* raw files saved by older app versions have no heading line — synthesize
+       one so every translated chapter starts with its heading */
+    if (!/^Ch[ưu]ơ?ng\s*\d+/i.test(body)) {
+      const n = chapterNum(ch.filename);
+      if (n != null) body = `Chương ${n}\n\n${body}`;
+    }
+    pending.push({ filename: ch.filename, body });
   }
 
   /* translate the folder title (via the Batch API, folded into the first
@@ -1326,6 +1361,7 @@ async function run(makeSink, root = null, only = null) {
     if (failed.length) log(`\n${failed.length} chapter(s) failed to download — click “Retry failed” to try just those again.`, "err");
   } catch (e) {
     setStatus(e.stopped ? "Stopped." : `Error: ${e.message}`);
+    if (!e.stopped) log(`ERROR — ${errMsg(e)}`, "err");
   } finally {
     running = false;
     wasStopped = stopRequested;
