@@ -73,7 +73,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.30";
+const VERSION = "1.31";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -99,7 +99,7 @@ $("translate").addEventListener("change", e => {
 $("apikey").addEventListener("change", e => localStorage.setItem("apikey", e.target.value.trim()));
 syncTrOpts();
 
-const NOVEL_URL_RE = /^https:\/\/truyenfull\.today(\/|$)/i;
+const NOVEL_URL_RE = /^https:\/\/truyenfull\.(today|live)(\/|$)/i;
 let running = false;
 let stopRequested = false;
 let aborter = null;
@@ -1102,7 +1102,7 @@ async function run(makeSink, root = null) {
   const novelUrl = $("url").value.trim();
   const concurrency = Math.max(1, Math.min(10, parseInt($("conc").value, 10) || 5));
   if (!NOVEL_URL_RE.test(novelUrl)) {
-    setStatus("Enter a novel URL starting with https://truyenfull.today");
+    setStatus("Enter a novel URL starting with https://truyenfull.today or https://truyenfull.live");
     return;
   }
   const translate = $("translate").checked;
@@ -1245,7 +1245,7 @@ $("btn-folder").addEventListener("click", async () => {
   /* the button is always enabled, so guard here: give clear feedback instead
      of making the user pick a folder for a run that will silently no-op */
   if (!NOVEL_URL_RE.test($("url").value.trim())) {
-    setStatus("Enter a novel URL starting with https://truyenfull.today");
+    setStatus("Enter a novel URL starting with https://truyenfull.today or https://truyenfull.live");
     return;
   }
   if (!window.showDirectoryPicker) {
