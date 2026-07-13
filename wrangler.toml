@@ -1,0 +1,6 @@
+# Cloudflare Worker config — lets Workers Builds (git-connected CI) deploy
+# worker.js on every push to main. The name must match the existing worker
+# so deploys keep the truyenfull.vtlinh87.workers.dev URL.
+name = "truyenfull"
+main = "worker.js"
+compatibility_date = "2026-07-01"
