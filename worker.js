@@ -98,13 +98,16 @@ export default {
 
     // Batched chapter fetch: fetch up to 50 URLs in one call (free-tier
     // subrequest limit), holding at most `concurrency` requests in flight
-    // against the site at a time so it doesn't get hammered.
-    //   POST <worker>/fetch-many  { "urls": [...], "concurrency": 5 }
+    // against the site at a time. Capped at 6 — Cloudflare only allows ~6
+    // simultaneous outgoing connections per invocation anyway, so a higher
+    // number would just be misleading; the front-end runs several of these
+    // calls in parallel to go wider.
+    //   POST <worker>/fetch-many  { "urls": [...], "concurrency": 6 }
     if (url.pathname === "/fetch-many" && request.method === "POST") {
       let urls = [], concurrency;
       try { ({ urls, concurrency } = await request.json()); } catch {}
       const list = (urls || []).slice(0, 50);
-      const conc = Math.max(1, Math.min(50, Number(concurrency) || 10));
+      const conc = Math.max(1, Math.min(6, Number(concurrency) || 6));
       const results = new Array(list.length);
       let next = 0;
       await Promise.all(Array.from({ length: Math.min(conc, list.length) }, async () => {
