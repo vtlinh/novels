@@ -113,30 +113,21 @@ export default {
     }
 
     // Batched chapter fetch: fetch up to 50 URLs in one call (free-tier
-    // subrequest limit), holding at most `concurrency` requests in flight
-    // against the site at a time. Capped at 6 — Cloudflare only allows ~6
-    // simultaneous outgoing connections per invocation anyway, so a higher
-    // number would just be misleading; the front-end runs several of these
-    // calls in parallel to go wider.
-    //   POST <worker>/fetch-many  { "urls": [...], "concurrency": 6 }
+    // subrequest limit). No throttling of our own — all fetches are fired at
+    // once and Cloudflare's per-invocation connection handling paces them
+    // (~6 simultaneous, the rest queue automatically). The front-end runs
+    // several of these calls in parallel to go wider.
+    //   POST <worker>/fetch-many  { "urls": [...] }
     if (url.pathname === "/fetch-many" && request.method === "POST") {
-      let urls = [], concurrency;
-      try { ({ urls, concurrency } = await request.json()); } catch {}
+      let urls = [];
+      try { ({ urls } = await request.json()); } catch {}
       const list = (urls || []).slice(0, 50);
-      const conc = Math.max(1, Math.min(6, Number(concurrency) || 6));
-      const results = new Array(list.length);
-      let next = 0;
-      await Promise.all(Array.from({ length: Math.min(conc, list.length) }, async () => {
-        for (;;) {
-          const i = next++;
-          if (i >= list.length) return;
-          const u = list[i];
-          try {
-            const r = await fetch(u, { headers: PAGE_HEADERS });
-            results[i] = { url: u, ok: r.ok, status: r.status, html: r.ok ? await stripHtml(r).text() : "" };
-          } catch (e) {
-            results[i] = { url: u, ok: false, status: 0, html: "", error: String(e) };
-          }
+      const results = await Promise.all(list.map(async u => {
+        try {
+          const r = await fetch(u, { headers: PAGE_HEADERS });
+          return { url: u, ok: r.ok, status: r.status, html: r.ok ? await stripHtml(r).text() : "" };
+        } catch (e) {
+          return { url: u, ok: false, status: 0, html: "", error: String(e) };
         }
       }));
       return withCors(Response.json({ results }));
