@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.41";
+const VERSION = "1.42";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -282,11 +282,11 @@ async function fetchDoc(url) {
 }
 
 /* Fetch many chapter URLs in a SINGLE Worker call (up to FETCH_BATCH, the
-   free-tier subrequest limit). `concurrency` caps how many requests the
-   Worker keeps in flight against the site at once, so we don't hammer
-   truyenfull. Returns Map(url -> html) for the ones that came back
-   non-empty. Retries the whole call on a network error. */
-async function fetchMany(urls, concurrency) {
+   free-tier subrequest limit). The Worker fires them all at once and
+   Cloudflare's own per-invocation connection handling paces them (~6
+   simultaneous, the rest queue). Returns Map(url -> html) for the ones that
+   came back non-empty. Retries the whole call on a network error. */
+async function fetchMany(urls) {
   let lastErr;
   for (let i = 0; i < MAX_RETRIES; i++) {
     throwIfStopped();
@@ -294,7 +294,7 @@ async function fetchMany(urls, concurrency) {
       const r = await fetch(`${PROXY}/fetch-many`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ urls, concurrency }),
+        body: JSON.stringify({ urls }),
         signal: aborter?.signal,
       });
       if (r.ok) {
@@ -311,24 +311,23 @@ async function fetchMany(urls, concurrency) {
 }
 
 /* Cloudflare allows only ~6 simultaneous outgoing connections per Worker
-   invocation, so a single /fetch-many call can never fetch more than ~6
-   chapters at once no matter what concurrency it's asked for. To honor
+   invocation (its own default; the Worker does no throttling), so a single
+   /fetch-many call can never fetch more than ~6 chapters at once. To honor
    higher slider values, run SEVERAL /fetch-many calls in parallel — each
    invocation gets its own connection budget and its own FETCH_BATCH-sized
-   group of chapters. ceil(slider/6) calls run at the full 6 connections
-   each, so the real parallelism is the slider rounded up to a multiple of 6
-   (e.g. 20 -> 4 calls x 6 = 24 chapters in parallel). `handle(group, conc)`
-   fetches and consumes one group; it must not throw. */
+   group of chapters. ceil(slider/6) calls run side by side, so the real
+   parallelism is the slider rounded up to a multiple of 6 (e.g. 20 -> 4
+   calls x ~6 = ~24 chapters in parallel). `handle(group)` fetches and
+   consumes one group; it must not throw. */
 const WORKER_CONNS = 6;
 async function fetchInPool(groups, concurrency, handle) {
   const calls = Math.max(1, Math.min(groups.length, Math.ceil(concurrency / WORKER_CONNS)));
-  const conc = Math.min(WORKER_CONNS, concurrency);
   let next = 0;
   await Promise.all(Array.from({ length: calls }, async () => {
     while (!stopRequested) {
       const g = next++;
       if (g >= groups.length) return;
-      await handle(groups[g], conc);
+      await handle(groups[g]);
     }
   }));
 }
@@ -348,7 +347,7 @@ function chapterLinks(doc, base, slug) {
   return out;
 }
 
-async function listAllChapters(novelUrl, concurrency) {
+async function listAllChapters(novelUrl) {
   const { base, slug } = SITE.normalize(novelUrl);
   const doc = await fetchDoc(base);
   const title = doc.querySelector('meta[property="og:title"]')?.content?.trim()
@@ -371,7 +370,7 @@ async function listAllChapters(novelUrl, concurrency) {
     const batch = [];
     for (let p = fetched + 1; p <= last && batch.length < FETCH_BATCH; p++) batch.push(p);
     setStatus(`Listing chapters: pages ${batch[0]}-${batch[batch.length - 1]} of ${last}…`);
-    const htmls = await fetchMany(batch.map(pageUrl), concurrency);
+    const htmls = await fetchMany(batch.map(pageUrl));
     for (const p of batch) {
       const html = htmls.get(pageUrl(p));
       const d = html ? new DOMParser().parseFromString(html, "text/html")
@@ -1324,7 +1323,7 @@ async function run(makeSink, root = null, only = null) {
       log(`Retrying ${chapters.length} failed chapter(s)… (v${VERSION})`);
     } else {
       setStatus("Listing chapters…");
-      ({ title, chapters } = await listAllChapters(novelUrl, concurrency));
+      ({ title, chapters } = await listAllChapters(novelUrl));
       if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
       runTitle = title;
       log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency} (v${VERSION})`);
@@ -1387,11 +1386,11 @@ async function run(makeSink, root = null, only = null) {
        batch so it's visible in the log whether batches really run in
        parallel (network-bound) or the time is going to saving files */
     let inFlight = 0;
-    const fetchGroup = retry => async (group, conc) => {
+    const fetchGroup = retry => async group => {
       const t0 = performance.now();
       let htmls;
       inFlight++;
-      try { htmls = await fetchMany(group.map(c => c.url), conc); }
+      try { htmls = await fetchMany(group.map(c => c.url)); }
       catch (e) {
         if (stopRequested && !retry) return;
         for (const ch of group) {
