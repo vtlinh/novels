@@ -104,7 +104,7 @@ export default {
       let urls = [], concurrency;
       try { ({ urls, concurrency } = await request.json()); } catch {}
       const list = (urls || []).slice(0, 50);
-      const conc = Math.max(1, Math.min(5, Number(concurrency) || 5));
+      const conc = Math.max(1, Math.min(50, Number(concurrency) || 10));
       const results = new Array(list.length);
       let next = 0;
       await Promise.all(Array.from({ length: Math.min(conc, list.length) }, async () => {
