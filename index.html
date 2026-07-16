@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.40";
+const VERSION = "1.41";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1351,7 +1351,10 @@ async function run(makeSink, root = null, only = null) {
       if (!html) throw new Error("fetch failed");
       const { filename, body } = parseChapter(new DOMParser().parseFromString(html, "text/html"), ch);
       collected.push({ filename, body });
-      if (await sink.exists(filename)) { skipped++; log(`skip   ${filename}`); return; }
+      /* the pre-run directory listing (absorb only runs after it's built) —
+         an in-memory check instead of a per-chapter filesystem round-trip
+         through the write queue */
+      if (existing.has(filename)) { skipped++; log(`skip   ${filename}`); return; }
       try { await sink.write(filename, body); saved++; log(`saved  ${filename}${retry ? " (retry)" : ""}`, "ok"); }
       catch (e) {
         pendingSaves.push({ url: ch.url, filename, body });
@@ -1380,8 +1383,14 @@ async function run(makeSink, root = null, only = null) {
        invocation is limited to ~6 connections). `retry` only changes log
        flavor and skips the progress-bar bump (retried chapters were already
        counted). Never throws — failures land in `failed`. */
+    /* count of /fetch-many calls currently on the wire — logged after each
+       batch so it's visible in the log whether batches really run in
+       parallel (network-bound) or the time is going to saving files */
+    let inFlight = 0;
     const fetchGroup = retry => async (group, conc) => {
+      const t0 = performance.now();
       let htmls;
+      inFlight++;
       try { htmls = await fetchMany(group.map(c => c.url), conc); }
       catch (e) {
         if (stopRequested && !retry) return;
@@ -1392,7 +1401,9 @@ async function run(makeSink, root = null, only = null) {
         }
         status();
         return;
-      }
+      } finally { inFlight--; }
+      log(`fetched ${group.length} page(s) in ${((performance.now() - t0) / 1000).toFixed(1)}s`
+        + (inFlight ? ` — ${inFlight} more batch${inFlight === 1 ? "" : "es"} in flight` : ""));
       for (const ch of group) {
         try { await absorb(ch, htmls.get(ch.url), retry); }
         catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}${retry ? " (retry)" : ""}`, "err"); }

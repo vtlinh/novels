@@ -48,6 +48,22 @@ const POLL_WINDOW_MS = 90000;
 const POLL_INTERVAL_MS = 10000;
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 
+// The front-end only ever reads text content, meta/title, and links out of
+// the fetched pages — scripts, stylesheets, iframes, svg, and HTML comments
+// (usually well over half the bytes of a chapter page) are dead weight, and
+// the client's extractContent() removes script/style itself anyway. Strip
+// them here so every page crosses the Worker->browser wire much smaller.
+// Transport compression (gzip/brotli) is already automatic on both legs;
+// this shrinks the actual content before it's compressed. Only applied to
+// HTML responses — anything else passes through untouched.
+const stripHtml = resp => {
+  if (!(resp.headers.get("content-type") || "").includes("html")) return resp;
+  return new HTMLRewriter()
+    .on("script, style, link, noscript, iframe, svg", { element(e) { e.remove(); } })
+    .onDocument({ comments(c) { c.remove(); } })
+    .transform(resp);
+};
+
 export default {
   async fetch(request) {
     const origin = request.headers.get("Origin") || "";
@@ -117,7 +133,7 @@ export default {
           const u = list[i];
           try {
             const r = await fetch(u, { headers: PAGE_HEADERS });
-            results[i] = { url: u, ok: r.ok, status: r.status, html: r.ok ? await r.text() : "" };
+            results[i] = { url: u, ok: r.ok, status: r.status, html: r.ok ? await stripHtml(r).text() : "" };
           } catch (e) {
             results[i] = { url: u, ok: false, status: 0, html: "", error: String(e) };
           }
@@ -146,7 +162,7 @@ export default {
     // 1. Chapter fetching
     const targetUrl = url.searchParams.get("url");
     if (targetUrl) {
-      return withCors(await fetch(targetUrl, { headers: PAGE_HEADERS }));
+      return withCors(stripHtml(await fetch(targetUrl, { headers: PAGE_HEADERS })));
     }
 
     return new Response(
