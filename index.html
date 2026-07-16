@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.38";
+const VERSION = "1.39";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -308,6 +308,29 @@ async function fetchMany(urls, concurrency) {
     await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
   }
   throw lastErr;
+}
+
+/* Cloudflare allows only ~6 simultaneous outgoing connections per Worker
+   invocation, so a single /fetch-many call can never fetch more than ~6
+   chapters at once no matter what concurrency it's asked for. To honor
+   higher slider values, run SEVERAL /fetch-many calls in parallel — each
+   invocation gets its own connection budget. The slider's value stays the
+   TOTAL in flight against the site: it's split across ceil(total/6) calls
+   (e.g. 50 -> 9 calls of 5-6 each). `handle(group, conc)` fetches and
+   consumes one group; it must not throw. */
+const WORKER_CONNS = 6;
+async function fetchInPool(groups, concurrency, handle) {
+  const calls = Math.max(1, Math.min(groups.length, Math.ceil(concurrency / WORKER_CONNS)));
+  const base = Math.floor(concurrency / calls), extra = concurrency % calls;
+  let next = 0;
+  await Promise.all(Array.from({ length: calls }, async (_, w) => {
+    const conc = base + (w < extra ? 1 : 0);
+    while (!stopRequested) {
+      const g = next++;
+      if (g >= groups.length) return;
+      await handle(groups[g], conc);
+    }
+  }));
 }
 
 function chapterLinks(doc, base, slug) {
@@ -1352,28 +1375,43 @@ async function run(makeSink, root = null, only = null) {
     if (skipped) log(`skip   ${skipped} already-downloaded chapter(s)`);
     status();
 
-    /* fetch the rest via one Worker call per group — a small first group so
-       files start appearing right away, then FETCH_BATCH at a time */
-    let i = 0;
-    while (i < toFetch.length && !stopRequested) {
-      const group = toFetch.slice(i, i + (i === 0 ? FIRST_FETCH_BATCH : FETCH_BATCH));
-      const from = i + 1;
-      i += group.length;
-      setStatus(`Fetching chapters ${from}-${i} of ${toFetch.length}…`);
+    /* Fetch one group per /fetch-many call, and run several calls in parallel
+       via fetchInPool so high slider values are honored (one Worker
+       invocation is limited to ~6 connections). `retry` only changes log
+       flavor and skips the progress-bar bump (retried chapters were already
+       counted). Never throws — failures land in `failed`. */
+    const fetchGroup = retry => async (group, conc) => {
       let htmls;
-      try { htmls = await fetchMany(group.map(c => c.url), concurrency); }
+      try { htmls = await fetchMany(group.map(c => c.url), conc); }
       catch (e) {
-        if (stopRequested) break;
-        for (const ch of group) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); bar.value = ++done; }
+        if (stopRequested && !retry) return;
+        for (const ch of group) {
+          failed.push(ch);
+          log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}${retry ? " (retry)" : ""}`, "err");
+          if (!retry) bar.value = ++done;
+        }
         status();
-        continue;
+        return;
       }
       for (const ch of group) {
-        try { await absorb(ch, htmls.get(ch.url)); }
-        catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); }
-        bar.value = ++done;
+        try { await absorb(ch, htmls.get(ch.url), retry); }
+        catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}${retry ? " (retry)" : ""}`, "err"); }
+        if (!retry) bar.value = ++done;
         status();
       }
+    };
+
+    /* group the chapters — a small first group so files start appearing right
+       away, then FETCH_BATCH at a time */
+    const groups = [];
+    for (let i = 0; i < toFetch.length;) {
+      const group = toFetch.slice(i, i + (i === 0 ? FIRST_FETCH_BATCH : FETCH_BATCH));
+      groups.push(group);
+      i += group.length;
+    }
+    if (groups.length) {
+      setStatus(`Fetching ${toFetch.length} chapter(s)…`);
+      await fetchInPool(groups, concurrency, fetchGroup(false));
     }
 
     /* End-of-run retry: once every other chapter is downloaded, take all the
@@ -1385,22 +1423,10 @@ async function run(makeSink, root = null, only = null) {
     if (failed.length && !stopRequested) {
       const toRetry = failed.splice(0);
       log(`\nRetrying ${toRetry.length} failed chapter(s)…`);
-      for (let j = 0; j < toRetry.length && !stopRequested; j += FETCH_BATCH) {
-        const group = toRetry.slice(j, j + FETCH_BATCH);
-        setStatus(`Retrying failed downloads… ${Math.min(j + group.length, toRetry.length)}/${toRetry.length}`);
-        let htmls;
-        try { htmls = await fetchMany(group.map(c => c.url), concurrency); }
-        catch (e) {
-          for (const ch of group) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}`, "err"); }
-          status();
-          continue;
-        }
-        for (const ch of group) {
-          try { await absorb(ch, htmls.get(ch.url), true); }
-          catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)} (retry)`, "err"); }
-        }
-        status();
-      }
+      setStatus(`Retrying ${toRetry.length} failed download(s)…`);
+      const rgroups = [];
+      for (let j = 0; j < toRetry.length; j += FETCH_BATCH) rgroups.push(toRetry.slice(j, j + FETCH_BATCH));
+      await fetchInPool(rgroups, concurrency, fetchGroup(true));
     }
 
     /* chapters that downloaded but would not save: retry one by one now
