@@ -47,11 +47,11 @@
 <body>
 <main>
   <h1>Novel Downloader</h1>
-  <p class="sub">Downloads every chapter of a truyenfull novel as text files. <span id="ver"></span></p>
+  <p class="sub">Downloads every chapter of a truyenfull or novelfull novel as text files. <span id="ver"></span></p>
 
   <div class="card">
     <label for="url">Novel URL</label>
-    <input id="url" type="url" placeholder="https://truyenfull.today/ten-truyen/" spellcheck="false">
+    <input id="url" type="url" placeholder="https://novelfull.com/god-of-crime.html" spellcheck="false">
     <label for="conc">Simultaneous downloads: <span id="conc-val">5</span></label>
     <input id="conc" type="range" min="1" max="5" value="5">
     <label class="check"><input type="checkbox" id="translate"> Translate to English (Claude)</label>
@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.36";
+const VERSION = "1.37";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -103,7 +103,71 @@ $("translate").addEventListener("change", e => {
 $("apikey").addEventListener("change", e => localStorage.setItem("apikey", e.target.value.trim()));
 syncTrOpts();
 
-const NOVEL_URL_RE = /^https:\/\/truyenfull\.(today|live)(\/|$)/i;
+/* ---------------- site adapters ----------------
+   Each supported site knows how to turn a novel URL into a listing base +
+   slug, page through its chapter listing, recognise chapter links, and pull a
+   chapter number out of a chapter URL. Everything downstream (fetching,
+   extraction, saving) is shared. `headingWord` is the language of the chapter
+   heading the site uses, so saved files read naturally ("Chương 5" vs
+   "Chapter 5"). */
+const SITES = [
+  {
+    name: "truyenfull",
+    urlRe: /^https:\/\/truyenfull\.(today|live)(\/|$)/i,
+    headingWord: "Chương",
+    /* /ten-truyen/ -> base "…/ten-truyen/", slug "ten-truyen" */
+    normalize(novelUrl) {
+      const base = novelUrl.replace(/\/+$/, "") + "/";
+      return { base, slug: new URL(base).pathname.replace(/^\/|\/$/g, "").split("/")[0] };
+    },
+    listPageUrl(base, slug, p) { return `${base}trang-${p}/`; },
+    isChapterPath(path, slug) { return path.includes(`/${slug}/`) && /chuong-\d+/.test(path); },
+    maxPage(doc, slug) {
+      let max = 1;
+      const re = new RegExp(`/${slug}/trang-(\\d+)`);
+      for (const a of doc.querySelectorAll("a[href]")) {
+        const m = (a.getAttribute("href") || "").match(re);
+        if (m) max = Math.max(max, parseInt(m[1], 10));
+      }
+      return max;
+    },
+    chapterNumFromUrl(url) {
+      const m = url.match(/chuong-(\d+)/g);
+      return m ? parseInt(m[m.length - 1].slice(7), 10) : null;
+    },
+  },
+  {
+    name: "novelfull",
+    urlRe: /^https:\/\/novelfull\.com\//i,
+    headingWord: "Chapter",
+    /* /god-of-crime.html -> base "…/god-of-crime.html", slug "god-of-crime".
+       Listing pages are the same URL with a ?page=N query string. */
+    normalize(novelUrl) {
+      const u = new URL(novelUrl);
+      const slug = u.pathname.replace(/^\/+/, "").replace(/\.html?$/i, "").split("/")[0];
+      return { base: `${u.origin}/${slug}.html`, slug };
+    },
+    listPageUrl(base, slug, p) { return `${base}?page=${p}`; },
+    isChapterPath(path, slug) { return path.includes(`/${slug}/`) && /chapter-\d+/i.test(path); },
+    /* Yii2 LinkPager: every page link carries a 1-based ?page=N, and the
+       "Last »" link's href holds the true final page number. */
+    maxPage(doc) {
+      let max = 1;
+      for (const a of doc.querySelectorAll("a[href]")) {
+        const m = (a.getAttribute("href") || "").match(/[?&]page=(\d+)/);
+        if (m) max = Math.max(max, parseInt(m[1], 10));
+      }
+      return max;
+    },
+    chapterNumFromUrl(url) {
+      const m = url.match(/chapter-(\d+)/ig);
+      return m ? parseInt(m[m.length - 1].replace(/chapter-/i, ""), 10) : null;
+    },
+  },
+];
+const siteFor = url => SITES.find(s => s.urlRe.test((url || "").trim()));
+let SITE = null;   // the adapter for the URL of the current/most recent run
+
 let running = false;
 let stopRequested = false;
 let aborter = null;
@@ -147,7 +211,7 @@ if (!window.showDirectoryPicker)
   $("btn-folder").title = "Folder saving needs Chrome or Edge; use ZIP instead.";
 
 function updateButtons() {
-  const ok = NOVEL_URL_RE.test($("url").value.trim());
+  const ok = !!siteFor($("url").value);
   $("btn-folder").disabled = false;   // always enabled
   $("btn-zip").disabled = running || !ok;
   $("btn-stop").style.display = running ? "inline-block" : "none";
@@ -246,8 +310,6 @@ async function fetchMany(urls, concurrency) {
   throw lastErr;
 }
 
-const slugOf = url => new URL(url).pathname.replace(/^\/|\/$/g, "").split("/")[0];
-
 function chapterLinks(doc, base, slug) {
   const seen = new Set(), out = [];
   for (const a of doc.querySelectorAll("a[href]")) {
@@ -255,7 +317,7 @@ function chapterLinks(doc, base, slug) {
     try { href = new URL(a.getAttribute("href"), base).href.split("#")[0]; }
     catch { continue; }
     const path = new URL(href).pathname;
-    if (path.includes(`/${slug}/`) && /chuong-\d+/.test(path) && !seen.has(href)) {
+    if (SITE.isChapterPath(path, slug) && !seen.has(href)) {
       seen.add(href);
       out.push({ url: href, text: a.textContent.trim() });
     }
@@ -263,28 +325,19 @@ function chapterLinks(doc, base, slug) {
   return out;
 }
 
-function maxListingPage(doc, slug) {
-  let max = 1;
-  for (const a of doc.querySelectorAll("a[href]")) {
-    const m = (a.getAttribute("href") || "").match(new RegExp(`/${slug}/trang-(\\d+)`));
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return max;
-}
-
 async function listAllChapters(novelUrl, concurrency) {
-  const base = novelUrl.replace(/\/+$/, "") + "/";
-  const slug = slugOf(base);
+  const { base, slug } = SITE.normalize(novelUrl);
   const doc = await fetchDoc(base);
   const title = doc.querySelector('meta[property="og:title"]')?.content?.trim()
+             || doc.querySelector('h3.title[itemprop="name"], h3.title')?.textContent.trim()
              || doc.querySelector("h1")?.textContent.trim() || slug;
 
   const seen = new Set(), chapters = [];
   const add = items => { for (const c of items) if (!seen.has(c.url)) { seen.add(c.url); chapters.push(c); } };
-  const pageUrl = p => `${base}trang-${p}/`;
+  const pageUrl = p => SITE.listPageUrl(base, slug, p);
 
   add(chapterLinks(doc, base, slug));
-  let last = maxListingPage(doc, slug);
+  let last = SITE.maxPage(doc, slug);
 
   /* fetch listing pages in batches via one Worker call each, instead of one
      round trip per page — this is what lets the download start quickly on
@@ -301,17 +354,17 @@ async function listAllChapters(novelUrl, concurrency) {
       const d = html ? new DOMParser().parseFromString(html, "text/html")
                      : await fetchDoc(pageUrl(p));
       add(chapterLinks(d, base, slug));
-      last = Math.max(last, maxListingPage(d, slug));
+      last = Math.max(last, SITE.maxPage(d, slug));
     }
     fetched = batch[batch.length - 1];
   }
 
-  for (const ch of chapters) ch.num = chapterUrlNum(ch) ?? parseHeading(ch.text).num;
+  for (const ch of chapters) ch.num = SITE.chapterNumFromUrl(ch.url) ?? parseHeading(ch.text).num;
   chapters.sort((a, b) => (a.num ?? 1e9) - (b.num ?? 1e9));
 
   /* assign filenames once, here: different chapters that map to the same
-     number (e.g. /chuong-12-1/ and /chuong-12-2/ both -> 12) get a
-     deterministic suffix so one doesn't overwrite or shadow the other */
+     number (e.g. two "chapter-12" URLs both -> 12) get a deterministic suffix
+     so one doesn't overwrite or shadow the other */
   const counts = new Map();
   for (const ch of chapters) {
     if (ch.num == null) { ch.filename = null; continue; }
@@ -319,20 +372,24 @@ async function listAllChapters(novelUrl, concurrency) {
     counts.set(ch.num, c);
     ch.filename = `Chapter ${ch.num}${c > 1 ? `-${c}` : ""}.txt`;
   }
-  return { title, chapters };
+  return { title, chapters, slug };
 }
 
 /* ---------------- chapter extraction ---------------- */
 
 const CONTENT_SELECTORS = ["#chapter-c", ".chapter-c", "#chapter-content",
   ".chapter-content", 'div[itemprop="articleBody"]', ".box-chap"];
-const AD_RE = /(CLICK\s*ADS|quảng cáo|mở khóa|truyenfull|đọc truyện online|ủng hộ dịch giả|Vui lòng|Mời bạn)/i;
+const AD_RE = /(CLICK\s*ADS|quảng cáo|mở khóa|truyenfull|đọc truyện online|ủng hộ dịch giả|Vui lòng|Mời bạn|novelfull|find any errors|broken links|non-standard content|report chapter|please report)/i;
 
+/* Parse a chapter heading in either supported language:
+   "Chương 5: Tiêu Viêm" (truyenfull) or "Chapter 5: Prologue" (novelfull). */
+const HEADING_RE = /(?:Ch[ưu]ơ?ng|Chapter)\s*(\d+)\s*[:\-–]?\s*(.*)/i;
+const HEADING_ONLY_RE = /^(?:Ch[ưu]ơ?ng|Chapter)\s*\d+$/i;
 function parseHeading(text) {
-  const m = text.match(/Ch[ưu]ơ?ng\s*(\d+)\s*[:\-–]?\s*(.*)/i);
+  const m = text.match(HEADING_RE);
   if (!m) return { num: null, title: text.trim() };
   let title = m[2].trim();
-  if (/^Ch[ưu]ơ?ng\s*\d+$/i.test(title)) title = "";
+  if (HEADING_ONLY_RE.test(title)) title = "";
   return { num: parseInt(m[1], 10), title };
 }
 
@@ -371,20 +428,13 @@ const sanitize = name => name
   .replace(/[^\x20-\x7E]/g, " ")
   .replace(/\s+/g, " ").trim().replace(/[. ]+$/, "").slice(0, 180);
 
-/* Files are named just "Chapter N" (with a -2/-3 suffix on duplicate numbers;
-   assigned in listAllChapters) — the chapter's name/title lives inside the
-   body (first line) instead, so it gets translated along with the text. */
-const chapterUrlNum = ch => {
-  const m = ch.url.match(/chuong-(\d+)/g);
-  return m ? parseInt(m[m.length - 1].slice(7), 10) : null;
-};
-
 /* parse an already-fetched chapter document into { filename, body }. The
-   Vietnamese chapter heading ("Chương N: <name>") is prepended to the body so
-   the chapter name is translated together with the chapter text. */
+   chapter heading ("Chương N: <name>" / "Chapter N: <name>") is prepended to
+   the body so — for Vietnamese sources — the name is translated together with
+   the chapter text, and every saved file opens with its heading. */
 function parseChapter(doc, ch) {
   if (!ch.filename) throw new Error("cannot determine chapter number");
-  const headEl = doc.querySelector("a.chapter-title, h2 a, .chapter-title");
+  const headEl = doc.querySelector("a.chapter-title, h2 a, h3 a, .chapter-title, .chapter-text");
   const head = parseHeading(headEl ? headEl.textContent.trim() : ch.text);
   let title = head.title || parseHeading(ch.text).title;
   let content = extractContent(doc);
@@ -395,7 +445,7 @@ function parseChapter(doc, ch) {
      same-number lines so narrative text is never touched. */
   const nl = content.indexOf("\n");
   const firstLine = (nl === -1 ? content : content.slice(0, nl)).trim();
-  if (firstLine.length < 120 && /^Ch[ưu]ơ?ng\s*\d+/i.test(firstLine)) {
+  if (firstLine.length < 120 && /^(?:Ch[ưu]ơ?ng|Chapter)\s*\d+/i.test(firstLine)) {
     const fh = parseHeading(firstLine);
     if (fh.num === ch.num) {
       if (!title && fh.title) title = fh.title;
@@ -404,7 +454,8 @@ function parseChapter(doc, ch) {
   }
 
   if (!content.trim()) throw new Error("empty content");
-  const heading = title ? `Chương ${ch.num}: ${title}` : `Chương ${ch.num}`;
+  const word = SITE?.headingWord || "Chương";
+  const heading = title ? `${word} ${ch.num}: ${title}` : `${word} ${ch.num}`;
   return { filename: ch.filename, body: `${heading}\n\n${content}` };
 }
 
@@ -1057,9 +1108,9 @@ async function translateNovel(sink, chapters, ctx = {}) {
     if (!body) continue;
     /* raw files saved by older app versions have no heading line — synthesize
        one so every translated chapter starts with its heading */
-    if (!/^Ch[ưu]ơ?ng\s*\d+/i.test(body)) {
+    if (!/^(?:Ch[ưu]ơ?ng|Chapter)\s*\d+/i.test(body)) {
       const n = chapterNum(ch.filename);
-      if (n != null) body = `Chương ${n}\n\n${body}`;
+      if (n != null) body = `${SITE?.headingWord || "Chương"} ${n}\n\n${body}`;
     }
     pending.push({ filename: ch.filename, body });
   }
@@ -1213,10 +1264,12 @@ async function run(makeSink, root = null, only = null) {
   if (running) return;
   const novelUrl = $("url").value.trim();
   const concurrency = Math.max(1, Math.min(5, parseInt($("conc").value, 10) || 5));
-  if (!NOVEL_URL_RE.test(novelUrl)) {
-    setStatus("Enter a novel URL starting with https://truyenfull.today or https://truyenfull.live");
+  const site = siteFor(novelUrl);
+  if (!site) {
+    setStatus("Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com");
     return;
   }
+  SITE = site;
   const translate = $("translate").checked;
   if (translate && !$("apikey").value.trim()) {
     setStatus("Enter your Anthropic API key to translate.");
@@ -1253,7 +1306,7 @@ async function run(makeSink, root = null, only = null) {
       runTitle = title;
       log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency} (v${VERSION})`);
     }
-    const slug = slugOf(novelUrl.replace(/\/+$/, "") + "/");
+    const slug = SITE.normalize(novelUrl).slug;
     const folderName = await resolveFolderName(root, slug, title);
     log(`Saving to: ${folderName}/`);
 
@@ -1412,8 +1465,8 @@ async function run(makeSink, root = null, only = null) {
 $("btn-folder").addEventListener("click", async () => {
   /* the button is always enabled, so guard here: give clear feedback instead
      of making the user pick a folder for a run that will silently no-op */
-  if (!NOVEL_URL_RE.test($("url").value.trim())) {
-    setStatus("Enter a novel URL starting with https://truyenfull.today or https://truyenfull.live");
+  if (!siteFor($("url").value)) {
+    setStatus("Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com");
     return;
   }
   if (!window.showDirectoryPicker) {
