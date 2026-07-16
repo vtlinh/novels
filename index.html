@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.39";
+const VERSION = "1.40";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -314,17 +314,17 @@ async function fetchMany(urls, concurrency) {
    invocation, so a single /fetch-many call can never fetch more than ~6
    chapters at once no matter what concurrency it's asked for. To honor
    higher slider values, run SEVERAL /fetch-many calls in parallel — each
-   invocation gets its own connection budget. The slider's value stays the
-   TOTAL in flight against the site: it's split across ceil(total/6) calls
-   (e.g. 50 -> 9 calls of 5-6 each). `handle(group, conc)` fetches and
-   consumes one group; it must not throw. */
+   invocation gets its own connection budget and its own FETCH_BATCH-sized
+   group of chapters. ceil(slider/6) calls run at the full 6 connections
+   each, so the real parallelism is the slider rounded up to a multiple of 6
+   (e.g. 20 -> 4 calls x 6 = 24 chapters in parallel). `handle(group, conc)`
+   fetches and consumes one group; it must not throw. */
 const WORKER_CONNS = 6;
 async function fetchInPool(groups, concurrency, handle) {
   const calls = Math.max(1, Math.min(groups.length, Math.ceil(concurrency / WORKER_CONNS)));
-  const base = Math.floor(concurrency / calls), extra = concurrency % calls;
+  const conc = Math.min(WORKER_CONNS, concurrency);
   let next = 0;
-  await Promise.all(Array.from({ length: calls }, async (_, w) => {
-    const conc = base + (w < extra ? 1 : 0);
+  await Promise.all(Array.from({ length: calls }, async () => {
     while (!stopRequested) {
       const g = next++;
       if (g >= groups.length) return;
