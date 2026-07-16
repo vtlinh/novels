@@ -52,8 +52,8 @@
   <div class="card">
     <label for="url">Novel URL</label>
     <input id="url" type="url" placeholder="https://novelfull.com/god-of-crime.html" spellcheck="false">
-    <label for="conc">Simultaneous downloads: <span id="conc-val">5</span></label>
-    <input id="conc" type="range" min="1" max="5" value="5">
+    <label for="conc">Simultaneous downloads: <span id="conc-val">10</span></label>
+    <input id="conc" type="range" min="1" max="50" value="10">
     <label class="check"><input type="checkbox" id="translate"> Translate to English (Claude)</label>
     <div id="tr-opts">
       <label for="apikey">Anthropic API key (kept in this browser only)</label>
@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.37";
+const VERSION = "1.38";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -87,7 +87,7 @@ const PROXY = "https://truyenfull.vtlinh87.workers.dev";
 /* remember settings between visits */
 $("url").value = localStorage.getItem("url") || "";
 $("url").addEventListener("input", e => localStorage.setItem("url", e.target.value.trim()));
-$("conc").value = localStorage.getItem("conc") || "5";
+$("conc").value = localStorage.getItem("conc") || "10";
 $("conc-val").textContent = $("conc").value;
 $("conc").addEventListener("input", e => {
   $("conc-val").textContent = e.target.value;
@@ -1263,7 +1263,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
 async function run(makeSink, root = null, only = null) {
   if (running) return;
   const novelUrl = $("url").value.trim();
-  const concurrency = Math.max(1, Math.min(5, parseInt($("conc").value, 10) || 5));
+  const concurrency = Math.max(1, Math.min(50, parseInt($("conc").value, 10) || 10));
   const site = siteFor(novelUrl);
   if (!site) {
     setStatus("Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com");
