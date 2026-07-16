@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.43";
+const VERSION = "1.44";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -487,18 +487,15 @@ function folderSink(rootHandle, folderName) {
   let dir;
   const openDir = () => rootHandle.getDirectoryHandle(folderName, { create: true });
 
-  /* Chromium invalidates cached directory handles when the folder changes on
-     disk — including files being created in it by our own parallel workers —
-     throwing "state had changed since it was read from disk". Funnel every
-     file-system operation through one queue so creations never overlap, and
-     refresh the handle + retry if the folder still changes under us
-     (cloud sync, antivirus). */
-  let tail = Promise.resolve();
-  const locked = fn => {
-    const p = tail.then(fn);
-    tail = p.then(() => {}, () => {});
-    return p;
-  };
+  /* Writes run in PARALLEL (each pool worker writes its own chapters as they
+     arrive). Historically every operation was funneled through one queue
+     because Chromium threw "state had changed since it was read from disk" —
+     but that turned out to be Unicode normalization disagreeing about
+     non-ASCII filenames, fixed for good by sanitize() folding every name to
+     plain ASCII. On Android especially, each write costs a fixed ~50-150ms of
+     storage-framework overhead, so serializing them dominated whole runs.
+     The per-write retry below (with handle refresh) and the pendingSaves ->
+     rescue-ZIP path in run() remain as the safety net. */
 
   /* when the folder rejects several writes in a row the blocker is
      environmental (Controlled Folder Access, antivirus) — stop burning
@@ -518,62 +515,53 @@ function folderSink(rootHandle, folderName) {
     async init() { dir = await openDir(); },
     /* all non-empty filenames in one directory listing — vastly faster than
        per-file exists() when checking thousands of chapters on a resume */
-    list(sub) {
-      return locked(async () => {
-        const out = new Set();
+    async list(sub) {
+      const out = new Set();
+      try {
+        const d = await dirFor(sub);
+        const entries = [];
+        for await (const [n, h] of d.entries()) if (h.kind === "file") entries.push([n, h]);
+        await Promise.all(entries.map(async ([n, h]) => {
+          try { if ((await h.getFile()).size > 0) out.add(n); } catch {}
+        }));
+      } catch {}
+      return out;
+    },
+    async exists(name, sub) {
+      try { return (await (await (await dirFor(sub)).getFileHandle(name)).getFile()).size > 0; }
+      catch { return false; }
+    },
+    async read(name, sub) {
+      try { return await (await (await (await dirFor(sub)).getFileHandle(name)).getFile()).text(); }
+      catch { return null; }
+    },
+    async write(name, text, sub) {
+      let lastErr;
+      const attempts = consecFails >= 3 ? 1 : MAX_RETRIES;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        let w;
         try {
-          const d = await dirFor(sub);
-          const entries = [];
-          for await (const [n, h] of d.entries()) if (h.kind === "file") entries.push([n, h]);
-          await Promise.all(entries.map(async ([n, h]) => {
-            try { if ((await h.getFile()).size > 0) out.add(n); } catch {}
-          }));
-        } catch {}
-        return out;
-      });
-    },
-    exists(name, sub) {
-      return locked(async () => {
-        try { return (await (await (await dirFor(sub)).getFileHandle(name)).getFile()).size > 0; }
-        catch { return false; }
-      });
-    },
-    read(name, sub) {
-      return locked(async () => {
-        try { return await (await (await (await dirFor(sub)).getFileHandle(name)).getFile()).text(); }
-        catch { return null; }
-      });
-    },
-    write(name, text, sub) {
-      return locked(async () => {
-        let lastErr;
-        const attempts = consecFails >= 3 ? 1 : MAX_RETRIES;
-        for (let attempt = 0; attempt < attempts; attempt++) {
-          let w;
-          try {
-            if (attempt > 0) {
-              try { dir = await openDir(); subdirs.clear(); } catch {}
-              /* a half-written or externally touched file can wedge every
-                 rewrite attempt — drop it and recreate from scratch */
-              if (attempt > 1) { try { await (await dirFor(sub)).removeEntry(name); } catch {} }
-            }
-            w = await (await (await dirFor(sub)).getFileHandle(name, { create: true })).createWritable();
-            await w.write(text);
-            await w.close();
-            consecFails = 0;
-            return;
-          } catch (e) {
-            lastErr = e;
-            /* never leave a failed stream dangling: its open swap file keeps
-               the handle in the stale "state changed" condition and can wedge
-               every subsequent attempt on the same file */
-            if (w) { try { await w.abort(); } catch {} }
-            await new Promise(res => setTimeout(res, 500 * 2 ** attempt));
+          if (attempt > 0) {
+            try { dir = await openDir(); subdirs.clear(); } catch {}
+            /* a half-written or externally touched file can wedge every
+               rewrite attempt — drop it and recreate from scratch */
+            if (attempt > 1) { try { await (await dirFor(sub)).removeEntry(name); } catch {} }
           }
+          w = await (await (await dirFor(sub)).getFileHandle(name, { create: true })).createWritable();
+          await w.write(text);
+          await w.close();
+          consecFails = 0;
+          return;
+        } catch (e) {
+          lastErr = e;
+          /* never leave a failed stream dangling: its open swap file can
+             wedge every subsequent attempt on the same file */
+          if (w) { try { await w.abort(); } catch {} }
+          await new Promise(res => setTimeout(res, 500 * 2 ** attempt));
         }
-        consecFails++;
-        throw lastErr;
-      });
+      }
+      consecFails++;
+      throw lastErr;
     },
     async finish() {},
   };
@@ -1350,8 +1338,7 @@ async function run(makeSink, root = null, only = null) {
       const { filename, body } = parseChapter(new DOMParser().parseFromString(html, "text/html"), ch);
       collected.push({ filename, body });
       /* the pre-run directory listing (absorb only runs after it's built) —
-         an in-memory check instead of a per-chapter filesystem round-trip
-         through the write queue */
+         an in-memory check instead of a per-chapter filesystem round-trip */
       if (existing.has(filename)) { skipped++; log(`skip   ${filename}`); return; }
       try { await sink.write(filename, body); saved++; log(`saved  ${filename}${retry ? " (retry)" : ""}`, "ok"); }
       catch (e) {
