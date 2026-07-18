@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#111418">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Novel Downloader</title>
 <style>
   :root { --bg:#111418; --card:#1b2026; --fg:#e8eaed; --muted:#9aa0a6;
@@ -60,6 +64,7 @@
       <input id="apikey" type="password" placeholder="sk-ant-..." spellcheck="false">
     </div>
     <p class="hint">For the @Voice app, use the <code>/storage/emulated/0/Android/data/com.hyperionics.avar/files</code> folder.</p>
+    <p class="hint" id="saved-folder" style="display:none">Saved folder: <b id="saved-folder-name"></b> — <a href="#" id="saved-folder-clear" style="color:var(--accent)">change</a></p>
     <button id="btn-folder">Download to folder…</button>
     <button id="btn-zip">Download as ZIP</button>
     <button id="btn-stop">Stop</button>
@@ -77,7 +82,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.49";
+const VERSION = "1.50";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -167,6 +172,71 @@ const SITES = [
 ];
 const siteFor = url => SITES.find(s => s.urlRe.test((url || "").trim()));
 let SITE = null;   // the adapter for the URL of the current/most recent run
+
+/* ---- PWA: installable app + Android share target ----
+   sw.js + manifest.webmanifest make Chrome offer "Install app"; once
+   installed, the app appears in Android's share sheet (share_target in the
+   manifest), landing here with the shared payload in the query string. */
+if ("serviceWorker" in navigator)
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+
+/* Pull the first http(s) URL out of a share-target launch (?url= / ?text= /
+   ?title=) and prefill the input, then clean the address bar. */
+(() => {
+  const q = new URLSearchParams(location.search);
+  const shared = q.get("url") || q.get("text") || q.get("title") || "";
+  const m = shared.match(/https?:\/\/\S+/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname);
+  $("url").value = m[0];
+  localStorage.setItem("url", m[0]);
+  if (!siteFor(m[0]))
+    setStatus("Shared URL isn't from a supported site (truyenfull.today/.live, novelfull.com).");
+})();
+
+/* ---- remembered download folder (IndexedDB) ----
+   The picked FileSystemDirectoryHandle is stored and reused on later runs,
+   so the folder only ever has to be picked once. Re-use needs at most a
+   one-tap permission confirmation (no folder navigation); with Chrome's
+   persistent-permission prompt accepted, none at all. */
+const idbKV = {
+  open: () => new Promise((res, rej) => {
+    const r = indexedDB.open("novel-downloader", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("kv");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }),
+  req: (db, mode, fn) => new Promise((res, rej) => {
+    const rq = fn(db.transaction("kv", mode).objectStore("kv"));
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  }),
+};
+const savedRoot = {
+  async get() { try { return (await idbKV.req(await idbKV.open(), "readonly", s => s.get("rootDir"))) || null; } catch { return null; } },
+  async set(h) { try { await idbKV.req(await idbKV.open(), "readwrite", s => s.put(h, "rootDir")); } catch {} },
+  async clear() { try { await idbKV.req(await idbKV.open(), "readwrite", s => s.delete("rootDir")); } catch {} },
+};
+function showSavedFolder(name) {
+  $("saved-folder").style.display = name ? "block" : "none";
+  $("saved-folder-name").textContent = name || "";
+}
+savedRoot.get().then(h => showSavedFolder(h?.name));
+$("saved-folder-clear").addEventListener("click", async e => {
+  e.preventDefault();
+  await savedRoot.clear();
+  showSavedFolder(null);
+  setStatus("Saved folder cleared — the next folder download will ask you to pick one.");
+});
+/* permission (one tap at most) + liveness check on a restored handle */
+async function usableRoot(h) {
+  try {
+    if (await h.queryPermission({ mode: "readwrite" }) !== "granted"
+        && await h.requestPermission({ mode: "readwrite" }) !== "granted") return false;
+    await h.keys().next();   // throws if the folder was deleted/moved
+    return true;
+  } catch { return false; }
+}
 
 let running = false;
 let stopRequested = false;
@@ -1536,9 +1606,16 @@ $("btn-folder").addEventListener("click", async () => {
     setStatus("Folder saving needs Chrome or Edge — use “Download as ZIP” instead.");
     return;
   }
-  let root;
-  try { root = await showDirectoryPicker({ mode: "readwrite" }); }
-  catch { return; /* user canceled */ }
+  /* reuse the remembered folder when it's still there and permission is
+     (re-)granted — the picker only appears the first time or after "change" */
+  let root = await savedRoot.get();
+  if (root && !(await usableRoot(root))) root = null;
+  if (!root) {
+    try { root = await showDirectoryPicker({ mode: "readwrite" }); }
+    catch { return; /* user canceled */ }
+    await savedRoot.set(root);
+    showSavedFolder(root.name);
+  }
   run(folderName => folderSink(root, folderName), rootOps(root));
 });
 
