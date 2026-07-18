@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.45";
+const VERSION = "1.46";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -424,6 +424,10 @@ function parseHeading(text) {
   return { num: parseInt(m[1], 10), title };
 }
 
+/* Returns { text, raw }: `text` is the cleaned chapter prose; `raw` is the
+   content area's text before the ad/lock filtering — kept so an empty result
+   can report WHAT was on the page (lock notice, "loading" placeholder,
+   bot-challenge text) instead of a bare "empty content". */
 function extractContent(doc) {
   let div = null;
   for (const sel of CONTENT_SELECTORS) { div = doc.querySelector(sel); if (div) break; }
@@ -434,18 +438,20 @@ function extractContent(doc) {
       const len = d.textContent.length;
       if (len > best) { best = len; div = d; }
     }
-    if (!div) return "";
+    if (!div) return { text: "", raw: "" };
   }
   div.querySelectorAll("script,style,ins,iframe,button").forEach(t => t.remove());
+  const raw = div.textContent.replace(/\s+/g, " ").trim();
   div.querySelectorAll('[class*="ads"],[class*="banner"],[class*="lock"],[class*="notice"]')
      .forEach(t => t.remove());
   div.querySelectorAll("br").forEach(br => br.replaceWith("\n"));
   div.querySelectorAll("p").forEach(p => { p.prepend("\n"); p.append("\n"); });
 
-  return div.textContent.split("\n")
+  const text = div.textContent.split("\n")
     .map(l => l.trim())
     .filter(l => l && !(l.length < 200 && AD_RE.test(l)))
     .join("\n\n");
+  return { text, raw };
 }
 
 /* Chromium can refuse a handle whose cached name and on-disk name disagree
@@ -468,7 +474,7 @@ function parseChapter(doc, ch) {
   const headEl = doc.querySelector("a.chapter-title, h2 a, h3 a, .chapter-title, .chapter-text");
   const head = parseHeading(headEl ? headEl.textContent.trim() : ch.text);
   let title = head.title || parseHeading(ch.text).title;
-  let content = extractContent(doc);
+  let { text: content, raw } = extractContent(doc);
 
   /* some layouts repeat the chapter heading as the content's first line —
      drop it there (and keep its title if it's the richer one) so the
@@ -484,7 +490,11 @@ function parseChapter(doc, ch) {
     }
   }
 
-  if (!content.trim()) throw new Error("empty content");
+  if (!content.trim()) {
+    throw new Error(raw
+      ? `empty content after filtering — the page's content area says: "${raw.slice(0, 150)}"`
+      : "empty content — the chapter area has no text at all (the site may load chapters by script, or serves bots an empty page)");
+  }
   const word = SITE?.headingWord || "Chương";
   const heading = title ? `${word} ${ch.num}: ${title}` : `${word} ${ch.num}`;
   return { filename: ch.filename, body: `${heading}\n\n${content}` };
