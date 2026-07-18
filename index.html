@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.44";
+const VERSION = "1.45";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -271,8 +271,17 @@ async function fetchDoc(url) {
         const html = await r.text();
         if (html.trim()) return new DOMParser().parseFromString(html, "text/html");
       }
+      /* a definitive not-found won't change on retry — fail fast with a
+         clear message instead of burning ~30s of backoff (it usually means
+         the novel isn't on this site / the URL is wrong) */
+      if (r.status === 404 || r.status === 410) {
+        const e = new Error(`HTTP ${r.status} — this page doesn't exist on the site. Check the novel's URL (it may only be hosted elsewhere): ${url}`);
+        e.fatal = true;
+        throw e;
+      }
       lastErr = new Error(`HTTP ${r.status}`);
     } catch (e) {
+      if (e.fatal || e.stopped) throw e;
       throwIfStopped();
       lastErr = e;
     }
