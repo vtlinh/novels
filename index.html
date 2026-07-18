@@ -82,7 +82,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.50";
+const VERSION = "1.51";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -180,20 +180,6 @@ let SITE = null;   // the adapter for the URL of the current/most recent run
 if ("serviceWorker" in navigator)
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 
-/* Pull the first http(s) URL out of a share-target launch (?url= / ?text= /
-   ?title=) and prefill the input, then clean the address bar. */
-(() => {
-  const q = new URLSearchParams(location.search);
-  const shared = q.get("url") || q.get("text") || q.get("title") || "";
-  const m = shared.match(/https?:\/\/\S+/);
-  if (!m) return;
-  history.replaceState(null, "", location.pathname);
-  $("url").value = m[0];
-  localStorage.setItem("url", m[0]);
-  if (!siteFor(m[0]))
-    setStatus("Shared URL isn't from a supported site (truyenfull.today/.live, novelfull.com).");
-})();
-
 /* ---- remembered download folder (IndexedDB) ----
    The picked FileSystemDirectoryHandle is stored and reused on later runs,
    so the folder only ever has to be picked once. Re-use needs at most a
@@ -237,6 +223,41 @@ async function usableRoot(h) {
     return true;
   } catch { return false; }
 }
+
+/* Pull the first http(s) URL out of a share-target launch (?url= / ?text= /
+   ?title=), prefill the input, clean the address bar — and if the saved
+   folder is usable WITHOUT a permission prompt (Chrome only allows prompts
+   from a user tap), start the download immediately, no taps needed. */
+(() => {
+  const q = new URLSearchParams(location.search);
+  const shared = q.get("url") || q.get("text") || q.get("title") || "";
+  const m = shared.match(/https?:\/\/\S+/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname);
+  $("url").value = m[0];
+  localStorage.setItem("url", m[0]);
+  if (!siteFor(m[0])) {
+    setStatus("Shared URL isn't from a supported site (truyenfull.today/.live, novelfull.com).");
+    return;
+  }
+  (async () => {
+    const root = await savedRoot.get();
+    if (!root) { setStatus("URL received — tap a download button to start."); return; }
+    try {
+      if (await root.queryPermission({ mode: "readwrite" }) !== "granted") {
+        setStatus(`URL received — tap "Download to folder…" to start (one tap to re-allow "${root.name}"; choose "Allow on every visit" to skip this next time).`);
+        return;
+      }
+      await root.keys().next();   // folder deleted/moved -> fall back to the button
+    } catch {
+      setStatus("URL received — tap a download button to start.");
+      return;
+    }
+    if (running) return;
+    log(`Shared URL received — auto-starting download into "${root.name}"…`);
+    run(folderName => folderSink(root, folderName), rootOps(root));
+  })();
+})();
 
 let running = false;
 let stopRequested = false;
