@@ -50,7 +50,7 @@
 <body>
 <main>
   <h1>Novel Downloader</h1>
-  <p class="sub">Downloads every chapter of a truyenfull or novelfull novel as text files. <span id="ver"></span></p>
+  <p class="sub"><span id="ver"></span></p>
 
   <div class="card">
     <label for="url">Novel URL</label>
@@ -62,9 +62,8 @@
       <label for="apikey">Anthropic API key (kept in this browser only)</label>
       <input id="apikey" type="password" placeholder="sk-ant-..." spellcheck="false">
     </div>
-    <p class="hint">For the @Voice app, use the <code>/storage/emulated/0/Android/data/com.hyperionics.avar/files</code> folder.</p>
     <p class="hint" id="saved-folder" style="display:none">Saved folder: <b id="saved-folder-name"></b> — <a href="#" id="saved-folder-clear" style="color:var(--accent)">change</a></p>
-    <button id="btn-folder">Download to folder…</button>
+    <button id="btn-folder">Download</button>
     <button id="btn-stop">Stop</button>
     <button id="btn-restart">Restart</button>
     <button id="btn-retry">Retry failed</button>
@@ -80,7 +79,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.53";
+const VERSION = "1.54";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -245,7 +244,7 @@ async function usableRoot(h) {
       run(folderName => folderSink(root, folderName), rootOps(root));
     };
     const root = await savedRoot.get();
-    if (!root) { setStatus("URL received — tap “Download to folder…” to start."); return; }
+    if (!root) { setStatus("URL received — tap “Download” to start."); return; }
     let state = "missing";
     try {
       state = await root.queryPermission({ mode: "readwrite" });
@@ -254,7 +253,7 @@ async function usableRoot(h) {
     if (state === "granted") { startInto(root); return; }
     if (state === "missing") {
       log(`(auto-start unavailable: saved folder "${root.name}" is missing or unreadable)`);
-      setStatus("URL received — tap “Download to folder…” to start.");
+      setStatus("URL received — tap “Download” to start.");
       return;
     }
     /* Permission needs re-confirming, and Chrome only allows permission
@@ -268,7 +267,7 @@ async function usableRoot(h) {
       document.removeEventListener("click", once, true);
       if (e.target.closest("button, a, input, label") || running) return;
       if (await usableRoot(root)) startInto(root);
-      else setStatus('Folder permission was not granted — tap "Download to folder…" to pick again.');
+      else setStatus('Folder permission was not granted — tap "Download" to pick again.');
     };
     document.addEventListener("click", once, true);
   })();
