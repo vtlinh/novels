@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.46";
+const VERSION = "1.47";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -411,6 +411,10 @@ async function listAllChapters(novelUrl) {
 const CONTENT_SELECTORS = ["#chapter-c", ".chapter-c", "#chapter-content",
   ".chapter-content", 'div[itemprop="articleBody"]', ".box-chap"];
 const AD_RE = /(CLICK\s*ADS|quảng cáo|mở khóa|truyenfull|đọc truyện online|ủng hộ dịch giả|Vui lòng|Mời bạn|novelfull|find any errors|broken links|non-standard content|report chapter|please report)/i;
+/* class-keyword match for junk containers, anchored at word boundaries so
+   e.g. "wp-block-paragraph" (contains "lock") is NOT junk but
+   "chapter-lock", "ads-holder", "google-ads" are */
+const JUNK_CLASS_RE = /(?:^|[^a-z])(ads?|banner|notice|lock(?:ed)?|unlock)(?:[^a-z]|$)/i;
 
 /* Parse a chapter heading in either supported language:
    "Chương 5: Tiêu Viêm" (truyenfull) or "Chapter 5: Prologue" (novelfull). */
@@ -442,8 +446,14 @@ function extractContent(doc) {
   }
   div.querySelectorAll("script,style,ins,iframe,button").forEach(t => t.remove());
   const raw = div.textContent.replace(/\s+/g, " ").trim();
+  /* ad/banner/lock/notice containers are removed by class keyword — matched
+     at word boundaries, because a substring match eats real content:
+     truyenfull.live marks every chapter paragraph "wp-block-paragraph",
+     and "block" contains "lock" */
   div.querySelectorAll('[class*="ads"],[class*="banner"],[class*="lock"],[class*="notice"]')
-     .forEach(t => t.remove());
+     .forEach(t => {
+       if (JUNK_CLASS_RE.test(t.getAttribute("class") || "")) t.remove();
+     });
   div.querySelectorAll("br").forEach(br => br.replaceWith("\n"));
   div.querySelectorAll("p").forEach(p => { p.prepend("\n"); p.append("\n"); });
 
