@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.47";
+const VERSION = "1.48";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -678,6 +678,8 @@ const NAMES_CACHE_FILE = ".names_cache.json";
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
 const FETCH_BATCH = 50;                        // chapters fetched per Worker call (free-tier subrequest limit)
+const RETRY_PASSES = 4;                        // end-of-run retry passes over the failed chapters
+const RETRY_PASS_DELAY = 7000;                 // pause before each retry pass (shown to the user)
 /* A bundle's combined output (all its chapter translations + the names JSON)
    must stay under TRANSLATE_MAX_TOKENS or the batch truncates and the whole
    bundle is lost. We pack consecutive chapters up to this many estimated OUTPUT
@@ -1437,17 +1439,28 @@ async function run(makeSink, root = null, only = null) {
 
     /* End-of-run retry: once every other chapter is downloaded, take all the
        chapters that failed above — pooled across every batch — and re-fetch
-       them in fresh FETCH_BATCH-sized Worker calls. Survivors drop out of
-       `failed`; whatever still fails is left for the manual "Retry failed"
+       them in fresh FETCH_BATCH-sized Worker calls, in up to RETRY_PASSES
+       passes. Each pass is preceded by a RETRY_PASS_DELAY pause (announced in
+       the status bar and log, so the run doesn't look stuck) to give a
+       rate-limiting site a breather. Survivors drop out of `failed`; whatever
+       still fails after the last pass is left for the manual "Retry failed"
        button. Runs before the save-retry so recovered chapters that then fail
        to write still get the pendingSaves rescue + ZIP fallback. */
-    if (failed.length && !stopRequested) {
+    for (let pass = 1; pass <= RETRY_PASSES && failed.length && !stopRequested; pass++) {
       const toRetry = failed.splice(0);
-      log(`\nRetrying ${toRetry.length} failed chapter(s)…`);
-      setStatus(`Retrying ${toRetry.length} failed download(s)…`);
+      const secs = RETRY_PASS_DELAY / 1000;
+      setStatus(`Waiting ${secs}s before retry pass ${pass}/${RETRY_PASSES} (${toRetry.length} failed chapter${toRetry.length > 1 ? "s" : ""})…`);
+      log(`\nWaiting ${secs} seconds, then retry pass ${pass}/${RETRY_PASSES} for ${toRetry.length} failed chapter(s)…`);
+      await sleepUnlessStopped(RETRY_PASS_DELAY);
+      if (stopRequested) { failed.push(...toRetry); break; }
+      setStatus(`Retry pass ${pass}/${RETRY_PASSES}: ${toRetry.length} chapter(s)…`);
       const rgroups = [];
       for (let j = 0; j < toRetry.length; j += FETCH_BATCH) rgroups.push(toRetry.slice(j, j + FETCH_BATCH));
       await fetchInPool(rgroups, concurrency, fetchGroup(true));
+      const recovered = toRetry.length - failed.length;
+      log(failed.length
+        ? `Retry pass ${pass}/${RETRY_PASSES}: ${recovered} recovered, ${failed.length} still failing`
+        : `Retry pass ${pass}/${RETRY_PASSES}: all ${recovered} recovered`, failed.length ? "err" : "ok");
     }
 
     /* chapters that downloaded but would not save: retry one by one now
