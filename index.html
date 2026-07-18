@@ -79,7 +79,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.54";
+const VERSION = "1.55";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -563,9 +563,15 @@ function extractContent(doc) {
   const text = div.textContent.split("\n")
     .map(l => l.trim())
     .filter(l => l && !(l.length < 200 && AD_RE.test(l)))
-    .join("\n\n");
+    .join("\n");
   return { text, raw };
 }
+
+/* saved chapter text uses SINGLE newlines only — one line per paragraph,
+   never a blank line. Applied to every chapter write (raw and translated)
+   as the final guarantee, wherever the text came from. */
+const singleNewlines = s =>
+  s.replace(/\r/g, "").replace(/\n{2,}/g, "\n").replace(/^\n+|\n+$/g, "");
 
 /* Chromium can refuse a handle whose cached name and on-disk name disagree
    after Unicode normalization ("state had changed since it was read from
@@ -610,7 +616,7 @@ function parseChapter(doc, ch) {
   }
   const word = SITE?.headingWord || "Chương";
   const heading = title ? `${word} ${ch.num}: ${title}` : `${word} ${ch.num}`;
-  return { filename: ch.filename, body: `${heading}\n\n${content}` };
+  return { filename: ch.filename, body: singleNewlines(`${heading}\n${content}`) };
 }
 
 /* ---------------- output sinks ---------------- */
@@ -1078,7 +1084,7 @@ const BUNDLE_SYSTEM =
   + "Before writing any translation, read ALL the chapters in the bundle and decide one English rendering for every proper name that appears anywhere in them (reusing the glossary for names already in it). Then translate every chapter using that single shared set of renderings.\n"
   + "In your `chapters` output, `n` is the number from that chapter's `=== CHAPTER n ===` delimiter — its 1-based position in this bundle — NEVER the chapter number that appears inside the heading text.\n"
   + "Translation rules:\n"
-  + "- Translate each labelled chapter into natural, fluent English, EVERYTHING it contains — including its first line, the chapter heading (e.g. \"Chương 5: Tiêu Viêm\" -> \"Chapter 5: Xiao Yan\"). Keep that heading as the translated chapter's first line, followed by a blank line, then the prose. Preserve paragraph breaks (a blank line between paragraphs). Do not add or drop any heading, note, or commentary of your own — translate exactly what is given.\n"
+  + "- Translate each labelled chapter into natural, fluent English, EVERYTHING it contains — including its first line, the chapter heading (e.g. \"Chương 5: Tiêu Viêm\" -> \"Chapter 5: Xiao Yan\"). Keep that heading as the translated chapter's first line, then the prose. Put each paragraph on its own line, separated by a SINGLE newline — never insert blank lines. Do not add or drop any heading, note, or commentary of your own — translate exactly what is given.\n"
   + "- NAME CONSISTENCY IS CRITICAL. Every proper name — characters, nicknames, places, sects/organizations, techniques, titles, brands — must use ONE identical English rendering in EVERY chapter it appears in across this bundle. If a name appears in Chapter 1 and again in Chapter 5 of this bundle, both must read exactly the same. Never render the same name two different ways between chapters. If a name is in the glossary, reuse that rendering EXACTLY; for a name not in the glossary, commit to the single best rendering once and apply it identically everywhere in the bundle.\n"
   + "- Romanize person names in the conventional form for the name's likely origin: most are Sino-Vietnamese, so use the standard pinyin-style English rendering (e.g. \"Tiêu Viêm\" -> \"Xiao Yan\", \"Đấu Khí\" -> \"Dou Qi\"), not a diacritic-stripped copy. Translate meaningful place/organization/technique names.\n"
   + "Name-list rules (the `names` array):\n"
@@ -1148,7 +1154,7 @@ async function recoverPendingBatches(sink, ctx) {
               const fn = (rec.files || [])[parseInt(item.n, 10) - 1];
               if (!fn || !item.text || !item.text.trim()) continue;
               if (await sink.exists(fn, TRANSLATED_DIR)) continue;
-              await sink.write(fn, item.text, TRANSLATED_DIR);
+              await sink.write(fn, singleNewlines(item.text), TRANSLATED_DIR);
               n++;
               log(`saved  ${TRANSLATED_DIR}/${fn} (recovered)`, "ok");
             }
@@ -1168,7 +1174,7 @@ async function recoverPendingBatches(sink, ctx) {
           if (!msg || msg.stop_reason === "max_tokens") continue;
           const text = messageText(msg);
           if (!text || await sink.exists(rec.files[i], TRANSLATED_DIR)) continue;
-          await sink.write(rec.files[i], text, TRANSLATED_DIR);
+          await sink.write(rec.files[i], singleNewlines(text), TRANSLATED_DIR);
           n++;
           log(`saved  ${TRANSLATED_DIR}/${rec.files[i]} (recovered)`, "ok");
         }
@@ -1235,7 +1241,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
        one so every translated chapter starts with its heading */
     if (!/^(?:Ch[ưu]ơ?ng|Chapter)\s*\d+/i.test(body)) {
       const n = chapterNum(ch.filename);
-      if (n != null) body = `${SITE?.headingWord || "Chương"} ${n}\n\n${body}`;
+      if (n != null) body = `${SITE?.headingWord || "Chương"} ${n}\n${body}`;
     }
     pending.push({ filename: ch.filename, body });
   }
@@ -1361,7 +1367,7 @@ async function translateNovel(sink, chapters, ctx = {}) {
       handled.add(ch.filename);
       if (doneSet.has(ch.filename)) continue;
       try {
-        await sink.write(ch.filename, item.text, TRANSLATED_DIR);
+        await sink.write(ch.filename, singleNewlines(item.text), TRANSLATED_DIR);
         doneSet.add(ch.filename);
         saved++;
         log(`saved  ${TRANSLATED_DIR}/${ch.filename}`, "ok");
