@@ -77,7 +77,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.48";
+const VERSION = "1.49";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1323,8 +1323,11 @@ async function run(makeSink, root = null, only = null) {
   lastRun = { makeSink, root };
   aborter = new AbortController();
   $("btn-stop").disabled = false;
-  await acquireWakeLock();
+  /* swap the buttons BEFORE the first await, so clicking Retry/Restart
+     immediately replaces it with Stop (no window where a running retry
+     still shows a clickable Retry button) */
   updateButtons();
+  await acquireWakeLock();
   logEl.textContent = "";
   bar.style.display = "block";
   bar.value = 0;
