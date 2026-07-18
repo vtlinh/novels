@@ -82,7 +82,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.51";
+const VERSION = "1.52";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -241,21 +241,38 @@ async function usableRoot(h) {
     return;
   }
   (async () => {
+    const startInto = root => {
+      if (running) return;
+      log(`Shared URL received — starting download into "${root.name}"…`);
+      run(folderName => folderSink(root, folderName), rootOps(root));
+    };
     const root = await savedRoot.get();
     if (!root) { setStatus("URL received — tap a download button to start."); return; }
+    let state = "missing";
     try {
-      if (await root.queryPermission({ mode: "readwrite" }) !== "granted") {
-        setStatus(`URL received — tap "Download to folder…" to start (one tap to re-allow "${root.name}"; choose "Allow on every visit" to skip this next time).`);
-        return;
-      }
-      await root.keys().next();   // folder deleted/moved -> fall back to the button
-    } catch {
+      state = await root.queryPermission({ mode: "readwrite" });
+      if (state === "granted") await root.keys().next();   // folder deleted/moved?
+    } catch { state = "missing"; }
+    if (state === "granted") { startInto(root); return; }
+    if (state === "missing") {
+      log(`(auto-start unavailable: saved folder "${root.name}" is missing or unreadable)`);
       setStatus("URL received — tap a download button to start.");
       return;
     }
-    if (running) return;
-    log(`Shared URL received — auto-starting download into "${root.name}"…`);
-    run(folderName => folderSink(root, folderName), rootOps(root));
+    /* Permission needs re-confirming, and Chrome only allows permission
+       prompts in response to a user tap — so auto-start can't run yet.
+       Arm a one-time tap-ANYWHERE handler: the first tap on the page
+       re-grants and starts the run. Taps on buttons/links are left to
+       their own handlers (the folder button reaches the same result). */
+    log(`(auto-start needs one tap: folder permission for "${root.name}" is "${state}")`);
+    setStatus(`URL received — tap anywhere to start downloading into "${root.name}".`);
+    const once = async e => {
+      document.removeEventListener("click", once, true);
+      if (e.target.closest("button, a, input, label") || running) return;
+      if (await usableRoot(root)) startInto(root);
+      else setStatus('Folder permission was not granted — tap "Download to folder…" to pick again.');
+    };
+    document.addEventListener("click", once, true);
   })();
 })();
 
