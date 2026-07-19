@@ -45,7 +45,8 @@ class Translator(
     /* abort an in-flight translation request so Stop doesn't wait it out */
     fun cancel() { try { client.dispatcher.cancelAll() } catch (e: Exception) {} }
 
-    private fun callModel(user: String): String? = try {
+    private fun callModel(user: String): String? {
+        return try {
         val body = JSONObject()
             .put("model", OPUS)
             .put("max_tokens", MAX_TOKENS)
@@ -76,6 +77,7 @@ class Translator(
         log("Translate API error: ${e.message}")
         null
     }
+    }
 
     private fun readText(uri: String): String? = try {
         context.contentResolver.openInputStream(Uri.parse(uri))?.use {
@@ -83,13 +85,15 @@ class Translator(
         }
     } catch (e: Exception) { null }
 
-    private fun writeTranslated(tdir: DocumentFile, name: String, text: String): Boolean = try {
-        val f = tdir.createFile("text/plain", name) ?: return false
-        context.contentResolver.openOutputStream(f.uri)?.use {
-            it.write(Extractor.singleNewlines(text).toByteArray(Charsets.UTF_8))
-        } ?: return false
-        true
-    } catch (e: Exception) { false }
+    private fun writeTranslated(tdir: DocumentFile, name: String, text: String): Boolean {
+        return try {
+            val f = tdir.createFile("text/plain", name) ?: return false
+            context.contentResolver.openOutputStream(f.uri)?.use {
+                it.write(Extractor.singleNewlines(text).toByteArray(Charsets.UTF_8))
+            } ?: return false
+            true
+        } catch (e: Exception) { false }
+    }
 
     private fun chunk(items: List<Pair<String, String>>): List<List<Pair<String, String>>> {
         val groups = ArrayList<MutableList<Pair<String, String>>>()
