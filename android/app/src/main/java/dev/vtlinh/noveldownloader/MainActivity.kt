@@ -104,27 +104,29 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.updateBanner).setOnClickListener { installUpdate() }
-        startUpdatePolling()
     }
 
     private var updateFound = false
+    private var lastUpdateCheck = 0L
 
-    /* Poll for a newer published version on launch and then hourly. Once one
-       is found, stop polling and reveal the sticky banner; the user upgrades
-       by tapping it. */
-    private fun startUpdatePolling() {
+    override fun onResume() {
+        super.onResume()
+        checkForUpdate()
+    }
+
+    /* Check for a newer published version whenever the app returns to the
+       foreground, at most once a minute. Once one is found, checks stop and
+       the sticky banner shows; the user upgrades by tapping it. */
+    private fun checkForUpdate() {
+        if (updateFound) return
+        val now = System.currentTimeMillis()
+        if (now - lastUpdateCheck < 60_000) return
+        lastUpdateCheck = now
         lifecycleScope.launch {
-            while (!updateFound) {
-                val latest = Updater.latestVersion()
-                if (latest != null && latest.first > Updater.currentVersionCode(this@MainActivity)) {
-                    updateFound = true
-                    findViewById<TextView>(R.id.updateBanner).apply {
-                        text = "New version ${latest.second} available — tap to upgrade"
-                        visibility = View.VISIBLE
-                    }
-                    break   // stop polling
-                }
-                kotlinx.coroutines.delay(60 * 60 * 1000L)   // 60 minutes
+            val latest = Updater.latestVersion()
+            if (latest != null && latest.first > Updater.currentVersionCode(this@MainActivity)) {
+                updateFound = true
+                findViewById<TextView>(R.id.updateBanner).visibility = View.VISIBLE
             }
         }
     }
