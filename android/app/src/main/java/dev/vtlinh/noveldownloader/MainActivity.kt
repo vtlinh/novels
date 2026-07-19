@@ -94,6 +94,35 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+
+        checkForUpdate()
+    }
+
+    /* on every launch: compare this build's versionCode against the latest
+       published release; offer to download + install when newer */
+    private fun checkForUpdate() {
+        lifecycleScope.launch {
+            val latest = Updater.latestVersion() ?: return@launch
+            if (latest.first <= Updater.currentVersionCode(this@MainActivity)) return@launch
+            androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
+                .setTitle("Update available")
+                .setMessage("Version ${latest.second} is available. Download and install?")
+                .setPositiveButton("Update") { _, _ ->
+                    lifecycleScope.launch {
+                        val statusText = findViewById<TextView>(R.id.statusText)
+                        statusText.text = "Downloading update…"
+                        val apk = Updater.downloadApk(this@MainActivity)
+                        if (apk != null) {
+                            statusText.text = "Opening installer…"
+                            Updater.install(this@MainActivity, apk)
+                        } else {
+                            statusText.text = "Update download failed — try again later."
+                        }
+                    }
+                }
+                .setNegativeButton("Later", null)
+                .show()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

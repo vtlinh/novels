@@ -3,6 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+/* CI stamps every build with the workflow run number, so each main build is
+   a higher versionCode — that's what the in-app update check compares. */
+val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+
 android {
     namespace = "dev.vtlinh.noveldownloader"
     compileSdk = 34
@@ -11,13 +15,30 @@ android {
         applicationId = "dev.vtlinh.noveldownloader"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = ciRunNumber
+        versionName = "0.1.$ciRunNumber"
+    }
+
+    /* one committed key signs every build: Android only installs an update
+       over an existing app when signatures match, and CI runners would
+       otherwise generate a fresh random debug key per run */
+    signingConfigs {
+        create("shared") {
+            storeFile = file("../signing.p12")
+            storePassword = "noveldownloader"
+            keyAlias = "novel"
+            keyPassword = "noveldownloader"
+            storeType = "PKCS12"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("shared")
         }
     }
     compileOptions {
