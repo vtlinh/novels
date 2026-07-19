@@ -25,6 +25,16 @@ class DownloadEngine(
     private val progress: (Int, Int) -> Unit,
 ) {
     @Volatile var stopRequested = false
+    @Volatile private var translator: Translator? = null
+
+    /* Stop instantly: set the cooperative flag AND abort every in-flight
+       HTTP request (chapter fetches, and any running translation call) so
+       we don't wait out sockets/timeouts. */
+    fun stop() {
+        stopRequested = true
+        try { client.dispatcher.cancelAll() } catch (e: Exception) {}
+        try { translator?.cancel() } catch (e: Exception) {}
+    }
 
     companion object {
         const val CONC_START = 20
@@ -313,8 +323,9 @@ class DownloadEngine(
 
         if (translate && apiKey.isNotBlank() && !stopRequested) {
             try {
-                Translator(context, apiKey, log, status)
-                    .translate(dir, store, folderKey, slug, chapters.mapNotNull { it.filename }) { stopRequested }
+                val t = Translator(context, apiKey, log, status)
+                translator = t
+                t.translate(dir, store, folderKey, slug, chapters.mapNotNull { it.filename }) { stopRequested }
             } catch (e: Exception) {
                 log("TRANSLATION FAILED — ${e.message}")
             }

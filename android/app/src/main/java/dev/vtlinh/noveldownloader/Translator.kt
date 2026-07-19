@@ -42,6 +42,9 @@ class Translator(
         .callTimeout(10, TimeUnit.MINUTES)
         .build()
 
+    /* abort an in-flight translation request so Stop doesn't wait it out */
+    fun cancel() { try { client.dispatcher.cancelAll() } catch (e: Exception) {} }
+
     private fun callModel(user: String): String? = try {
         val body = JSONObject()
             .put("model", OPUS)

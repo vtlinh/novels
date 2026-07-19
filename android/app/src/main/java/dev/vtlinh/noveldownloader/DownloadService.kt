@@ -37,7 +37,7 @@ class DownloadService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            engine?.stopRequested = true
+            engine?.stop()
             statusFlow.value = "Stopping…"
             return START_NOT_STICKY
         }
