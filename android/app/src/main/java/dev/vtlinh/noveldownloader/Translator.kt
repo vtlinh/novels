@@ -34,6 +34,7 @@ class Translator(
 ) {
     companion object {
         private const val OPUS = "claude-opus-4-8"
+        private const val SONNET = "claude-sonnet-5"   // novel-title translation (short, cheap)
         private const val EFFORT = "medium"
         private const val MAX_TOKENS = 128000        // Opus 4.8 max output; a bundle's whole translation must fit under this
         private const val BUNDLE_TOKEN_BUDGET = 80000 // estimated output tokens packed per bundle (headroom below MAX_TOKENS)
@@ -158,11 +159,12 @@ class Translator(
         slug: String,
         files: List<String>,
         isStopped: () -> Boolean,
+        wantTitle: String? = null,
     ): Map<String, JSONObject> {
         if (isStopped()) throw StoppedException()
         val submitted = JSONObject(call("POST", "/v1/messages/batches", JSONObject().put("requests", requests), isStopped))
         val id = submitted.getString("id")
-        store.addPending(folder, slug, id, files, System.currentTimeMillis())
+        store.addPending(folder, slug, id, files, System.currentTimeMillis(), wantTitle)
         log("[$label] batch submitted (${requests.length()} request(s)); polling…")
 
         var cancelSent = false
@@ -318,6 +320,90 @@ class Translator(
 
     private lateinit var store: DownloadStore
 
+    /* Render the novel-folder name "English (Vietnamese)" via a Sonnet batch,
+       BEFORE the folder is created, so the download saves straight into the
+       English-named folder. Cached in the DB, so it's translated once. A title
+       batch orphaned by an app restart is recovered instead of resubmitted.
+       Returns the sanitized folder name, or null if it couldn't be produced
+       (caller falls back to the Vietnamese name). */
+    suspend fun ensureEnglishTitle(
+        vietTitle: String,
+        store: DownloadStore,
+        folder: String,
+        slug: String,
+        isStopped: () -> Boolean,
+    ): String? = withContext(Dispatchers.IO) {
+        this@Translator.store = store
+        store.getTitle(folder, slug)?.let { return@withContext it }
+
+        val now = System.currentTimeMillis()
+        store.prunePending(now)
+
+        /* recover an orphaned title batch from a previous session first */
+        val orphan = store.pendingFor(folder, slug, now).firstOrNull { it.wantTitle != null }
+        if (orphan != null) {
+            try {
+                val eng = collectTitle(orphan.batchId, isStopped)
+                if (!eng.isNullOrBlank()) {
+                    val english = Extractor.sanitize("$eng (${orphan.wantTitle})")
+                    store.setTitle(folder, slug, english)
+                    store.removePending(orphan.batchId)
+                    log("Title recovered — folder \"$english\"")
+                    return@withContext english
+                }
+            } catch (e: StoppedException) {
+                return@withContext null
+            } catch (e: Exception) {
+                log("Title batch recovery failed — ${e.message}")
+            }
+        }
+
+        /* submit a fresh title batch (Sonnet, plain text) */
+        try {
+            val params = JSONObject()
+                .put("model", SONNET)
+                .put("max_tokens", 200)
+                .put(
+                    "messages",
+                    JSONArray().put(
+                        JSONObject().put("role", "user").put(
+                            "content",
+                            "Translate this Vietnamese novel title to natural English. Reply with ONLY the translated title, nothing else:\n" + vietTitle,
+                        ),
+                    ),
+                )
+            val reqs = JSONArray().put(JSONObject().put("custom_id", "title").put("params", params))
+            val submitted = JSONObject(call("POST", "/v1/messages/batches", JSONObject().put("requests", reqs), isStopped))
+            val id = submitted.getString("id")
+            store.addPending(folder, slug, id, emptyList(), now, vietTitle)
+            log("[title] batch submitted; translating title…")
+            val eng = collectTitle(id, isStopped)
+            store.removePending(id)
+            if (eng.isNullOrBlank()) return@withContext null
+            val english = Extractor.sanitize("$eng (${vietTitle})")
+            store.setTitle(folder, slug, english)
+            english
+        } catch (e: StoppedException) {
+            null
+        } catch (e: Exception) {
+            log("Title translation error — ${e.message}")
+            null
+        }
+    }
+
+    /* poll a one-request "title" batch to completion and return its text */
+    private suspend fun collectTitle(id: String, isStopped: () -> Boolean): String? {
+        while (true) {
+            if (isStopped()) throw StoppedException()
+            val b = JSONObject(call("GET", "/v1/messages/batches/$id", null, isStopped, ignoreStop = true))
+            if (b.optString("processing_status") == "ended") break
+            sleepPoll(POLL_MS, isStopped, ignoreStop = false)
+        }
+        val results = fetchResults(id, "title", isStopped)
+        val msg = results["title"] ?: return null
+        return messageText(msg).ifBlank { null }
+    }
+
     /* translate every downloaded chapter not already present in translated/ */
     suspend fun translate(
         dir: DocumentFile,
@@ -431,7 +517,8 @@ class Translator(
     ) {
         val now = System.currentTimeMillis()
         store.prunePending(now)
-        val mine = store.pendingFor(folder, slug, now)
+        /* title batches (wantTitle set) are recovered up front by ensureEnglishTitle */
+        val mine = store.pendingFor(folder, slug, now).filter { it.wantTitle == null }
         if (mine.isEmpty()) return
         val done = tdir.listFiles().mapNotNull { it.name }.toHashSet()
         log("Found ${mine.size} unfinished batch(es) from a previous session — recovering…")

@@ -14,6 +14,7 @@ data class PendingBatch(
     val files: List<String>,
     val created: Long,
     val tries: Int,
+    val wantTitle: String?,   // non-null on a title-translation batch (custom_id "title")
 )
 
 /* App-private SQLite index of downloaded chapters, keyed by (folder, slug).
@@ -22,7 +23,7 @@ data class PendingBatch(
    (no directory listing). On a new device / reinstall / copied folder the
    index is simply empty and DownloadEngine rebuilds it from one listing. */
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 3) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 4) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -42,7 +43,12 @@ class DownloadStore(context: Context) :
         db.execSQL(
             "CREATE TABLE pending_batches (" +
                 "batch_id TEXT PRIMARY KEY, folder TEXT, slug TEXT, " +
-                "files TEXT, created INTEGER, tries INTEGER)",
+                "files TEXT, created INTEGER, tries INTEGER, want_title TEXT)",
+        )
+        db.execSQL(
+            "CREATE TABLE titles (" +
+                "folder TEXT, slug TEXT, english TEXT, " +
+                "PRIMARY KEY(folder, slug))",
         )
     }
 
@@ -50,16 +56,40 @@ class DownloadStore(context: Context) :
         db.execSQL("DROP TABLE IF EXISTS chapters")
         db.execSQL("DROP TABLE IF EXISTS names")
         db.execSQL("DROP TABLE IF EXISTS pending_batches")
+        db.execSQL("DROP TABLE IF EXISTS titles")
         onCreate(db)
+    }
+
+    /* ---- translated novel-folder name cache: slug -> "English (Vietnamese)" ---- */
+
+    fun getTitle(folder: String, slug: String): String? {
+        readableDatabase.query(
+            "titles", arrayOf("english"), "folder=? AND slug=?", arrayOf(folder, slug), null, null, null,
+        ).use { c -> if (c.moveToNext()) return c.getString(0) }
+        return null
+    }
+
+    fun setTitle(folder: String, slug: String, english: String) {
+        writableDatabase.execSQL(
+            "INSERT OR REPLACE INTO titles(folder,slug,english) VALUES(?,?,?)",
+            arrayOf(folder, slug, english),
+        )
     }
 
     /* ---- pending Message Batches (orphaned-batch recovery) ---- */
 
-    fun addPending(folder: String, slug: String, batchId: String, files: List<String>, created: Long) {
+    fun addPending(
+        folder: String,
+        slug: String,
+        batchId: String,
+        files: List<String>,
+        created: Long,
+        wantTitle: String? = null,
+    ) {
         val arr = JSONArray().apply { for (f in files) put(f) }
         writableDatabase.execSQL(
-            "INSERT OR REPLACE INTO pending_batches(batch_id,folder,slug,files,created,tries) VALUES(?,?,?,?,?,0)",
-            arrayOf(batchId, folder, slug, arr.toString(), created),
+            "INSERT OR REPLACE INTO pending_batches(batch_id,folder,slug,files,created,tries,want_title) VALUES(?,?,?,?,?,0,?)",
+            arrayOf(batchId, folder, slug, arr.toString(), created, wantTitle),
         )
     }
 
@@ -67,7 +97,7 @@ class DownloadStore(context: Context) :
     fun pendingFor(folder: String, slug: String, now: Long): List<PendingBatch> {
         val out = ArrayList<PendingBatch>()
         readableDatabase.query(
-            "pending_batches", arrayOf("batch_id", "files", "created", "tries"),
+            "pending_batches", arrayOf("batch_id", "files", "created", "tries", "want_title"),
             "folder=? AND slug=?", arrayOf(folder, slug), null, null, "created",
         ).use { c ->
             while (c.moveToNext()) {
@@ -78,7 +108,7 @@ class DownloadStore(context: Context) :
                     val arr = JSONArray(c.getString(1))
                     for (i in 0 until arr.length()) files.add(arr.getString(i))
                 } catch (e: Exception) {}
-                out.add(PendingBatch(c.getString(0), files, created, c.getInt(3)))
+                out.add(PendingBatch(c.getString(0), files, created, c.getInt(3), c.getString(4)))
             }
         }
         return out

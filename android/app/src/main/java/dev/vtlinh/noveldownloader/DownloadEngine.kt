@@ -175,7 +175,40 @@ class DownloadEngine(
             status("Error: folder unavailable")
             return@withContext
         }
-        val folderName = Extractor.sanitize(title)
+        val store = DownloadStore(context)
+        val folderKey = treeUri.toString()
+
+        /* When translating, render the English folder name up front (Sonnet,
+           Batches API) so chapters save straight into an "English (Vietnamese)"
+           folder. If a plain Vietnamese-named folder already exists from an
+           earlier non-translated run, rename it in place instead of starting
+           a fresh one. */
+        val vietName = Extractor.sanitize(title)
+        var folderName = vietName
+        if (translate && apiKey.isNotBlank() && !stopRequested) {
+            status("Translating title…")
+            val t = translator ?: Translator(context, apiKey, log, status).also { translator = it }
+            val english = try {
+                t.ensureEnglishTitle(title, store, folderKey, slug) { stopRequested }
+            } catch (e: Exception) { log("Title translation failed — ${e.message}"); null }
+            if (!english.isNullOrBlank()) {
+                folderName = english
+                if (english != vietName) {
+                    val existingEng = root.findFile(english)?.takeIf { it.isDirectory }
+                    val existingViet = root.findFile(vietName)?.takeIf { it.isDirectory }
+                    if (existingEng == null && existingViet != null) {
+                        val ok = try { existingViet.renameTo(english) } catch (e: Exception) { false }
+                        if (ok) {
+                            store.clear(folderKey, slug)   // rename changes child URIs — rebuild the index
+                            log("Renamed existing folder to \"$english\"")
+                        } else {
+                            log("Could not rename folder — using \"$english\"")
+                        }
+                    }
+                }
+            }
+        }
+
         val dir = root.findFile(folderName)?.takeIf { it.isDirectory }
             ?: root.createDirectory(folderName)
         if (dir == null) {
@@ -186,8 +219,6 @@ class DownloadEngine(
         log("Saving to: $folderName/")
 
         status("Checking already-downloaded chapters…")
-        val store = DownloadStore(context)
-        val folderKey = treeUri.toString()
         val existing = HashSet<String>()   // filenames known present on disk
 
         val cached = store.get(folderKey, slug)   // filename -> document URI
@@ -323,8 +354,7 @@ class DownloadEngine(
 
         if (translate && apiKey.isNotBlank() && !stopRequested) {
             try {
-                val t = Translator(context, apiKey, log, status)
-                translator = t
+                val t = translator ?: Translator(context, apiKey, log, status).also { translator = it }
                 t.translate(dir, store, folderKey, slug, chapters.mapNotNull { it.filename }) { stopRequested }
             } catch (e: Exception) {
                 log("TRANSLATION FAILED — ${e.message}")
