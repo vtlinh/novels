@@ -100,7 +100,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.56";
+const VERSION = "1.57";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -219,9 +219,19 @@ const idbKV = {
   }),
 };
 const savedRoot = {
-  async get() { try { return (await idbKV.req(await idbKV.open(), "readonly", s => s.get("rootDir"))) || null; } catch { return null; } },
-  async set(h) { try { await idbKV.req(await idbKV.open(), "readwrite", s => s.put(h, "rootDir")); } catch {} },
-  async clear() { try { await idbKV.req(await idbKV.open(), "readwrite", s => s.delete("rootDir")); } catch {} },
+  /* cached in memory (warmed at startup) so the click path reaches the
+     permission request immediately — Chrome's user-activation window is
+     short, and burning it on an IndexedDB read can get the permission
+     prompt (and then the folder picker) silently refused */
+  cached: undefined,   // undefined = not loaded yet; null = none saved
+  async get() {
+    if (this.cached !== undefined) return this.cached;
+    try { this.cached = (await idbKV.req(await idbKV.open(), "readonly", s => s.get("rootDir"))) || null; }
+    catch { this.cached = null; }
+    return this.cached;
+  },
+  async set(h) { this.cached = h; try { await idbKV.req(await idbKV.open(), "readwrite", s => s.put(h, "rootDir")); } catch {} },
+  async clear() { this.cached = null; try { await idbKV.req(await idbKV.open(), "readwrite", s => s.delete("rootDir")); } catch {} },
 };
 function showSavedFolder(name) {
   $("saved-folder").style.display = name ? "block" : "none";
@@ -1655,10 +1665,19 @@ async function startFolderDownload() {
   /* reuse the remembered folder when it's still there and permission is
      (re-)granted — the picker only appears the first time or after "change" */
   let root = await savedRoot.get();
-  if (root && !(await usableRoot(root))) root = null;
+  if (root && !(await usableRoot(root))) {
+    log(`Saved folder "${root.name}" couldn't be used (permission not re-granted, or the folder is gone) — pick it again.`, "err");
+    root = null;
+  }
   if (!root) {
     try { root = await showDirectoryPicker({ mode: "readwrite" }); }
-    catch { return; /* user canceled */ }
+    catch (e) {
+      /* never exit silently: say WHY nothing happened */
+      setStatus(e && e.name === "SecurityError"
+        ? "Chrome blocked the folder dialog (the tap “expired”) — tap Download again."
+        : "Folder pick canceled — tap Download to try again.");
+      return;
+    }
     await savedRoot.set(root);
     showSavedFolder(root.name);
   }
@@ -1697,7 +1716,7 @@ window.addEventListener("message", e => {
   $("browse-url-label").textContent = browseUrl;
   $("browse-dl").disabled = !siteFor(browseUrl);
 });
-$("browse-dl").addEventListener("click", () => {
+$("browse-dl").addEventListener("click", async () => {
   const site = siteFor(browseUrl);
   if (!site) return;
   const novel = site.normalize(browseUrl).base;
@@ -1705,7 +1724,8 @@ $("browse-dl").addEventListener("click", () => {
   localStorage.setItem("url", novel);
   updateButtons();
   closeBrowser();
-  startFolderDownload();
+  setStatus(`Starting download: ${novel}`);
+  await startFolderDownload();
 });
 
 </script>
