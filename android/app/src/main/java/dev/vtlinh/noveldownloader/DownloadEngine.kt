@@ -6,7 +6,9 @@ import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -79,7 +81,7 @@ class DownloadEngine(
     private fun isThrottle(s: Int) = s == 429 || s == 503 || s == 408 || s == 0
 
     private val pool = Semaphore(CONC_MAX)
-    private val fillerLock = kotlinx.coroutines.sync.Mutex()
+    private val fillerLock = Mutex()
     private var filler = 0   // permits held back; effective limit = CONC_MAX - filler
 
     private suspend fun setConc(target: Int) {
@@ -94,7 +96,7 @@ class DownloadEngine(
 
     /* rolling adaptation window: once FETCH_BATCH results accumulate, apply
        the halve/grow rules and start a fresh window. `status` null = saved. */
-    private val adaptLock = kotlinx.coroutines.sync.Mutex()
+    private val adaptLock = Mutex()
     private var winOk = 0
     private var winStatuses = ArrayList<Int>()
 
