@@ -101,7 +101,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.58";
+const VERSION = "1.59";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -116,6 +116,7 @@ $("conc-val").textContent = $("conc").value;
 $("conc").addEventListener("input", e => {
   $("conc-val").textContent = e.target.value;
   localStorage.setItem("conc", e.target.value);
+  poolPump?.();   // live: grow an active fetch pool immediately
 });
 $("translate").checked = localStorage.getItem("translate") === "1";
 $("apikey").value = localStorage.getItem("apikey") || "";
@@ -463,19 +464,31 @@ async function fetchMany(urls) {
    invocation gets its own connection budget and its own FETCH_BATCH-sized
    group of chapters. ceil(slider/6) calls run side by side, so the real
    parallelism is the slider rounded up to a multiple of 6 (e.g. 20 -> 4
-   calls x ~6 = ~24 chapters in parallel). `handle(group)` fetches and
-   consumes one group; it must not throw. */
+   calls x ~6 = ~24 chapters in parallel).
+
+   `target` is a FUNCTION, read before every new call is launched — so the
+   slider is live: moving it mid-run grows the pool at once (the slider
+   handler pokes poolPump) and shrinks it as running calls finish.
+   `handle(group)` fetches and consumes one group; it must not throw. */
 const WORKER_CONNS = 6;
-async function fetchInPool(groups, concurrency, handle) {
-  const calls = Math.max(1, Math.min(groups.length, Math.ceil(concurrency / WORKER_CONNS)));
-  let next = 0;
-  await Promise.all(Array.from({ length: calls }, async () => {
-    while (!stopRequested) {
-      const g = next++;
-      if (g >= groups.length) return;
-      await handle(groups[g]);
-    }
-  }));
+let poolPump = null;   // set while a fetch pool is active; called on slider moves
+async function fetchInPool(groups, target, handle) {
+  let next = 0, active = 0;
+  try {
+    await new Promise(resolve => {
+      const pump = () => {
+        const desired = Math.max(1, Math.ceil(target() / WORKER_CONNS));
+        while (!stopRequested && active < desired && next < groups.length) {
+          const g = next++;
+          active++;
+          handle(groups[g]).catch(() => {}).then(() => { active--; pump(); });
+        }
+        if (active === 0 && (stopRequested || next >= groups.length)) resolve();
+      };
+      poolPump = pump;
+      pump();
+    });
+  } finally { poolPump = null; }
 }
 
 function chapterLinks(doc, base, slug) {
@@ -1428,7 +1441,9 @@ async function translateNovel(sink, chapters, ctx = {}) {
 async function run(makeSink, root = null, only = null) {
   if (running) return;
   const novelUrl = $("url").value.trim();
-  const concurrency = Math.max(1, Math.min(50, parseInt($("conc").value, 10) || 10));
+  /* read live so the slider adjusts an ongoing run: the fetch pool asks for
+     this before every new Worker call it launches */
+  const concurrency = () => Math.max(1, Math.min(50, parseInt($("conc").value, 10) || 10));
   const site = siteFor(novelUrl);
   if (!site) {
     setStatus("Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com");
@@ -1472,7 +1487,7 @@ async function run(makeSink, root = null, only = null) {
       ({ title, chapters } = await listAllChapters(novelUrl));
       if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
       runTitle = title;
-      log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency} (v${VERSION})`);
+      log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency()} (v${VERSION})`);
     }
     const slug = SITE.normalize(novelUrl).slug;
     const folderName = await resolveFolderName(root, slug, title);
