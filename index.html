@@ -94,7 +94,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.67";
+const VERSION = "1.68";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1547,14 +1547,8 @@ async function run(makeSink, root = null, only = null) {
        invocation is limited to ~6 connections). `retry` only changes log
        flavor and skips the progress-bar bump (retried chapters were already
        counted). Never throws — failures land in `failed`. */
-    /* count of /fetch-many calls currently on the wire — logged after each
-       batch so it's visible in the log whether batches really run in
-       parallel (network-bound) or the time is going to saving files */
-    let inFlight = 0;
     const fetchGroup = retry => async group => {
-      const t0 = performance.now();
       let htmls, failures;
-      inFlight++;
       try { ({ htmls, failures } = await fetchMany(group.map(c => c.url))); }
       catch (e) {
         if (stopRequested && !retry) return;
@@ -1565,9 +1559,7 @@ async function run(makeSink, root = null, only = null) {
         }
         status();
         return;
-      } finally { inFlight--; }
-      log(`fetched ${htmls.size}/${group.length} page(s) in ${((performance.now() - t0) / 1000).toFixed(1)}s`
-        + (inFlight ? ` — ${inFlight} more batch${inFlight === 1 ? "" : "es"} in flight` : ""));
+      }
       /* per-status breakdown of what the site refused, and throttle callout */
       if (failures.length) {
         const counts = new Map();
