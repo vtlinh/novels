@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- open book + download arrow, matching the web app's icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#4f8cff"
+        android:pathData="M30,42 L54,36 L54,58 L30,64 Z" />
+    <path
+        android:fillColor="#7ba8ff"
+        android:pathData="M78,42 L54,36 L54,58 L78,64 Z" />
+    <path
+        android:fillColor="#3ddc84"
+        android:pathData="M51,64 L57,64 L57,72 L63,72 L54,82 L45,72 L51,72 Z" />
+</vector>
