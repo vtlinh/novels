@@ -95,7 +95,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.79";
+const VERSION = "1.80";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -296,6 +296,14 @@ async function usableRoot(h) {
 })();
 
 let running = false;
+/* chapters fetched but not yet processed/saved — after Stop these are the
+   ones still being wrapped up, counted down on the Stopping… button */
+let pendingChapters = 0;
+function updateStopLabel() {
+  if (!stopRequested || !running) return;
+  $("btn-stop").textContent = pendingChapters > 0
+    ? `Stopping… (${pendingChapters} left)` : "Stopping…";
+}
 let stopRequested = false;
 let aborter = null;
 let lastRun = null;      // {makeSink, root} of the current/most recent run
@@ -363,7 +371,7 @@ $("btn-stop").addEventListener("click", () => {
   stopRequested = true;
   aborter?.abort();
   $("btn-stop").disabled = true;
-  $("btn-stop").textContent = "Stopping…";
+  updateStopLabel();
   setStatus("Stopping — finishing what's already in flight…");
   log("Stop requested.", "err");
 });
@@ -1486,6 +1494,7 @@ async function run(makeSink, root = null, only = null) {
   aborter = new AbortController();
   $("btn-stop").disabled = false;
   $("btn-stop").textContent = "Stop";   // reset after a previous "Stopping…"
+  pendingChapters = 0;
   /* swap the buttons BEFORE the first await, so clicking Retry/Restart
      immediately replaces it with Stop (no window where a running retry
      still shows a clickable Retry button) */
@@ -1631,6 +1640,8 @@ async function run(makeSink, root = null, only = null) {
         status();
         return;
       }
+      pendingChapters += group.length;
+      updateStopLabel();
       /* per-status breakdown of what the site refused, and throttle callout */
       if (failures.length) {
         const counts = new Map();
@@ -1643,6 +1654,8 @@ async function run(makeSink, root = null, only = null) {
       for (const ch of group) {
         try { await absorb(ch, htmls.get(ch.url), retry); }
         catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}${retry ? " (retry)" : ""}`, "err"); }
+        pendingChapters--;
+        updateStopLabel();
         if (!retry) bar.value = ++done;
         status();
       }
