@@ -34,7 +34,6 @@
   #btn-folder { background:var(--accent); color:#fff; margin-right:8px; }
   #btn-stop { background:var(--err); color:#fff; display:none; }
   #open-browser { background:#2a313a; color:var(--fg); margin-top:12px; padding:9px 14px; }
-  #btn-bg { background:#2a313a; color:var(--fg); margin-right:8px; }
   #btn-restart { background:var(--accent); color:#fff; display:none; margin-right:8px; }
   #btn-retry { background:#e0a33e; color:#1b2026; display:none; margin-right:8px; }
   button:disabled { opacity:.45; cursor:not-allowed; }
@@ -78,7 +77,6 @@
     </div>
     <p class="hint" id="saved-folder" style="display:none">Saved folder: <b id="saved-folder-name"></b> — <a href="#" id="saved-folder-clear" style="color:var(--accent)">change</a></p>
     <button id="btn-folder">Download</button>
-    <button id="btn-bg">Download in background</button>
     <button id="btn-stop">Stop</button>
     <button id="btn-restart">Restart</button>
     <button id="btn-retry">Retry failed</button>
@@ -103,7 +101,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.61";
+const VERSION = "1.62";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -310,158 +308,6 @@ async function usableRoot(h) {
   })();
 })();
 
-/* ---- background download (Background Fetch API) ----
-   "Download in background" hands every pending chapter URL to the
-   browser's download manager, which keeps fetching after the app is
-   closed (Android shows a progress notification). While the app stays
-   open, finished chapters are saved to the folder live. Whatever
-   finishes after leaving is stashed into a per-job cache by the service
-   worker; collectBgJobs() parses and saves it on the next visit. */
-const BG_SUPPORTED = "BackgroundFetchManager" in self;
-const bgJobs = {
-  async all() { try { return (await idbKV.req(await idbKV.open(), "readonly", s => s.get("bgJobs"))) || []; } catch { return []; } },
-  async saveAll(list) { try { await idbKV.req(await idbKV.open(), "readwrite", s => s.put(list, "bgJobs")); } catch {} },
-  async add(job) { await this.saveAll([...(await this.all()).filter(j => j.id !== job.id), job]); },
-  async remove(id) { await this.saveAll((await this.all()).filter(j => j.id !== id)); },
-};
-
-/* parse one background-fetched chapter and write it (skips existing) */
-async function saveBgChapter(sink, existing, entry, html) {
-  if (!entry || !html || !html.trim() || existing.has(entry.filename)) return false;
-  const { filename, body } = parseChapter(new DOMParser().parseFromString(html, "text/html"), entry);
-  await sink.write(filename, body);
-  existing.add(filename);
-  return true;
-}
-
-/* save every stashed result of settled background jobs into the folder */
-async function collectBgJobs(root) {
-  const jobs = await bgJobs.all();
-  let total = 0;
-  for (const job of jobs) {
-    try {
-      if (Date.now() - (job.created || 0) > 7 * 864e5) {
-        try { await caches.delete("bgjob-" + job.id); } catch {}
-        await bgJobs.remove(job.id);
-        continue;
-      }
-      if (!(await caches.has("bgjob-" + job.id))) continue;   // still downloading
-      const site = siteFor(job.novelUrl);
-      if (!site) { await bgJobs.remove(job.id); continue; }
-      SITE = site;
-      const cache = await caches.open("bgjob-" + job.id);
-      const folderName = await resolveFolderName(rootOps(root), job.slug, job.title);
-      const sink = folderSink(root, folderName);
-      await sink.init();
-      const existing = await sink.list();
-      let saved = 0;
-      for (const req of await cache.keys()) {
-        try {
-          const url = new URL(req.url).searchParams.get("url");
-          const entry = job.files.find(f => f.url === url);
-          const html = await (await cache.match(req)).text();
-          if (await saveBgChapter(sink, existing, entry, html)) { saved++; total++; }
-        } catch (e) { log(`! background chapter failed to save — ${errMsg(e)}`, "err"); }
-      }
-      await caches.delete("bgjob-" + job.id);
-      await bgJobs.remove(job.id);
-      if (saved) log(`Background download collected: ${saved} chapter(s) into "${folderName}"`, "ok");
-    } catch (e) { log(`! background job collect failed — ${errMsg(e)}`, "err"); }
-  }
-  return total;
-}
-
-let bgBusy = false;
-async function bgDownload() {
-  if (bgBusy || running) return;
-  const novelUrl = $("url").value.trim();
-  const site = siteFor(novelUrl);
-  if (!site) { setStatus("Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com"); return; }
-  bgBusy = true;
-  $("btn-bg").disabled = true;
-  try {
-    SITE = site;
-    let root = await savedRoot.get();
-    if (root && !(await usableRoot(root))) root = null;
-    if (!root) {
-      try { root = await showDirectoryPicker({ mode: "readwrite" }); }
-      catch { setStatus("Folder pick canceled."); return; }
-      await savedRoot.set(root);
-      showSavedFolder(root.name);
-    }
-    setStatus("Listing chapters…");
-    const { title, chapters, slug } = await listAllChapters(novelUrl);
-    if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
-    const folderName = await resolveFolderName(rootOps(root), slug, title);
-    const sink = folderSink(root, folderName);
-    await sink.init();
-    const existing = await sink.list();
-    const toFetch = chapters.filter(ch => ch.filename && !existing.has(ch.filename));
-    if (!toFetch.length) { setStatus("Nothing to download — every chapter is already saved."); return; }
-
-    const id = `novel-${slug}-${Date.now()}`;
-    await bgJobs.add({ id, novelUrl, slug, title, created: Date.now(),
-      files: toFetch.map(ch => ({ url: ch.url, filename: ch.filename, num: ch.num, text: ch.text })) });
-    const swReg = await navigator.serviceWorker.ready;
-    const reg = await swReg.backgroundFetch.fetch(id, toFetch.map(ch => proxied(ch.url)), {
-      title: `${folderName} — ${toFetch.length} chapter(s)`,
-      downloadTotal: toFetch.length * 60000,   // ~60KB/page estimate for the notification's progress bar
-    });
-    log(`Background download started: ${toFetch.length} chapter(s) into "${folderName}". Safe to leave the app — Android keeps downloading and shows progress in the notification.`, "ok");
-    setStatus("Background download running — safe to leave the app.");
-
-    /* while the app stays open, save each chapter the moment it lands */
-    let saved = 0;
-    const entryByUrl = new Map(toFetch.map(ch => [ch.url, { url: ch.url, filename: ch.filename, num: ch.num, text: ch.text }]));
-    await Promise.all((await reg.matchAll()).map(async rec => {
-      try {
-        const resp = await rec.responseReady;
-        const html = await resp.text();
-        const url = new URL(rec.request.url).searchParams.get("url");
-        if (await saveBgChapter(sink, existing, entryByUrl.get(url), html)) {
-          saved++;
-          setStatus(`Background download: ${saved}/${toFetch.length} saved — safe to leave anytime.`);
-        }
-      } catch {} /* not fetched yet or failed — the SW stash + collect covers it */
-    }));
-    /* still here at the end: sweep the stash (covers records the live loop
-       lost a race on) and clean the job up */
-    await collectBgJobs(root);
-    setStatus(`Background download done: ${saved}/${toFetch.length} chapter(s) saved.`);
-    log(`Background download finished while the app was open (${saved}/${toFetch.length} saved live).`, "ok");
-  } catch (e) {
-    log(`BACKGROUND DOWNLOAD FAILED — ${errMsg(e)}`, "err");
-    setStatus(`Error: ${e.message}`);
-  } finally {
-    bgBusy = false;
-    $("btn-bg").disabled = false;
-  }
-}
-$("btn-bg").addEventListener("click", bgDownload);
-if (!BG_SUPPORTED) $("btn-bg").style.display = "none";
-
-/* on startup: if settled background jobs are waiting, offer one-tap saving */
-(async () => {
-  if (!BG_SUPPORTED) return;
-  let ready = false;
-  for (const j of await bgJobs.all())
-    if (await caches.has("bgjob-" + j.id)) { ready = true; break; }
-  if (!ready) return;
-  setStatus("Background chapters are ready — tap anywhere to save them to your folder.");
-  const once = async e => {
-    document.removeEventListener("click", once, true);
-    if (e.target.closest("button, a, input, label")) return;
-    const root = await savedRoot.get();
-    if (!root || !(await usableRoot(root))) {
-      setStatus("Tap “Download” to grant the folder — background chapters will be saved with it.");
-      return;
-    }
-    const n = await collectBgJobs(root);
-    setStatus(n ? `Saved ${n} background chapter(s).` : "Background chapters were already saved.");
-  };
-  document.addEventListener("click", once, true);
-})();
-
 let running = false;
 let stopRequested = false;
 let aborter = null;
@@ -506,7 +352,6 @@ if (!window.showDirectoryPicker)
 
 function updateButtons() {
   $("btn-folder").disabled = false;   // always enabled
-  $("btn-bg").disabled = running || bgBusy;
   $("btn-stop").style.display = running ? "inline-block" : "none";
   /* a stopped run leaves a Restart button in the Stop button's place — it
      reuses the already-granted folder handle, so no re-picking */
@@ -1852,9 +1697,6 @@ async function startFolderDownload() {
     await savedRoot.set(root);
     showSavedFolder(root.name);
   }
-  /* sweep any settled background jobs first, so their chapters are on disk
-     before this run lists what to skip */
-  try { await collectBgJobs(root); } catch {}
   run(folderName => folderSink(root, folderName), rootOps(root));
 }
 $("btn-folder").addEventListener("click", startFolderDownload);
