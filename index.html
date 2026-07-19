@@ -23,8 +23,6 @@
   input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #333a42;
           background:#12161b; color:var(--fg); font-size:14px; }
   input:focus { outline:none; border-color:var(--accent); }
-  input[type="range"] { padding:0; border:none; background:none;
-                        accent-color:var(--accent); }
   label.check { display:flex; align-items:center; gap:8px; margin-top:16px;
                 color:var(--fg); font-size:14px; cursor:pointer; }
   label.check input { width:auto; accent-color:var(--accent); }
@@ -68,8 +66,6 @@
     <label for="url">Novel URL</label>
     <input id="url" type="url" placeholder="https://novelfull.com/god-of-crime.html" spellcheck="false">
     <button id="open-browser">Use browser mode</button>
-    <label for="conc">Simultaneous downloads: <span id="conc-val">10</span></label>
-    <input id="conc" type="range" min="1" max="50" value="10">
     <label class="check"><input type="checkbox" id="translate"> Translate to English (Claude)</label>
     <div id="tr-opts">
       <label for="apikey">Anthropic API key (kept in this browser only)</label>
@@ -98,7 +94,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.63";
+const VERSION = "1.64";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -108,13 +104,6 @@ const PROXY = "https://truyenfull.vtlinh87.workers.dev";
 /* remember settings between visits */
 $("url").value = localStorage.getItem("url") || "";
 $("url").addEventListener("input", e => localStorage.setItem("url", e.target.value.trim()));
-$("conc").value = localStorage.getItem("conc") || "10";
-$("conc-val").textContent = $("conc").value;
-$("conc").addEventListener("input", e => {
-  $("conc-val").textContent = e.target.value;
-  localStorage.setItem("conc", e.target.value);
-  poolPump?.();   // live: grow an active fetch pool immediately
-});
 $("translate").checked = localStorage.getItem("translate") === "1";
 $("apikey").value = localStorage.getItem("apikey") || "";
 const syncTrOpts = () => { $("tr-opts").style.display = $("translate").checked ? "block" : "none"; };
@@ -428,8 +417,10 @@ async function fetchDoc(url) {
 /* Fetch many chapter URLs in a SINGLE Worker call (up to FETCH_BATCH, the
    free-tier subrequest limit). The Worker fires them all at once and
    Cloudflare's own per-invocation connection handling paces them (~6
-   simultaneous, the rest queue). Returns Map(url -> html) for the ones that
-   came back non-empty. Retries the whole call on a network error. */
+   simultaneous, the rest queue). Returns { htmls: Map(url -> html) for the
+   ones that came back non-empty, failures: [{url, status}] for the rest } —
+   the statuses feed throttle detection. Retries the whole call on a network
+   error. */
 async function fetchMany(urls) {
   let lastErr;
   for (let i = 0; i < MAX_RETRIES; i++) {
@@ -443,15 +434,52 @@ async function fetchMany(urls) {
       });
       if (r.ok) {
         const { results } = await r.json();
-        const map = new Map();
-        for (const res of results || []) if (res.ok && res.html && res.html.trim()) map.set(res.url, res.html);
-        return map;
+        const htmls = new Map(), failures = [];
+        for (const res of results || []) {
+          if (res.ok && res.html && res.html.trim()) htmls.set(res.url, res.html);
+          else failures.push({ url: res.url, status: res.status || 0 });
+        }
+        return { htmls, failures };
       }
       lastErr = new Error(`proxy /fetch-many HTTP ${r.status}`);
     } catch (e) { throwIfStopped(); lastErr = e; }
     await sleepUnlessStopped(1000 * 2 ** i + Math.random() * 1000);
   }
   throw lastErr;
+}
+
+/* ---- adaptive download speed ----
+   Parallelism is managed automatically (no slider): every run starts at
+   CONC_START. A batch where throttling statuses (429/503/408 or Worker-side
+   network errors) hit at least 20% of its chapters HALVES the target (floor
+   CONC_MIN); two consecutive fully-clean batches raise it by 5 (ceiling
+   CONC_MAX). The fetch pool reads `conc` before every new Worker call, so
+   changes take effect immediately. */
+const CONC_START = 20, CONC_MIN = 5, CONC_MAX = 50;
+let conc = CONC_START, cleanStreak = 0;
+const resetConc = () => { conc = CONC_START; cleanStreak = 0; };
+const isThrottleStatus = s => s === 429 || s === 503 || s === 408 || s === 0;
+function adaptConc(okCount, failStatuses) {
+  const total = okCount + failStatuses.length;
+  if (!total) return;
+  const throttled = failStatuses.filter(isThrottleStatus).length;
+  if (throttled >= Math.max(2, Math.ceil(total * 0.2))) {
+    cleanStreak = 0;
+    const before = conc;
+    conc = Math.max(CONC_MIN, Math.floor(conc / 2));
+    if (conc < before) log(`⚠ throttling detected — parallel downloads lowered ${before} → ${conc}`, "err");
+  } else if (failStatuses.length === 0) {
+    if (++cleanStreak >= 2) {
+      cleanStreak = 0;
+      if (conc < CONC_MAX) {
+        conc = Math.min(CONC_MAX, conc + 5);
+        log(`site is healthy — parallel downloads raised to ${conc}`);
+        poolPump?.();
+      }
+    }
+  } else {
+    cleanStreak = 0;   // scattered non-throttle failures: hold steady
+  }
 }
 
 /* Cloudflare allows only ~6 simultaneous outgoing connections per Worker
@@ -526,7 +554,7 @@ async function listAllChapters(novelUrl) {
     const batch = [];
     for (let p = fetched + 1; p <= last && batch.length < FETCH_BATCH; p++) batch.push(p);
     setStatus(`Listing chapters: pages ${batch[0]}-${batch[batch.length - 1]} of ${last}…`);
-    const htmls = await fetchMany(batch.map(pageUrl));
+    const { htmls } = await fetchMany(batch.map(pageUrl));
     for (const p of batch) {
       const html = htmls.get(pageUrl(p));
       const d = html ? new DOMParser().parseFromString(html, "text/html")
@@ -1425,7 +1453,7 @@ async function run(makeSink, root = null, only = null) {
   const novelUrl = $("url").value.trim();
   /* read live so the slider adjusts an ongoing run: the fetch pool asks for
      this before every new Worker call it launches */
-  const concurrency = () => Math.max(1, Math.min(50, parseInt($("conc").value, 10) || 10));
+  resetConc();   // every run starts back at the automatic default
   const site = siteFor(novelUrl);
   if (!site) {
     setStatus("Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com");
@@ -1469,7 +1497,7 @@ async function run(makeSink, root = null, only = null) {
       ({ title, chapters } = await listAllChapters(novelUrl));
       if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
       runTitle = title;
-      log(`${title} — ${chapters.length} chapters, fetch concurrency ${concurrency()} (v${VERSION})`);
+      log(`${title} — ${chapters.length} chapters, auto concurrency ${conc} (range ${CONC_MIN}–${CONC_MAX}) (v${VERSION})`);
     }
     const slug = SITE.normalize(novelUrl).slug;
     const folderName = await resolveFolderName(root, slug, title);
@@ -1530,9 +1558,9 @@ async function run(makeSink, root = null, only = null) {
     let inFlight = 0;
     const fetchGroup = retry => async group => {
       const t0 = performance.now();
-      let htmls;
+      let htmls, failures;
       inFlight++;
-      try { htmls = await fetchMany(group.map(c => c.url)); }
+      try { ({ htmls, failures } = await fetchMany(group.map(c => c.url))); }
       catch (e) {
         if (stopRequested && !retry) return;
         for (const ch of group) {
@@ -1543,8 +1571,17 @@ async function run(makeSink, root = null, only = null) {
         status();
         return;
       } finally { inFlight--; }
-      log(`fetched ${group.length} page(s) in ${((performance.now() - t0) / 1000).toFixed(1)}s`
+      log(`fetched ${htmls.size}/${group.length} page(s) in ${((performance.now() - t0) / 1000).toFixed(1)}s`
         + (inFlight ? ` — ${inFlight} more batch${inFlight === 1 ? "" : "es"} in flight` : ""));
+      /* per-status breakdown of what the site refused, and throttle callout */
+      if (failures.length) {
+        const counts = new Map();
+        for (const f of failures) counts.set(f.status, (counts.get(f.status) || 0) + 1);
+        const desc = [...counts].map(([s, n]) => `${n}× ${s ? "HTTP " + s : "network error"}`).join(", ");
+        const throttling = failures.some(f => isThrottleStatus(f.status));
+        log(`batch: ${failures.length} of ${group.length} failed (${desc})${throttling ? " — site appears to be rate limiting" : ""}`, "err");
+      }
+      adaptConc(htmls.size, failures.map(f => f.status));
       for (const ch of group) {
         try { await absorb(ch, htmls.get(ch.url), retry); }
         catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}${retry ? " (retry)" : ""}`, "err"); }
@@ -1559,7 +1596,7 @@ async function run(makeSink, root = null, only = null) {
       groups.push(toFetch.slice(i, i + FETCH_BATCH));
     if (groups.length) {
       setStatus(`Fetching ${toFetch.length} chapter(s)…`);
-      await fetchInPool(groups, concurrency, fetchGroup(false));
+      await fetchInPool(groups, () => conc, fetchGroup(false));
     }
 
     /* End-of-run retry: once every other chapter is downloaded, take all the
@@ -1581,7 +1618,7 @@ async function run(makeSink, root = null, only = null) {
       setStatus(`Retry pass ${pass}/${RETRY_PASSES}: ${toRetry.length} chapter(s)…`);
       const rgroups = [];
       for (let j = 0; j < toRetry.length; j += FETCH_BATCH) rgroups.push(toRetry.slice(j, j + FETCH_BATCH));
-      await fetchInPool(rgroups, concurrency, fetchGroup(true));
+      await fetchInPool(rgroups, () => conc, fetchGroup(true));
       const recovered = toRetry.length - failed.length;
       log(failed.length
         ? `Retry pass ${pass}/${RETRY_PASSES}: ${recovered} recovered, ${failed.length} still failing`
