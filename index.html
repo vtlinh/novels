@@ -94,7 +94,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.64";
+const VERSION = "1.65";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -368,11 +368,15 @@ $("btn-stop").addEventListener("click", () => {
 
 function log(msg, cls) {
   logEl.style.display = "block";
+  /* follow the tail only when already scrolled to the bottom — if the user
+     scrolled up to read something, don't yank them back down; scrolling
+     back to the bottom re-enables following */
+  const follow = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8;
   const line = document.createElement("div");
   if (cls) line.className = cls;
   line.textContent = msg;
   logEl.appendChild(line);
-  logEl.scrollTop = logEl.scrollHeight;
+  if (follow) logEl.scrollTop = logEl.scrollHeight;
 }
 function setStatus(msg) { statusEl.textContent = msg; }
 const errMsg = e => (e.name && e.name !== "Error" ? `${e.name}: ` : "") + e.message;
