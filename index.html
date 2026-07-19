@@ -94,7 +94,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.65";
+const VERSION = "1.66";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -456,33 +456,25 @@ async function fetchMany(urls) {
    Parallelism is managed automatically (no slider): every run starts at
    CONC_START. A batch where throttling statuses (429/503/408 or Worker-side
    network errors) hit at least 20% of its chapters HALVES the target (floor
-   CONC_MIN); two consecutive fully-clean batches raise it by 5 (ceiling
-   CONC_MAX). The fetch pool reads `conc` before every new Worker call, so
-   changes take effect immediately. */
+   CONC_MIN); every fully-clean batch raises it by 10 (ceiling CONC_MAX);
+   scattered non-throttle failures hold it steady. The fetch pool reads
+   `conc` before every new Worker call, so changes take effect immediately. */
 const CONC_START = 20, CONC_MIN = 5, CONC_MAX = 50;
-let conc = CONC_START, cleanStreak = 0;
-const resetConc = () => { conc = CONC_START; cleanStreak = 0; };
+let conc = CONC_START;
+const resetConc = () => { conc = CONC_START; };
 const isThrottleStatus = s => s === 429 || s === 503 || s === 408 || s === 0;
 function adaptConc(okCount, failStatuses) {
   const total = okCount + failStatuses.length;
   if (!total) return;
   const throttled = failStatuses.filter(isThrottleStatus).length;
   if (throttled >= Math.max(2, Math.ceil(total * 0.2))) {
-    cleanStreak = 0;
     const before = conc;
     conc = Math.max(CONC_MIN, Math.floor(conc / 2));
     if (conc < before) log(`⚠ throttling detected — parallel downloads lowered ${before} → ${conc}`, "err");
-  } else if (failStatuses.length === 0) {
-    if (++cleanStreak >= 2) {
-      cleanStreak = 0;
-      if (conc < CONC_MAX) {
-        conc = Math.min(CONC_MAX, conc + 5);
-        log(`site is healthy — parallel downloads raised to ${conc}`);
-        poolPump?.();
-      }
-    }
-  } else {
-    cleanStreak = 0;   // scattered non-throttle failures: hold steady
+  } else if (failStatuses.length === 0 && conc < CONC_MAX) {
+    conc = Math.min(CONC_MAX, conc + 10);
+    log(`clean batch — parallel downloads raised to ${conc}`);
+    poolPump?.();
   }
 }
 
