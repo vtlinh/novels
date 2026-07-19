@@ -94,7 +94,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.66";
+const VERSION = "1.67";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -467,13 +467,12 @@ function adaptConc(okCount, failStatuses) {
   const total = okCount + failStatuses.length;
   if (!total) return;
   const throttled = failStatuses.filter(isThrottleStatus).length;
+  /* adjustments are silent — the per-batch failure breakdown already says
+     when the site is rate limiting; the speed changes just happen */
   if (throttled >= Math.max(2, Math.ceil(total * 0.2))) {
-    const before = conc;
     conc = Math.max(CONC_MIN, Math.floor(conc / 2));
-    if (conc < before) log(`⚠ throttling detected — parallel downloads lowered ${before} → ${conc}`, "err");
   } else if (failStatuses.length === 0 && conc < CONC_MAX) {
     conc = Math.min(CONC_MAX, conc + 10);
-    log(`clean batch — parallel downloads raised to ${conc}`);
     poolPump?.();
   }
 }
@@ -1493,7 +1492,7 @@ async function run(makeSink, root = null, only = null) {
       ({ title, chapters } = await listAllChapters(novelUrl));
       if (!chapters.length) throw new Error("no chapters found — site layout may have changed");
       runTitle = title;
-      log(`${title} — ${chapters.length} chapters, auto concurrency ${conc} (range ${CONC_MIN}–${CONC_MAX}) (v${VERSION})`);
+      log(`${title} — ${chapters.length} chapters (v${VERSION})`);
     }
     const slug = SITE.normalize(novelUrl).slug;
     const folderName = await resolveFolderName(root, slug, title);
