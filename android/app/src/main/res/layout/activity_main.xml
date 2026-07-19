@@ -85,6 +85,22 @@
         android:layout_marginTop="4dp"
         android:text="Use browser mode" />
 
+    <CheckBox
+        android:id="@+id/translateCheck"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Translate to English (Claude)" />
+
+    <EditText
+        android:id="@+id/apiKeyInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Anthropic API key (sk-ant-…)"
+        android:inputType="textPassword"
+        android:importantForAutofill="no"
+        android:visibility="gone" />
+
     <ProgressBar
         android:id="@+id/progress"
         style="?android:attr/progressBarStyleHorizontal"

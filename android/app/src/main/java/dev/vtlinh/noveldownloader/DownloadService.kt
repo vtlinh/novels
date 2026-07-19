@@ -43,6 +43,8 @@ class DownloadService : Service() {
         }
         val url = intent?.getStringExtra("url")
         val tree = intent?.getStringExtra("tree")
+        val translate = intent?.getBooleanExtra("translate", false) ?: false
+        val apiKey = intent?.getStringExtra("apiKey") ?: ""
         if (url == null || tree == null || runningFlow.value) return START_NOT_STICKY
 
         createChannel()
@@ -62,7 +64,7 @@ class DownloadService : Service() {
         engine = eng
         scope.launch {
             try {
-                eng.run(url, Uri.parse(tree))
+                eng.run(url, Uri.parse(tree), translate, apiKey)
             } catch (e: Exception) {
                 logFlow.value = logFlow.value + "ERROR: ${e.message}"
                 statusFlow.value = "Error: ${e.message}"

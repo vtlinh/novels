@@ -10,7 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper
    (no directory listing). On a new device / reinstall / copied folder the
    index is simply empty and DownloadEngine rebuilds it from one listing. */
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -18,11 +18,43 @@ class DownloadStore(context: Context) :
                 "folder TEXT, slug TEXT, filename TEXT, uri TEXT, " +
                 "PRIMARY KEY(folder, slug, filename))",
         )
+        db.execSQL(
+            "CREATE TABLE names (" +
+                "folder TEXT, slug TEXT, vi TEXT, en TEXT, " +
+                "PRIMARY KEY(folder, slug, vi))",
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         db.execSQL("DROP TABLE IF EXISTS chapters")
+        db.execSQL("DROP TABLE IF EXISTS names")
         onCreate(db)
+    }
+
+    /* translation glossary: Vietnamese term -> fixed English rendering */
+    fun getNames(folder: String, slug: String): LinkedHashMap<String, String> {
+        val out = LinkedHashMap<String, String>()
+        readableDatabase.query(
+            "names", arrayOf("vi", "en"),
+            "folder=? AND slug=?", arrayOf(folder, slug), null, null, "vi",
+        ).use { c -> while (c.moveToNext()) out[c.getString(0)] = c.getString(1) }
+        return out
+    }
+
+    fun addNames(folder: String, slug: String, pairs: List<Pair<String, String>>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for ((vi, en) in pairs) {
+                db.execSQL(
+                    "INSERT OR IGNORE INTO names(folder,slug,vi,en) VALUES(?,?,?,?)",
+                    arrayOf(folder, slug, vi, en),
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     /* filename -> document URI for one novel, ordered by filename */

@@ -89,7 +89,12 @@ class DownloadEngine(
         var filename: String? = null
     }
 
-    suspend fun run(novelUrl: String, treeUri: Uri) = withContext(Dispatchers.IO) {
+    suspend fun run(
+        novelUrl: String,
+        treeUri: Uri,
+        translate: Boolean,
+        apiKey: String,
+    ) = withContext(Dispatchers.IO) {
         val site = Sites.forUrl(novelUrl)
         if (site == null) {
             log("Unsupported URL: $novelUrl")
@@ -304,8 +309,17 @@ class DownloadEngine(
         val secs = (System.currentTimeMillis() - fetchStart) / 1000.0
         val avg = if (secs > 1 && saved.get() > 0) " Avg %.1f/s.".format(saved.get() / secs) else ""
         val summary = "${saved.get()} saved, $skipped skipped, ${failed.size} failed.$avg"
-        status((if (stopRequested) "Stopped: " else "Done: ") + summary)
         log((if (stopRequested) "Stopped — re-run to resume. " else "✓ Finished. ") + summary)
+
+        if (translate && apiKey.isNotBlank() && !stopRequested) {
+            try {
+                Translator(context, apiKey, log, status)
+                    .translate(dir, store, folderKey, slug, chapters.mapNotNull { it.filename }) { stopRequested }
+            } catch (e: Exception) {
+                log("TRANSLATION FAILED — ${e.message}")
+            }
+        }
+        status((if (stopRequested) "Stopped: " else "Done: ") + summary)
     }
 
     private fun writeFile(dir: DocumentFile, name: String, text: String): String {

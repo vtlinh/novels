@@ -40,6 +40,20 @@ class MainActivity : AppCompatActivity() {
         urlInput.setText(prefs.getString("url", ""))
         handleShare(intent)
 
+        // translation toggle: reveal the key field, remember both
+        val translateCheck = findViewById<android.widget.CheckBox>(R.id.translateCheck)
+        val apiKeyInput = findViewById<EditText>(R.id.apiKeyInput)
+        translateCheck.isChecked = prefs.getBoolean("translate", false)
+        apiKeyInput.setText(prefs.getString("apiKey", ""))
+        apiKeyInput.visibility = if (translateCheck.isChecked) View.VISIBLE else View.GONE
+        translateCheck.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean("translate", checked).apply()
+            apiKeyInput.visibility = if (checked) View.VISIBLE else View.GONE
+        }
+        apiKeyInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) prefs.edit().putString("apiKey", apiKeyInput.text.toString().trim()).apply()
+        }
+
         findViewById<Button>(R.id.folderBtn).setOnClickListener { pickFolder.launch(null) }
 
         findViewById<Button>(R.id.downloadBtn).setOnClickListener { startDownload() }
@@ -162,8 +176,17 @@ class MainActivity : AppCompatActivity() {
         }
         val tree = prefs.getString("tree", null)
         if (tree == null) { pickFolder.launch(null); return }
+        val translate = findViewById<android.widget.CheckBox>(R.id.translateCheck).isChecked
+        val apiKey = findViewById<EditText>(R.id.apiKeyInput).text.toString().trim()
+        if (translate && apiKey.isEmpty()) {
+            findViewById<TextView>(R.id.statusText).text = "Enter your Anthropic API key to translate."
+            return
+        }
+        prefs.edit().putBoolean("translate", translate).putString("apiKey", apiKey).apply()
         startForegroundService(
-            Intent(this, DownloadService::class.java).putExtra("url", url).putExtra("tree", tree),
+            Intent(this, DownloadService::class.java)
+                .putExtra("url", url).putExtra("tree", tree)
+                .putExtra("translate", translate).putExtra("apiKey", apiKey),
         )
     }
 
