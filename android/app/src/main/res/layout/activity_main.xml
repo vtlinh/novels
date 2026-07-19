@@ -36,6 +36,14 @@
         android:textColor="@color/fg"
         android:textStyle="bold" />
 
+    <TextView
+        android:id="@+id/versionText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textSize="13sp"
+        android:textColor="@color/muted" />
+
     <!-- card: same rounded panel as the web app -->
     <LinearLayout
         android:layout_width="match_parent"
