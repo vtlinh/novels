@@ -141,14 +141,30 @@ class DownloadEngine(
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
-        var page = 1
-        while (page < last && !stopRequested) {
-            page++
-            status("Listing chapters: page $page of $last…")
-            val html = fetch(site.listPageUrl(base, slug, page)).html ?: continue
-            val d = Jsoup.parse(html, base)
-            addLinks(d)
-            last = maxOf(last, site.maxPage(d, slug))
+        /* fetch all remaining listing pages in parallel (Semaphore-capped);
+           parse in page order so chapter discovery stays deterministic. A
+           later page can raise the page count, so loop until none are left. */
+        var fetched = 1
+        while (fetched < last && !stopRequested) {
+            val batch = ((fetched + 1)..last).toList()
+            status("Listing chapters: pages ${batch.first()}-${batch.last()} of $last…")
+            val htmls = arrayOfNulls<String>(batch.size)
+            coroutineScope {
+                val sem = Semaphore(conc)
+                for ((i, p) in batch.withIndex()) {
+                    launch {
+                        sem.withPermit {
+                            if (!stopRequested) htmls[i] = fetch(site.listPageUrl(base, slug, p)).html
+                        }
+                    }
+                }
+            }
+            for (html in htmls) {
+                val d = Jsoup.parse(html ?: continue, base)
+                addLinks(d)
+                last = maxOf(last, site.maxPage(d, slug))
+            }
+            fetched = batch.last()
         }
         if (stopRequested) { status("Stopped."); return@withContext }
 
