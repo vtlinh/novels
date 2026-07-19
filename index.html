@@ -95,7 +95,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.73";
+const VERSION = "1.74";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -820,7 +820,10 @@ const OPUS = "claude-opus-4-8";               // translates chapter + names toge
 const TRANSLATE_EFFORT = "medium";
 const TRANSLATE_MAX_TOKENS = 128000;          // Opus 4.8 max output; a bundle's whole translation must fit under this
 const NAMES_CACHE_FILE = ".names_cache.json";
-const MANIFEST_FILE = ".downloaded.json";      // per-novel list of saved chapters, so resumes skip the folder listing
+/* ONE manifest at the download ROOT (the user-picked folder), keyed by novel
+   slug: { "<slug>": ["Chapter 1.txt", ...], ... } — resumes read this single
+   file instead of enumerating the novel's folder */
+const MANIFEST_FILE = ".downloaded.json";
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
 const FETCH_BATCH = 50;                        // chapters fetched per Worker call (free-tier subrequest limit)
@@ -1555,16 +1558,17 @@ async function run(makeSink, root = null, only = null) {
     /* skip already-downloaded chapters without any fetch: one directory
        listing checked in memory, instead of a filesystem call per chapter */
     setStatus("Checking already-downloaded chapters…");
-    /* the manifest written at the end of each run lists every saved chapter,
-       so a resume is one small file read instead of enumerating the whole
-       folder; without one (first run, new device, deleted) fall back to the
-       listing. A stale manifest only ever re-downloads (and overwrites)
-       chapters that are already there — never skips a missing one. */
-    let existing = null;
-    try {
-      const m = JSON.parse(await sink.read(MANIFEST_FILE) ?? "null");
-      if (m && Array.isArray(m.chapters)) existing = new Set(m.chapters);
-    } catch {}
+    /* the root-level manifest (one file in the picked folder, keyed by novel
+       slug) lists every saved chapter, so a resume is one small file read
+       instead of enumerating the novel's folder; with no entry (first run,
+       new device, deleted) fall back to the listing. A stale manifest only
+       ever re-downloads (and overwrites) chapters that are already there —
+       never skips a missing one. */
+    let existing = null, manifest = {};
+    if (root) {
+      try { manifest = JSON.parse(await root.read(MANIFEST_FILE) ?? "{}") || {}; } catch {}
+      if (Array.isArray(manifest[slug])) existing = new Set(manifest[slug]);
+    }
     if (!existing) existing = await sink.list();
     const toFetch = [];
     for (const ch of chapters) {
@@ -1670,12 +1674,14 @@ async function run(makeSink, root = null, only = null) {
        overall download-speed figure */
     fetchEnd = performance.now();
 
-    /* persist the manifest (chapter files only) so the next run resumes
-       without enumerating the folder */
-    try {
-      await sink.write(MANIFEST_FILE,
-        JSON.stringify({ chapters: [...existing].filter(n => /^Chapter .+\.txt$/.test(n)).sort() }));
-    } catch {}
+    /* persist this novel's entry in the root manifest (chapter files only)
+       so the next run resumes without enumerating the folder */
+    if (root) {
+      try {
+        manifest[slug] = [...existing].filter(n => /^Chapter .+\.txt$/.test(n)).sort();
+        await root.write(MANIFEST_FILE, JSON.stringify(manifest));
+      } catch {}
+    }
 
     if (translate && collected.length && !stopRequested) {
       collected.sort((a, b) => (chapterNum(a.filename) ?? 1e9) - (chapterNum(b.filename) ?? 1e9));
