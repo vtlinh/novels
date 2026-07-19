@@ -58,7 +58,7 @@ class MainActivity : AppCompatActivity() {
             if (!hasFocus) prefs.edit().putString("apiKey", apiKeyInput.text.toString().trim()).apply()
         }
 
-        findViewById<Button>(R.id.folderBtn).setOnClickListener { pickFolder.launch(null) }
+        findViewById<TextView>(R.id.folderBtn).setOnClickListener { pickFolder.launch(null) }
 
         findViewById<Button>(R.id.downloadBtn).setOnClickListener { startDownload() }
 
@@ -198,6 +198,12 @@ class MainActivity : AppCompatActivity() {
         val tree = prefs.getString("tree", null)
         findViewById<TextView>(R.id.folderLabel).text =
             if (tree == null) "No folder selected"
-            else "Folder: " + (Uri.parse(tree).lastPathSegment ?: tree)
+            else "Saved folder: " + folderDisplayName(tree)
+    }
+
+    /* "primary:Documents/Novels" -> "Novels" */
+    private fun folderDisplayName(tree: String): String {
+        val seg = Uri.parse(tree).lastPathSegment ?: return tree
+        return seg.substringAfterLast(':').substringAfterLast('/').ifEmpty { seg }
     }
 }

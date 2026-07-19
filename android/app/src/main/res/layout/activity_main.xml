@@ -74,62 +74,11 @@
             android:inputType="textUri"
             android:importantForAutofill="no" />
 
-        <TextView
-            android:id="@+id/folderLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:textSize="12sp"
-            android:textColor="@color/muted"
-            android:text="No folder selected" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/downloadBtn"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Download"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:textColor="#ffffff"
-                app:backgroundTint="@color/btn_accent"
-                app:cornerRadius="8dp" />
-
-            <Button
-                android:id="@+id/stopBtn"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Stop"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:textColor="#ffffff"
-                app:backgroundTint="@color/err"
-                app:cornerRadius="8dp"
-                android:visibility="gone" />
-
-            <Button
-                android:id="@+id/folderBtn"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Folder…"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:textColor="@color/fg"
-                app:backgroundTint="@color/btn_secondary"
-                app:cornerRadius="8dp" />
-        </LinearLayout>
-
         <Button
             android:id="@+id/browserBtn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
             android:text="Browser mode"
             android:textSize="14sp"
             android:textStyle="bold"
@@ -161,6 +110,66 @@
             android:inputType="textPassword"
             android:importantForAutofill="no"
             android:visibility="gone" />
+
+        <!-- saved-folder readout with an inline "change" link -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/folderLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="@color/muted"
+                android:text="No folder selected" />
+
+            <TextView
+                android:id="@+id/folderBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=" — change"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="4dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/downloadBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Download"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#ffffff"
+                app:backgroundTint="@color/btn_accent"
+                app:cornerRadius="8dp" />
+
+            <Button
+                android:id="@+id/stopBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Stop"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#ffffff"
+                app:backgroundTint="@color/err"
+                app:cornerRadius="8dp"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <ProgressBar
             android:id="@+id/progress"

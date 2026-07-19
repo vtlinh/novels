@@ -27,16 +27,22 @@
             app:cornerRadius="8dp"
             android:enabled="false" />
 
-        <TextView
+        <EditText
             android:id="@+id/browseUrl"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
+            android:background="@drawable/bg_input"
+            android:padding="8dp"
+            android:hint="Enter URL"
+            android:textSize="12sp"
+            android:textColor="@color/fg"
+            android:textColorHint="@color/muted"
+            android:inputType="textUri"
             android:maxLines="1"
-            android:ellipsize="start"
-            android:textSize="11sp"
-            android:textColor="@color/muted" />
+            android:imeOptions="actionGo"
+            android:importantForAutofill="no" />
 
         <Button
             android:id="@+id/browseClose"
