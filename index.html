@@ -98,7 +98,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.83";
+const VERSION = "1.84";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1834,7 +1834,7 @@ $("browse-close").addEventListener("click", closeBrowser);
 /* stable URL: the android workflow publishes every main build's APK to the
    fixed "android-latest" release, so this link never changes */
 $("btn-apk").addEventListener("click", () => {
-  location.href = "https://github.com/vtlinh/novels/releases/download/android-latest/app-debug.apk";
+  location.href = "https://github.com/vtlinh/novels/releases/download/android-latest/app-release.apk";
 });
 window.addEventListener("message", e => {
   if (e.origin !== PROXY || !e.data || e.data.type !== "browse-url") return;

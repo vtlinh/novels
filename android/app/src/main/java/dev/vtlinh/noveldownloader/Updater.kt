@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 object Updater {
     private const val BASE = "https://github.com/vtlinh/novels/releases/download/android-latest"
     private const val VERSION_URL = "$BASE/version.json"
-    private const val APK_URL = "$BASE/app-debug.apk"
+    private const val APK_URL = "$BASE/app-release.apk"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

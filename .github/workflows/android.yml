@@ -25,13 +25,13 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build debug APK
-        run: gradle -p android assembleDebug
+      - name: Build release APK
+        run: gradle -p android assembleRelease
 
       - uses: actions/upload-artifact@v4
         with:
-          name: novel-downloader-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: novel-downloader-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
 
       # main builds publish to a fixed release so the web page's
       # "Download Android app" button always has a stable public URL
@@ -43,6 +43,9 @@ jobs:
           echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"0.1.${GITHUB_RUN_NUMBER}\"}" > version.json
           gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create android-latest --repo "$GITHUB_REPOSITORY" \
-              --title "Android app (latest)" --notes "Debug APK auto-built from main." --latest=false
+              --title "Android app (latest)" --notes "APK auto-built from main." --latest=false
+          # app-debug.apk is a legacy alias: updaters installed before the
+          # switch to release builds still download that fixed filename
+          cp android/app/build/outputs/apk/release/app-release.apk app-debug.apk
           gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber \
-            android/app/build/outputs/apk/debug/app-debug.apk version.json
+            android/app/build/outputs/apk/release/app-release.apk app-debug.apk version.json
