@@ -5,17 +5,36 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import androidx.appcompat.app.AppCompatActivity
+import java.io.ByteArrayInputStream
 
 /* In-app site browser. Native WebView loads the novel sites directly — no
    proxy or CORS to work around — and a sticky header keeps a Download button
    on top. Download normalizes whatever page is open (novel, chapter, or
    listing) to its novel URL, hands it back to MainActivity, and finishes. */
 class BrowserActivity : AppCompatActivity() {
+
+    companion object {
+        /* well-known ad/tracking networks; requests to them are answered with
+           an empty body so the ad never loads */
+        private val AD_HOSTS = listOf(
+            "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+            "googletagmanager.com", "googletagservices.com", "google-analytics.com",
+            "adnxs.com", "adsterra", "hilltopads", "propellerads", "popads.net",
+            "popcash.net", "adcash", "exoclick", "juicyads", "trafficjunky",
+            "mgid.com", "taboola.com", "outbrain.com", "criteo", "zedo.com",
+            "adform.net", "smartadserver", "openx.net", "rubiconproject",
+            "pubmatic.com", "onclickads", "clickadu", "galaksion", "adskeeper",
+        )
+        private fun isAdHost(host: String) =
+            AD_HOSTS.any { host == it || host.endsWith(".$it") || host.contains(it) }
+    }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
     private var currentUrl: String = "https://truyenfull.today/"
@@ -48,6 +67,28 @@ class BrowserActivity : AppCompatActivity() {
                     if (!urlEdit.hasFocus()) urlEdit.setText(url)
                     downloadBtn.isEnabled = Sites.forUrl(url) != null
                 }
+            }
+
+            /* ad filtering: swallow every request to a known ad network */
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                val host = request?.url?.host ?: return null
+                return if (isAdHost(host)) {
+                    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                } else {
+                    null
+                }
+            }
+
+            /* popup-redirect filtering: a main-frame navigation to a different
+               domain that was NOT triggered by a user tap (no gesture) is the
+               classic JS ad redirect — block it. Taps navigate normally. */
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                if (request == null || !request.isForMainFrame) return false
+                val host = request.url.host ?: return false
+                if (isAdHost(host)) return true
+                if (request.isRedirect) return false   // server-side redirects are legitimate
+                val curHost = try { java.net.URI(currentUrl).host } catch (e: Exception) { null }
+                return host != curHost && !request.hasGesture()
             }
         }
         web.loadUrl(start)
