@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:background="@color/bg">
 
     <!-- sticky update banner: hidden until a newer version is found -->
     <TextView
         android:id="@+id/updateBanner"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#4f8cff"
+        android:background="@color/accent"
         android:textColor="#ffffff"
         android:textStyle="bold"
         android:gravity="center"
@@ -31,105 +33,162 @@
         android:layout_height="wrap_content"
         android:text="@string/app_name"
         android:textSize="22sp"
+        android:textColor="@color/fg"
         android:textStyle="bold" />
 
-    <EditText
-        android:id="@+id/urlInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:hint="https://novelfull.com/god-of-crime.html"
-        android:inputType="textUri"
-        android:importantForAutofill="no" />
-
-    <TextView
-        android:id="@+id/folderLabel"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:textSize="12sp"
-        android:text="No folder selected" />
-
+    <!-- card: same rounded panel as the web app -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="horizontal">
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_card"
+        android:padding="20dp">
 
-        <Button
-            android:id="@+id/downloadBtn"
+        <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Download" />
+            android:text="Novel URL"
+            android:textSize="12sp"
+            android:textColor="@color/muted" />
+
+        <EditText
+            android:id="@+id/urlInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/bg_input"
+            android:padding="11dp"
+            android:hint="https://novelfull.com/god-of-crime.html"
+            android:textSize="14sp"
+            android:textColor="@color/fg"
+            android:textColorHint="@color/muted"
+            android:inputType="textUri"
+            android:importantForAutofill="no" />
+
+        <TextView
+            android:id="@+id/folderLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="12sp"
+            android:textColor="@color/muted"
+            android:text="No folder selected" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/downloadBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Download"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#ffffff"
+                app:backgroundTint="@color/btn_accent"
+                app:cornerRadius="8dp" />
+
+            <Button
+                android:id="@+id/stopBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Stop"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#ffffff"
+                app:backgroundTint="@color/err"
+                app:cornerRadius="8dp"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/folderBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Folder…"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg"
+                app:backgroundTint="@color/btn_secondary"
+                app:cornerRadius="8dp" />
+        </LinearLayout>
 
         <Button
-            android:id="@+id/stopBtn"
+            android:id="@+id/browserBtn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="Stop"
+            android:text="Browser mode"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg"
+            app:backgroundTint="@color/btn_secondary"
+            app:cornerRadius="8dp" />
+
+        <CheckBox
+            android:id="@+id/translateCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Translate to English (Claude)"
+            android:textSize="14sp"
+            android:textColor="@color/fg"
+            app:buttonTint="@color/accent" />
+
+        <EditText
+            android:id="@+id/apiKeyInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/bg_input"
+            android:padding="11dp"
+            android:hint="Anthropic API key (sk-ant-…)"
+            android:textSize="14sp"
+            android:textColor="@color/fg"
+            android:textColorHint="@color/muted"
+            android:inputType="textPassword"
+            android:importantForAutofill="no"
             android:visibility="gone" />
 
-        <Button
-            android:id="@+id/folderBtn"
-            android:layout_width="wrap_content"
+        <ProgressBar
+            android:id="@+id/progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="Folder…" />
+            android:layout_marginTop="10dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/accent"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textSize="13sp"
+            android:textColor="@color/muted" />
     </LinearLayout>
-
-    <Button
-        android:id="@+id/browserBtn"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="Browser mode" />
-
-    <CheckBox
-        android:id="@+id/translateCheck"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Translate to English (Claude)" />
-
-    <EditText
-        android:id="@+id/apiKeyInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Anthropic API key (sk-ant-…)"
-        android:inputType="textPassword"
-        android:importantForAutofill="no"
-        android:visibility="gone" />
-
-    <ProgressBar
-        android:id="@+id/progress"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:indeterminate="true"
-        android:visibility="gone" />
-
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:textSize="13sp" />
 
     <ScrollView
         android:id="@+id/logScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="8dp"
-        android:layout_weight="1">
+        android:layout_marginTop="12dp"
+        android:layout_weight="1"
+        android:background="@drawable/bg_log"
+        android:padding="12dp">
 
         <TextView
             android:id="@+id/logText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
-            android:textSize="11sp" />
+            android:textSize="11sp"
+            android:textColor="@color/fg" />
     </ScrollView>
     </LinearLayout>
 </LinearLayout>
