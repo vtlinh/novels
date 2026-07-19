@@ -130,7 +130,38 @@ class DownloadEngine(
         log("Saving to: $folderName/")
 
         status("Checking already-downloaded chapters…")
-        val existing = dir.listFiles().mapNotNull { it.name }.toHashSet()
+        val store = DownloadStore(context)
+        val folderKey = treeUri.toString()
+        val existing = HashSet<String>()   // filenames known present on disk
+
+        val cached = store.get(folderKey, slug)   // filename -> document URI
+        var usedCache = false
+        if (cached.isNotEmpty()) {
+            /* O(1) spot-check: does a sample indexed file still exist? Catches
+               a deleted/moved folder without listing the whole directory. */
+            val sampleUri = cached.values.first()
+            val ok = try {
+                DocumentFile.fromSingleUri(context, Uri.parse(sampleUri))?.exists() == true
+            } catch (e: Exception) { false }
+            if (ok) {
+                existing.addAll(cached.keys)
+                usedCache = true
+            } else {
+                store.clear(folderKey, slug)
+                log("Saved-chapter index was stale (folder moved or removed) — re-listing.")
+            }
+        }
+        if (!usedCache) {
+            /* fallback: one folder listing (verify non-empty — files may have
+               been copied in from elsewhere), then rebuild the index */
+            val rows = ArrayList<Pair<String, String>>()
+            for (f in dir.listFiles()) {
+                val n = f.name ?: continue
+                if (f.length() > 0) { existing.add(n); rows.add(n to f.uri.toString()) }
+            }
+            store.addAll(folderKey, slug, rows)
+        }
+
         val toFetch = chapters.filter { it.filename != null && it.filename !in existing }
         val skipped = chapters.size - toFetch.size
         if (skipped > 0) log("skip $skipped already-downloaded chapter(s)")
@@ -152,7 +183,8 @@ class DownloadEngine(
                             val body = Extractor.parseChapter(
                                 Jsoup.parse(html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
                             )
-                            writeFile(dir, ch.filename!!, body)
+                            val uri = writeFile(dir, ch.filename!!, body)
+                            store.add(folderKey, slug, ch.filename!!, uri)
                             saved.incrementAndGet()
                         } catch (e: Exception) {
                             failed.add(ch)
@@ -192,11 +224,12 @@ class DownloadEngine(
         log((if (stopRequested) "Stopped — re-run to resume. " else "✓ Finished. ") + summary)
     }
 
-    private fun writeFile(dir: DocumentFile, name: String, text: String) {
+    private fun writeFile(dir: DocumentFile, name: String, text: String): String {
         val f = dir.createFile("text/plain", name)
             ?: throw RuntimeException("could not create $name")
         val out = context.contentResolver.openOutputStream(f.uri)
             ?: throw RuntimeException("could not open $name")
         out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+        return f.uri.toString()
     }
 }
