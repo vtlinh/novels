@@ -12,6 +12,8 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import androidx.appcompat.app.AppCompatActivity
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import java.io.ByteArrayInputStream
 
 /* In-app site browser. Native WebView loads the novel sites directly — no
@@ -59,6 +61,14 @@ class BrowserActivity : AppCompatActivity() {
 
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
+        /* force dark: the app theme is always dark, so darken pages too —
+           algorithmic darkening on modern WebViews, legacy force-dark otherwise */
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(web.settings, true)
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            @Suppress("DEPRECATION")
+            WebSettingsCompat.setForceDark(web.settings, WebSettingsCompat.FORCE_DARK_ON)
+        }
         web.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 if (url != null) {
