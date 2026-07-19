@@ -45,6 +45,17 @@
   .ok { color:var(--ok); } .err { color:var(--err); }
   p.hint { color:var(--muted); font-size:12px; margin:16px 0 0; }
   p.hint code { word-break:break-all; }
+  /* in-app site browser overlay */
+  #browser { position:fixed; inset:0; z-index:10; background:var(--bg);
+             display:none; flex-direction:column; }
+  #browser header { display:flex; gap:10px; align-items:center; padding:8px 12px;
+                    background:var(--card); }
+  #browser header button { margin:0; padding:8px 14px; }
+  #browse-dl { background:var(--accent); color:#fff; }
+  #browse-close { background:#2a313a; color:var(--fg); }
+  #browse-url-label { flex:1; font-size:12px; color:var(--muted); overflow:hidden;
+                      text-overflow:ellipsis; white-space:nowrap; direction:rtl; }
+  #browse-frame { flex:1; width:100%; border:0; background:#fff; }
 </style>
 </head>
 <body>
@@ -62,6 +73,7 @@
       <label for="apikey">Anthropic API key (kept in this browser only)</label>
       <input id="apikey" type="password" placeholder="sk-ant-..." spellcheck="false">
     </div>
+    <p class="hint">Or browse for a novel: <a href="#" id="open-browser" style="color:var(--accent)">open the novel site</a> — the Download button stays on top while you browse.</p>
     <p class="hint" id="saved-folder" style="display:none">Saved folder: <b id="saved-folder-name"></b> — <a href="#" id="saved-folder-clear" style="color:var(--accent)">change</a></p>
     <button id="btn-folder">Download</button>
     <button id="btn-stop">Stop</button>
@@ -73,13 +85,22 @@
   </div>
 </main>
 
+<div id="browser">
+  <header>
+    <button id="browse-dl" disabled>Download</button>
+    <span id="browse-url-label"></span>
+    <button id="browse-close">✕</button>
+  </header>
+  <iframe id="browse-frame" title="Novel site"></iframe>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
         integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=="
         crossorigin="anonymous"></script>
 <script>
 "use strict";
 
-const VERSION = "1.55";
+const VERSION = "1.56";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -117,10 +138,12 @@ const SITES = [
     name: "truyenfull",
     urlRe: /^https:\/\/truyenfull\.(today|live)(\/|$)/i,
     headingWord: "Chương",
-    /* /ten-truyen/ -> base "…/ten-truyen/", slug "ten-truyen" */
+    /* Any page under the novel -> base "…/ten-truyen/", slug "ten-truyen"
+       (a chapter or listing URL normalizes to its novel's URL) */
     normalize(novelUrl) {
-      const base = novelUrl.replace(/\/+$/, "") + "/";
-      return { base, slug: new URL(base).pathname.replace(/^\/|\/$/g, "").split("/")[0] };
+      const u = new URL(novelUrl);
+      const slug = u.pathname.replace(/^\/+/, "").split("/")[0];
+      return { base: `${u.origin}/${slug}/`, slug };
     },
     listPageUrl(base, slug, p) { return `${base}trang-${p}/`; },
     isChapterPath(path, slug) { return path.includes(`/${slug}/`) && /chuong-\d+/.test(path); },
@@ -1616,7 +1639,9 @@ async function run(makeSink, root = null, only = null) {
   }
 }
 
-$("btn-folder").addEventListener("click", async () => {
+/* the full download flow from a user gesture — shared by the Download
+   button and the in-app browser's sticky Download button */
+async function startFolderDownload() {
   /* the button is always enabled, so guard here: give clear feedback instead
      of making the user pick a folder for a run that will silently no-op */
   if (!siteFor($("url").value)) {
@@ -1638,6 +1663,49 @@ $("btn-folder").addEventListener("click", async () => {
     showSavedFolder(root.name);
   }
   run(folderName => folderSink(root, folderName), rootOps(root));
+}
+$("btn-folder").addEventListener("click", startFolderDownload);
+
+/* ---- in-app site browser ----
+   The novel sites forbid direct framing and a cross-origin iframe's location
+   is unreadable, so pages are proxied through the Worker's /browse route:
+   it strips frame-blocking headers and scripts, keeps link navigation inside
+   the proxy, and each page reports its original URL up to us via
+   postMessage. The sticky header's Download button normalizes whatever page
+   is being viewed (novel, chapter, listing) to its novel URL and starts the
+   usual folder download. */
+const BROWSE_HOME = "https://truyenfull.today/";
+let browseUrl = null;
+function closeBrowser() {
+  $("browser").style.display = "none";
+  $("browse-frame").src = "about:blank";
+}
+$("open-browser").addEventListener("click", e => {
+  e.preventDefault();
+  const v = $("url").value.trim();
+  const start = siteFor(v) ? v : BROWSE_HOME;
+  browseUrl = null;
+  $("browse-dl").disabled = true;
+  $("browse-url-label").textContent = start;
+  $("browse-frame").src = `${PROXY}/browse?url=${encodeURIComponent(start)}`;
+  $("browser").style.display = "flex";
+});
+$("browse-close").addEventListener("click", closeBrowser);
+window.addEventListener("message", e => {
+  if (e.origin !== PROXY || !e.data || e.data.type !== "browse-url") return;
+  browseUrl = String(e.data.url || "");
+  $("browse-url-label").textContent = browseUrl;
+  $("browse-dl").disabled = !siteFor(browseUrl);
+});
+$("browse-dl").addEventListener("click", () => {
+  const site = siteFor(browseUrl);
+  if (!site) return;
+  const novel = site.normalize(browseUrl).base;
+  $("url").value = novel;
+  localStorage.setItem("url", novel);
+  updateButtons();
+  closeBrowser();
+  startFolderDownload();
 });
 
 </script>

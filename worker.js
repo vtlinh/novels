@@ -37,6 +37,9 @@ const corsHeaders = origin => ({
   "vary": "Origin",
 });
 
+// The only sites /browse will proxy — keeps it from being an open proxy.
+const BROWSABLE_SITES = /^https:\/\/(truyenfull\.(today|live)|novelfull\.com)\//i;
+
 const PAGE_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
@@ -68,10 +71,52 @@ export default {
   async fetch(request) {
     const origin = request.headers.get("Origin") || "";
     const allowed = ALLOWED_ORIGINS.has(origin);
+    const url = new URL(request.url);
 
     // CORS preflight for any route — only answered for allowed origins.
     if (request.method === "OPTIONS")
       return new Response(null, { headers: allowed ? corsHeaders(origin) : {} });
+
+    // In-app site browser: proxy a supported novel site's page so the
+    // front-end can show it in an iframe (the sites forbid direct framing).
+    // This route sits BEFORE the origin gate because iframe navigations
+    // carry no Origin header; it is NOT an open proxy — only the supported
+    // novel sites may be targeted, and frame-ancestors restricts embedding
+    // to our own front-end. Scripts/ads are stripped (the pages are
+    // server-rendered) and a small shim is injected that (a) reports the
+    // page's original URL to the parent app and (b) keeps link navigation
+    // inside the proxy.
+    //   GET <worker>/browse?url=<encoded novel-site URL>
+    if (url.pathname === "/browse" && request.method === "GET") {
+      const target = url.searchParams.get("url") || "";
+      if (!BROWSABLE_SITES.test(target))
+        return new Response("unsupported url", { status: 400 });
+      const r = await fetch(target, { headers: PAGE_HEADERS });
+      const ct = r.headers.get("content-type") || "";
+      if (!ct.includes("html"))
+        return new Response(r.body, { status: r.status, headers: { "content-type": ct || "application/octet-stream" } });
+      const shim =
+        `<base href="${target.replace(/"/g, "&quot;")}">` +
+        `<script>(function(){var ORIG=${JSON.stringify(target)};` +
+        `try{parent.postMessage({type:"browse-url",url:ORIG},"*");}catch(e){}` +
+        `document.addEventListener("click",function(e){` +
+        `var t=e.target;while(t&&!(t.tagName==="A"&&t.getAttribute("href")))t=t.parentElement;` +
+        `if(!t)return;var href;try{href=new URL(t.getAttribute("href"),ORIG).href;}catch(err){return;}` +
+        `e.preventDefault();` +
+        `if(${BROWSABLE_SITES.toString()}.test(href))location.href="/browse?url="+encodeURIComponent(href);` +
+        `},true);})();</scr` + `ipt>`;
+      const cleaned = new HTMLRewriter()
+        .on("script, noscript, iframe, ins", { element(e) { e.remove(); } })
+        .on("head", { element(e) { e.prepend(shim, { html: true }); } })
+        .transform(r);
+      return new Response(cleaned.body, {
+        status: r.status,
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "content-security-policy": "frame-ancestors " + [...ALLOWED_ORIGINS].join(" "),
+        },
+      });
+    }
 
     // Only our own front-end may use the Worker.
     if (!allowed) return new Response("origin not allowed", { status: 403 });
@@ -82,8 +127,6 @@ export default {
       for (const [k, v] of Object.entries(CORS)) out.headers.set(k, v);
       return out;
     };
-
-    const url = new URL(request.url);
 
     // Batch status long-poll: check every ~10s for up to ~90s, return the
     // moment the batch ends — so the browser makes far fewer status calls.
@@ -157,7 +200,7 @@ export default {
     }
 
     return new Response(
-      "Novel Downloader proxy. Routes: GET /?url=<truyenfull page>, " +
+      "Novel Downloader proxy. Routes: GET /?url=<novel page>, GET /browse?url=<novel page>, " +
       "POST /fetch-many, ANY /anthropic/v1/..., GET /anthropic-poll/<batchId>",
       { headers: CORS },
     );
