@@ -94,7 +94,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.70";
+const VERSION = "1.71";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -362,6 +362,7 @@ $("btn-stop").addEventListener("click", () => {
   stopRequested = true;
   aborter?.abort();
   $("btn-stop").disabled = true;
+  $("btn-stop").textContent = "Stopping…";
   setStatus("Stopping — finishing what's already in flight…");
   log("Stop requested.", "err");
 });
@@ -1468,6 +1469,7 @@ async function run(makeSink, root = null, only = null) {
   lastRun = { makeSink, root };
   aborter = new AbortController();
   $("btn-stop").disabled = false;
+  $("btn-stop").textContent = "Stop";   // reset after a previous "Stopping…"
   /* swap the buttons BEFORE the first await, so clicking Retry/Restart
      immediately replaces it with Stop (no window where a running retry
      still shows a clickable Retry button) */
