@@ -42,30 +42,19 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.folderBtn).setOnClickListener { pickFolder.launch(null) }
 
-        findViewById<Button>(R.id.downloadBtn).setOnClickListener {
-            val url = urlInput.text.toString().trim()
-            prefs.edit().putString("url", url).apply()
-            if (Sites.forUrl(url) == null) {
-                findViewById<TextView>(R.id.statusText).text =
-                    "Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com"
-                return@setOnClickListener
-            }
-            val tree = prefs.getString("tree", null)
-            if (tree == null) {
-                pickFolder.launch(null)
-                return@setOnClickListener
-            }
-            val i = Intent(this, DownloadService::class.java)
-                .putExtra("url", url)
-                .putExtra("tree", tree)
-            startForegroundService(i)
+        findViewById<Button>(R.id.downloadBtn).setOnClickListener { startDownload() }
+
+        findViewById<Button>(R.id.browserBtn).setOnClickListener {
+            startActivity(Intent(this, BrowserActivity::class.java))
         }
 
         findViewById<Button>(R.id.stopBtn).setOnClickListener {
+            (it as Button).text = "Stopping…"
             startService(Intent(this, DownloadService::class.java).setAction(DownloadService.ACTION_STOP))
         }
 
         updateFolderLabel()
+        maybeAutoStartFromShare()
 
         val statusText = findViewById<TextView>(R.id.statusText)
         val logText = findViewById<TextView>(R.id.logText)
@@ -86,6 +75,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             DownloadService.runningFlow.collectLatest { r ->
                 stopBtn.visibility = if (r) View.VISIBLE else View.GONE
+                if (r) stopBtn.text = "Stop"   // reset after a previous "Stopping…"
                 progress.visibility = if (r) View.VISIBLE else View.GONE
                 dlBtn.isEnabled = !r
             }
@@ -138,6 +128,7 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleShare(intent)
+        maybeAutoStartFromShare()
     }
 
     private fun handleShare(intent: Intent?) {
@@ -146,6 +137,34 @@ class MainActivity : AppCompatActivity() {
         val m = Regex("https?://\\S+").find(text) ?: return
         findViewById<EditText>(R.id.urlInput).setText(m.value)
         prefs.edit().putString("url", m.value).apply()
+        sharedThisLaunch = true
+    }
+
+    private var sharedThisLaunch = false
+
+    /* a shared URL with a folder already set starts the download at once */
+    private fun maybeAutoStartFromShare() {
+        if (!sharedThisLaunch) return
+        sharedThisLaunch = false
+        val url = findViewById<EditText>(R.id.urlInput).text.toString().trim()
+        if (Sites.forUrl(url) == null || prefs.getString("tree", null) == null) return
+        if (DownloadService.runningFlow.value) return
+        startDownload()
+    }
+
+    private fun startDownload() {
+        val url = findViewById<EditText>(R.id.urlInput).text.toString().trim()
+        prefs.edit().putString("url", url).apply()
+        if (Sites.forUrl(url) == null) {
+            findViewById<TextView>(R.id.statusText).text =
+                "Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com"
+            return
+        }
+        val tree = prefs.getString("tree", null)
+        if (tree == null) { pickFolder.launch(null); return }
+        startForegroundService(
+            Intent(this, DownloadService::class.java).putExtra("url", url).putExtra("tree", tree),
+        )
     }
 
     private fun updateFolderLabel() {

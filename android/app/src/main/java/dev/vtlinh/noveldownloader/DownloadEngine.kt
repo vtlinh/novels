@@ -27,7 +27,10 @@ class DownloadEngine(
     @Volatile var stopRequested = false
 
     companion object {
-        const val CONCURRENCY = 20
+        const val CONC_START = 20
+        const val CONC_MIN = 5
+        const val CONC_MAX = 50
+        const val FETCH_BATCH = 50
         private const val UA =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
     }
@@ -37,15 +40,48 @@ class DownloadEngine(
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private fun fetch(url: String): String? = try {
+    class FetchResult(val html: String?, val status: Int)
+
+    private fun fetch(url: String): FetchResult = try {
         client.newCall(
             Request.Builder().url(url)
                 .header("User-Agent", UA)
                 .header("Accept-Language", "vi,en;q=0.8")
                 .build(),
-        ).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
+        ).execute().use { r ->
+            FetchResult(if (r.isSuccessful) r.body?.string() else null, r.code)
+        }
     } catch (e: Exception) {
-        null
+        FetchResult(null, 0)   // 0 = network error
+    }
+
+    /* adaptive parallelism, ported from the web app: start at CONC_START, a
+       batch with >=20% throttle statuses (429/503/408/network) halves it
+       (floor CONC_MIN), a fully-clean batch raises it by 10 (ceil CONC_MAX) */
+    @Volatile private var conc = CONC_START
+    private fun isThrottle(s: Int) = s == 429 || s == 503 || s == 408 || s == 0
+    private fun adaptConc(okCount: Int, statuses: List<Int>) {
+        val totalN = okCount + statuses.size
+        if (totalN == 0) return
+        val throttled = statuses.count { isThrottle(it) }
+        if (throttled >= maxOf(2, Math.ceil(totalN * 0.2).toInt())) {
+            conc = maxOf(CONC_MIN, conc / 2)
+        } else if (statuses.isEmpty() && conc < CONC_MAX) {
+            conc = minOf(CONC_MAX, conc + 10)
+        }
+    }
+
+    /* rolling 7-second download-rate readout */
+    private val rateStamps = java.util.concurrent.ConcurrentLinkedDeque<Long>()
+    @Volatile private var fetchStart = 0L
+    private fun noteSaved() { rateStamps.add(System.currentTimeMillis()) }
+    private fun liveRate(): String {
+        if (fetchStart == 0L) return ""
+        val now = System.currentTimeMillis()
+        while (rateStamps.isNotEmpty() && rateStamps.peekFirst() < now - 7000) rateStamps.pollFirst()
+        val windowSecs = minOf(7000L, now - fetchStart) / 1000.0
+        if (windowSecs < 1) return ""
+        return " · %.1f/s".format(rateStamps.size / windowSecs)
     }
 
     class Chapter(val url: String, val text: String) {
@@ -62,13 +98,18 @@ class DownloadEngine(
         val (base, slug) = site.normalize(novelUrl)
 
         status("Listing chapters…")
-        val firstHtml = fetch(base)
-        if (firstHtml == null) {
-            log("Could not load $base")
-            status("Error: could not load the novel page")
+        val first = fetch(base)
+        if (first.html == null) {
+            if (first.status == 404 || first.status == 410) {
+                log("HTTP ${first.status} — this novel isn't on the site. Check the URL (it may only be hosted elsewhere).")
+                status("Error: novel not found on this site (HTTP ${first.status})")
+            } else {
+                log("Could not load $base (HTTP ${first.status})")
+                status("Error: could not load the novel page")
+            }
             return@withContext
         }
-        val doc = Jsoup.parse(firstHtml, base)
+        val doc = Jsoup.parse(first.html, base)
         val title = doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
             ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
             ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
@@ -89,7 +130,7 @@ class DownloadEngine(
         while (page < last && !stopRequested) {
             page++
             status("Listing chapters: page $page of $last…")
-            val html = fetch(site.listPageUrl(base, slug, page)) ?: continue
+            val html = fetch(site.listPageUrl(base, slug, page)).html ?: continue
             val d = Jsoup.parse(html, base)
             addLinks(d)
             last = maxOf(last, site.maxPage(d, slug))
@@ -166,41 +207,82 @@ class DownloadEngine(
         val skipped = chapters.size - toFetch.size
         if (skipped > 0) log("skip $skipped already-downloaded chapter(s)")
 
+        conc = CONC_START
         val done = AtomicInteger(0)
         val saved = AtomicInteger(0)
+        val inFlight = AtomicInteger(0)
         val failed = java.util.Collections.synchronizedList(mutableListOf<Chapter>())
         val total = toFetch.size
-        val sem = Semaphore(CONCURRENCY)
+        fetchStart = System.currentTimeMillis()
 
-        suspend fun fetchAll(list: List<Chapter>, countProgress: Boolean) = coroutineScope {
-            for (ch in list) {
-                if (stopRequested) break
-                launch {
-                    sem.withPermit {
-                        if (stopRequested) return@withPermit
-                        try {
-                            val html = fetch(ch.url) ?: throw RuntimeException("fetch failed")
-                            val body = Extractor.parseChapter(
-                                Jsoup.parse(html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
-                            )
-                            val uri = writeFile(dir, ch.filename!!, body)
-                            store.add(folderKey, slug, ch.filename!!, uri)
-                            saved.incrementAndGet()
-                        } catch (e: Exception) {
-                            failed.add(ch)
-                            log("FAILED ${ch.url} — ${e.message}")
-                        }
-                        if (countProgress) {
-                            val d = done.incrementAndGet()
-                            progress(d, total)
-                            status("$d/$total done (${saved.get()} saved, ${failed.size} failed)")
-                        }
-                    }
-                }
+        fun report() {
+            if (stopRequested) {
+                status("Stopping… (${inFlight.get()} left)")
+            } else {
+                status("${done.get()}/$total done (${saved.get()} saved, ${failed.size} failed)${liveRate()}")
             }
         }
 
-        fetchAll(toFetch, true)
+        /* one FETCH_BATCH-sized group, its chapters fetched concurrently up to
+           the CURRENT `conc`; returns the batch's HTTP statuses so the caller
+           can adapt speed and detect throttling. countProgress bumps the bar
+           only on the main pass (retried chapters were already counted). */
+        suspend fun runBatch(batch: List<Chapter>, countProgress: Boolean): List<Int> = coroutineScope {
+            val sem = Semaphore(conc.coerceIn(CONC_MIN, CONC_MAX))
+            val statuses = java.util.Collections.synchronizedList(mutableListOf<Int>())
+            batch.map { ch ->
+                launch {
+                    if (stopRequested) return@launch
+                    sem.withPermit {
+                        if (stopRequested) return@withPermit
+                        inFlight.incrementAndGet()
+                        try {
+                            val res = fetch(ch.url)
+                            if (res.html == null) {
+                                statuses.add(res.status)
+                                failed.add(ch)
+                                log("FAILED ${ch.url} — HTTP ${res.status}")
+                            } else {
+                                val body = Extractor.parseChapter(
+                                    Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
+                                )
+                                val uri = writeFile(dir, ch.filename!!, body)
+                                store.add(folderKey, slug, ch.filename!!, uri)
+                                saved.incrementAndGet()
+                                noteSaved()
+                            }
+                        } catch (e: Exception) {
+                            statuses.add(-1)   // parse/write error, not a throttle signal
+                            failed.add(ch)
+                            log("FAILED ${ch.url} — ${e.message}")
+                        } finally {
+                            inFlight.decrementAndGet()
+                        }
+                        if (countProgress) { done.incrementAndGet(); progress(done.get(), total) }
+                        report()
+                    }
+                }
+            }.forEach { it.join() }
+            statuses
+        }
+
+        suspend fun fetchGroups(list: List<Chapter>, countProgress: Boolean) {
+            var i = 0
+            while (i < list.size && !stopRequested) {
+                val batch = list.subList(i, minOf(i + FETCH_BATCH, list.size))
+                i += batch.size
+                val okBefore = saved.get()
+                val statuses = runBatch(batch, countProgress)
+                if (statuses.isNotEmpty()) {
+                    val throttle = statuses.count { isThrottle(it) }
+                    log("batch: ${statuses.size} of ${batch.size} failed" +
+                        (if (throttle > 0) " — site appears to be rate limiting" else ""))
+                }
+                adaptConc(saved.get() - okBefore, statuses)
+            }
+        }
+
+        fetchGroups(toFetch, true)
 
         /* end-of-run retry passes over pooled failures, 7s apart */
         var pass = 0
@@ -215,11 +297,13 @@ class DownloadEngine(
             }
             if (stopRequested) { failed.addAll(toRetry); break }
             status("Retry pass $pass/4: ${toRetry.size} chapter(s)…")
-            fetchAll(toRetry, false)
+            fetchGroups(toRetry, false)
             log("Retry pass $pass/4: ${toRetry.size - failed.size} recovered, ${failed.size} still failing")
         }
 
-        val summary = "${saved.get()} saved, $skipped skipped, ${failed.size} failed"
+        val secs = (System.currentTimeMillis() - fetchStart) / 1000.0
+        val avg = if (secs > 1 && saved.get() > 0) " Avg %.1f/s.".format(saved.get() / secs) else ""
+        val summary = "${saved.get()} saved, $skipped skipped, ${failed.size} failed.$avg"
         status((if (stopRequested) "Stopped: " else "Done: ") + summary)
         log((if (stopRequested) "Stopped — re-run to resume. " else "✓ Finished. ") + summary)
     }

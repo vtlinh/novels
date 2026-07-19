@@ -78,6 +78,13 @@
             android:text="Folder…" />
     </LinearLayout>
 
+    <Button
+        android:id="@+id/browserBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Use browser mode" />
+
     <ProgressBar
         android:id="@+id/progress"
         style="?android:attr/progressBarStyleHorizontal"

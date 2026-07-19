@@ -29,6 +29,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".BrowserActivity"
+            android:exported="false" />
+
         <!-- Foreground service: downloads keep running with the screen off -->
         <service
             android:name=".DownloadService"
