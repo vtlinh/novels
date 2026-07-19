@@ -6,7 +6,9 @@ import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -65,20 +67,60 @@ class DownloadEngine(
         FetchResult(null, 0)   // 0 = network error
     }
 
-    /* adaptive parallelism, ported from the web app: start at CONC_START, a
-       batch with >=20% throttle statuses (429/503/408/network) halves it
-       (floor CONC_MIN), a fully-clean batch raises it by 10 (ceil CONC_MAX) */
+    /* Adaptive parallelism, same rules as the web app — >=20% throttle
+       statuses (429/503/408/network) in a window halves the limit (floor
+       CONC_MIN), a fully-clean window raises it by 10 (ceil CONC_MAX) — but
+       applied to a rolling window of results instead of batch boundaries:
+       chapters stream through one shared pool with no barrier, so a slow
+       straggler never idles the other slots.
+
+       The pool is a fixed CONC_MAX-permit Semaphore whose effective limit is
+       shrunk by holding back "filler" permits; adjusting `conc` just acquires
+       or releases fillers. */
     @Volatile private var conc = CONC_START
     private fun isThrottle(s: Int) = s == 429 || s == 503 || s == 408 || s == 0
-    private fun adaptConc(okCount: Int, statuses: List<Int>) {
-        val totalN = okCount + statuses.size
-        if (totalN == 0) return
-        val throttled = statuses.count { isThrottle(it) }
-        if (throttled >= maxOf(2, Math.ceil(totalN * 0.2).toInt())) {
-            conc = maxOf(CONC_MIN, conc / 2)
-        } else if (statuses.isEmpty() && conc < CONC_MAX) {
-            conc = minOf(CONC_MAX, conc + 10)
+
+    private val pool = Semaphore(CONC_MAX)
+    private val fillerLock = Mutex()
+    private var filler = 0   // permits held back; effective limit = CONC_MAX - filler
+
+    private suspend fun setConc(target: Int) {
+        val t = target.coerceIn(CONC_MIN, CONC_MAX)
+        conc = t
+        fillerLock.withLock {
+            val want = CONC_MAX - t
+            while (filler < want) { pool.acquire(); filler++ }
+            while (filler > want) { pool.release(); filler-- }
         }
+    }
+
+    /* rolling adaptation window: once FETCH_BATCH results accumulate, apply
+       the halve/grow rules and start a fresh window. `status` null = saved. */
+    private val adaptLock = Mutex()
+    private var winOk = 0
+    private var winStatuses = ArrayList<Int>()
+
+    private suspend fun recordResult(status: Int?) {
+        var target = -1
+        adaptLock.withLock {
+            if (status == null) winOk++ else winStatuses.add(status)
+            val n = winOk + winStatuses.size
+            if (n >= FETCH_BATCH) {
+                val throttled = winStatuses.count { isThrottle(it) }
+                if (winStatuses.isNotEmpty()) {
+                    log("last $n chapters: ${winStatuses.size} failed" +
+                        (if (throttled > 0) " — site appears to be rate limiting" else ""))
+                }
+                if (throttled >= maxOf(2, Math.ceil(n * 0.2).toInt())) {
+                    target = maxOf(CONC_MIN, conc / 2)
+                } else if (winStatuses.isEmpty() && conc < CONC_MAX) {
+                    target = minOf(CONC_MAX, conc + 10)
+                }
+                winOk = 0
+                winStatuses = ArrayList()
+            }
+        }
+        if (target > 0) setConc(target)
     }
 
     /* rolling 7-second download-rate readout */
@@ -269,7 +311,6 @@ class DownloadEngine(
         val skipped = chapters.size - toFetch.size
         if (skipped > 0) log("skip $skipped already-downloaded chapter(s)")
 
-        conc = CONC_START
         val done = AtomicInteger(0)
         val saved = AtomicInteger(0)
         val inFlight = AtomicInteger(0)
@@ -285,23 +326,24 @@ class DownloadEngine(
             }
         }
 
-        /* one FETCH_BATCH-sized group, its chapters fetched concurrently up to
-           the CURRENT `conc`; returns the batch's HTTP statuses so the caller
-           can adapt speed and detect throttling. countProgress bumps the bar
-           only on the main pass (retried chapters were already counted). */
-        suspend fun runBatch(batch: List<Chapter>, countProgress: Boolean): List<Int> = coroutineScope {
-            val sem = Semaphore(conc.coerceIn(CONC_MIN, CONC_MAX))
-            val statuses = java.util.Collections.synchronizedList(mutableListOf<Int>())
-            batch.map { ch ->
+        /* Every chapter is queued at once and streams through the shared
+           dynamic pool — a request starts the moment a slot frees up, no
+           batch barrier. countProgress bumps the bar only on the main pass
+           (retried chapters were already counted). */
+        suspend fun fetchAll(list: List<Chapter>, countProgress: Boolean) = coroutineScope {
+            list.map { ch ->
                 launch {
                     if (stopRequested) return@launch
-                    sem.withPermit {
-                        if (stopRequested) return@withPermit
+                    pool.acquire()
+                    var outcome: Int? = null   // null = saved, else the failure status
+                    var finished = false
+                    try {
+                        if (stopRequested) return@launch
                         inFlight.incrementAndGet()
                         try {
                             val res = fetch(ch.url)
                             if (res.html == null) {
-                                statuses.add(res.status)
+                                outcome = res.status
                                 failed.add(ch)
                                 log("FAILED ${ch.url} — HTTP ${res.status}")
                             } else {
@@ -314,37 +356,27 @@ class DownloadEngine(
                                 noteSaved()
                             }
                         } catch (e: Exception) {
-                            statuses.add(-1)   // parse/write error, not a throttle signal
+                            outcome = -1   // parse/write error, not a throttle signal
                             failed.add(ch)
                             log("FAILED ${ch.url} — ${e.message}")
                         } finally {
                             inFlight.decrementAndGet()
                         }
+                        finished = true
+                    } finally {
+                        pool.release()
+                    }
+                    if (finished) {
                         if (countProgress) { done.incrementAndGet(); progress(done.get(), total) }
                         report()
+                        recordResult(outcome)
                     }
                 }
             }.forEach { it.join() }
-            statuses
         }
 
-        suspend fun fetchGroups(list: List<Chapter>, countProgress: Boolean) {
-            var i = 0
-            while (i < list.size && !stopRequested) {
-                val batch = list.subList(i, minOf(i + FETCH_BATCH, list.size))
-                i += batch.size
-                val okBefore = saved.get()
-                val statuses = runBatch(batch, countProgress)
-                if (statuses.isNotEmpty()) {
-                    val throttle = statuses.count { isThrottle(it) }
-                    log("batch: ${statuses.size} of ${batch.size} failed" +
-                        (if (throttle > 0) " — site appears to be rate limiting" else ""))
-                }
-                adaptConc(saved.get() - okBefore, statuses)
-            }
-        }
-
-        fetchGroups(toFetch, true)
+        setConc(CONC_START)
+        fetchAll(toFetch, true)
 
         /* end-of-run retry passes over pooled failures, 7s apart */
         var pass = 0
@@ -359,7 +391,7 @@ class DownloadEngine(
             }
             if (stopRequested) { failed.addAll(toRetry); break }
             status("Retry pass $pass/4: ${toRetry.size} chapter(s)…")
-            fetchGroups(toRetry, false)
+            fetchAll(toRetry, false)
             log("Retry pass $pass/4: ${toRetry.size - failed.size} recovered, ${failed.size} still failing")
         }
 

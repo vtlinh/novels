@@ -297,7 +297,33 @@ class Translator(
         return JSONArray().put(JSONObject().put("custom_id", "bundle").put("params", params))
     }
 
-    /* merge model-returned name pairs into the glossary + DB (existing win) */
+    /* ---- name-pair validation, ported from the web app ----
+       Enforce the glossary rules even if the model slips: drop parenthetical
+       notes, collapse "a/b" alternatives to the longest, and reject pairs
+       that are really sentence fragments rather than names. */
+    private val VI_PARTICLES = setOf(
+        "là", "của", "và", "rằng", "thì", "mà", "rồi", "đã", "đang", "sẽ",
+        "thật", "cũng", "đến", "không", "nhé", "ạ", "ơi", "vậy", "nữa",
+    )
+    private val EN_VERBS = Regex("\\b(is|are|was|were|has|have|had|will|would|did|arrived|came|come|said|went)\\b")
+
+    private fun cleanEnglish(raw: String): String {
+        var en = raw.replace(Regex("\\s*\\([^)]*\\)"), "")
+        if (en.contains("/")) en = en.split("/").map { it.trim() }.maxByOrNull { it.length } ?: ""
+        return en.replace(Regex("\\s+"), " ").trim()
+    }
+
+    private fun isNamePair(vi: String, en: String): Boolean {
+        val viWords = vi.split(Regex("\\s+"))
+        val enWords = en.split(Regex("\\s+"))
+        if (viWords.size > 7 || enWords.size > 8) return false
+        if (viWords.any { it in VI_PARTICLES }) return false
+        if (EN_VERBS.containsMatchIn(en)) return false   // case-sensitive: a name like "Will" stays safe
+        return true
+    }
+
+    /* merge model-returned name pairs into the glossary + DB (existing win),
+       so the NEXT bundle's request carries every name fixed so far */
     private fun mergeNames(
         parsed: JSONObject,
         glossary: LinkedHashMap<String, String>,
@@ -310,8 +336,8 @@ class Translator(
         for (i in 0 until names.length()) {
             val o = names.optJSONObject(i) ?: continue
             val vi = o.optString("vietnamese").trim()
-            val en = o.optString("english").trim()
-            if (vi.isNotEmpty() && en.isNotEmpty() && !glossary.containsKey(vi)) {
+            val en = cleanEnglish(o.optString("english"))
+            if (vi.isNotEmpty() && en.isNotEmpty() && isNamePair(vi, en) && !glossary.containsKey(vi)) {
                 glossary[vi] = en; newPairs.add(vi to en)
             }
         }
