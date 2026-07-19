@@ -95,13 +95,10 @@
   <iframe id="browse-frame" title="Novel site"></iframe>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
-        integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=="
-        crossorigin="anonymous"></script>
 <script>
 "use strict";
 
-const VERSION = "1.62";
+const VERSION = "1.63";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -679,12 +676,12 @@ function folderSink(rootHandle, folderName) {
      non-ASCII filenames, fixed for good by sanitize() folding every name to
      plain ASCII. On Android especially, each write costs a fixed ~50-150ms of
      storage-framework overhead, so serializing them dominated whole runs.
-     The per-write retry below (with handle refresh) and the pendingSaves ->
-     rescue-ZIP path in run() remain as the safety net. */
+     The per-write retry below (with handle refresh) and the pendingSaves
+     end-of-run re-write in run() remain as the safety net. */
 
   /* when the folder rejects several writes in a row the blocker is
      environmental (Controlled Folder Access, antivirus) — stop burning
-     ~7s of retries per file and fast-fail into the rescue path */
+     ~7s of retries per file and fast-fail into the pendingSaves re-write */
   let consecFails = 0;
 
   /* sub-directory handles (e.g. the translated-chapters folder) */
@@ -750,21 +747,6 @@ function folderSink(rootHandle, folderName) {
     },
     async finish() {},
   };
-}
-
-function triggerDownload(blob, filename) {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-async function saveAsZip(folderName, files, zipName) {
-  const zip = new JSZip();
-  const folder = zip.folder(folderName);
-  for (const f of files) folder.file(f.filename, f.body);
-  triggerDownload(await zip.generateAsync({ type: "blob" }), zipName);
 }
 
 /* helpers on the user-picked root folder: the per-slug title cache lives
@@ -1504,7 +1486,7 @@ async function run(makeSink, root = null, only = null) {
     const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)`);
 
     /* Parse a freshly-fetched chapter, keep it for translation, and write it
-       to the folder (falling back to the pendingSaves rescue path on a write
+       to the folder (falling back to the pendingSaves re-write on a write
        error). Throws when the HTML is missing/unparseable so the caller can
        mark the chapter failed. Shared by the main loop and the retry pass. */
     const absorb = async (ch, html, retry = false) => {
@@ -1588,7 +1570,7 @@ async function run(makeSink, root = null, only = null) {
        rate-limiting site a breather. Survivors drop out of `failed`; whatever
        still fails after the last pass is left for the manual "Retry failed"
        button. Runs before the save-retry so recovered chapters that then fail
-       to write still get the pendingSaves rescue + ZIP fallback. */
+       to write still get the pendingSaves end-of-run re-write. */
     for (let pass = 1; pass <= RETRY_PASSES && failed.length && !stopRequested; pass++) {
       const toRetry = failed.splice(0);
       const secs = RETRY_PASS_DELAY / 1000;
@@ -1607,23 +1589,21 @@ async function run(makeSink, root = null, only = null) {
     }
 
     /* chapters that downloaded but would not save: retry one by one now
-       that no other writes are in flight */
-    const rescued = [];
+       that no other writes are in flight; whatever still fails is counted
+       as failed and left for the "Retry failed" button */
+    let saveFailed = 0;
     for (let i = 0; i < pendingSaves.length; i++) {
       const p = pendingSaves[i];
       setStatus(`Retrying failed saves… ${i + 1}/${pendingSaves.length}`);
       try { await sink.write(p.filename, p.body); saved++; log(`saved  ${p.filename} (retry)`, "ok"); }
-      catch (e) { rescued.push(p); log(`SAVE FAILED ${p.filename} — ${errMsg(e)}`, "err"); }
+      catch (e) {
+        saveFailed++;
+        failed.push({ url: p.url, filename: p.filename, num: chapterNum(p.filename), text: "" });
+        log(`SAVE FAILED ${p.filename} — ${errMsg(e)}`, "err");
+      }
     }
-
-    /* last resort: the content is already downloaded, so never drop it —
-       hand it over as a ZIP, which bypasses folder writes entirely */
-    if (rescued.length) {
-      setStatus("Folder saves failed — building rescue ZIP…");
-      await saveAsZip(folderName, rescued, `${folderName} - rescued chapters.zip`);
-      log(`\n${rescued.length} chapter(s) would not save to the folder — they were downloaded as "${folderName} - rescued chapters.zip" instead.`, "err");
-      log(`If folder saving keeps failing: check Windows Security → Ransomware protection → "Controlled folder access" (it silently blocks Chrome from writing), and note that Desktop/Documents folders are often OneDrive-synced by default even when they look local.`);
-    }
+    if (saveFailed)
+      log(`\n${saveFailed} chapter(s) could not be saved to the folder. If folder saving keeps failing: check Windows Security → Ransomware protection → "Controlled folder access" (it silently blocks Chrome from writing), and note that Desktop/Documents folders are often OneDrive-synced by default even when they look local.`, "err");
 
     if (translate && collected.length && !stopRequested) {
       collected.sort((a, b) => (chapterNum(a.filename) ?? 1e9) - (chapterNum(b.filename) ?? 1e9));
@@ -1639,8 +1619,7 @@ async function run(makeSink, root = null, only = null) {
     }
 
     await sink.finish();
-    const summary = `${saved} saved, ${skipped} skipped, ${failed.length} failed`
-      + (rescued.length ? `, ${rescued.length} rescued to ZIP.` : ".");
+    const summary = `${saved} saved, ${skipped} skipped, ${failed.length} failed.`;
     setStatus(`${stopRequested ? "Stopped" : "Done"}: ${summary}`);
     /* always end with a clear finish line in the log so it's obvious the run
        is complete (not still running / stuck) */
