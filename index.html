@@ -35,7 +35,8 @@
   #btn-restart { background:var(--accent); color:#fff; display:none; margin-right:8px; }
   #btn-retry { background:#e0a33e; color:#1b2026; display:none; margin-right:8px; }
   button:disabled { opacity:.45; cursor:not-allowed; }
-  #status { font-size:13px; color:var(--muted); margin-top:14px; min-height:18px; }
+  #status { font-size:13px; color:var(--muted); margin-top:14px; min-height:18px;
+            white-space:pre-line; }
   progress { width:100%; height:8px; margin-top:10px; accent-color:var(--accent);
              display:none; }
   #log { font:12px/1.6 ui-monospace, monospace; background:#0d1013; border-radius:8px;
@@ -94,7 +95,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.72";
+const VERSION = "1.73";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -819,6 +820,7 @@ const OPUS = "claude-opus-4-8";               // translates chapter + names toge
 const TRANSLATE_EFFORT = "medium";
 const TRANSLATE_MAX_TOKENS = 128000;          // Opus 4.8 max output; a bundle's whole translation must fit under this
 const NAMES_CACHE_FILE = ".names_cache.json";
+const MANIFEST_FILE = ".downloaded.json";      // per-novel list of saved chapters, so resumes skip the folder listing
 const TITLE_CACHE_FILE = ".title_cache.json";
 const TRANSLATED_DIR = "translated";
 const FETCH_BATCH = 50;                        // chapters fetched per Worker call (free-tier subrequest limit)
@@ -1523,7 +1525,7 @@ async function run(makeSink, root = null, only = null) {
       if (elapsed < 1000) return "";
       while (rateStamps.length && rateStamps[0] < now - RATE_WINDOW) rateStamps.shift();
       const windowSecs = Math.min(RATE_WINDOW, elapsed) / 1000;
-      return ` — ${(rateStamps.length / windowSecs).toFixed(1)} chapters/s`;
+      return `\n${(rateStamps.length / windowSecs).toFixed(1)} chapters/s`;   // own line (#status is pre-line)
     };
     const overallRate = () => {
       if (!fetchStart || !saved) return "";
@@ -1543,7 +1545,7 @@ async function run(makeSink, root = null, only = null) {
       /* the pre-run directory listing (absorb only runs after it's built) —
          an in-memory check instead of a per-chapter filesystem round-trip */
       if (existing.has(filename)) { skipped++; log(`skip   ${filename}`); return; }
-      try { await sink.write(filename, body); saved++; noteSaved(); log(`saved  ${filename}${retry ? " (retry)" : ""}`, "ok"); }
+      try { await sink.write(filename, body); saved++; noteSaved(); existing.add(filename); log(`saved  ${filename}${retry ? " (retry)" : ""}`, "ok"); }
       catch (e) {
         pendingSaves.push({ url: ch.url, filename, body });
         log(`SAVE FAILED ${filename} — ${errMsg(e)} (will retry at the end)`, "err");
@@ -1553,7 +1555,17 @@ async function run(makeSink, root = null, only = null) {
     /* skip already-downloaded chapters without any fetch: one directory
        listing checked in memory, instead of a filesystem call per chapter */
     setStatus("Checking already-downloaded chapters…");
-    const existing = await sink.list();
+    /* the manifest written at the end of each run lists every saved chapter,
+       so a resume is one small file read instead of enumerating the whole
+       folder; without one (first run, new device, deleted) fall back to the
+       listing. A stale manifest only ever re-downloads (and overwrites)
+       chapters that are already there — never skips a missing one. */
+    let existing = null;
+    try {
+      const m = JSON.parse(await sink.read(MANIFEST_FILE) ?? "null");
+      if (m && Array.isArray(m.chapters)) existing = new Set(m.chapters);
+    } catch {}
+    if (!existing) existing = await sink.list();
     const toFetch = [];
     for (const ch of chapters) {
       if (ch.filename && existing.has(ch.filename)) {
@@ -1644,7 +1656,7 @@ async function run(makeSink, root = null, only = null) {
     for (let i = 0; i < pendingSaves.length; i++) {
       const p = pendingSaves[i];
       setStatus(`Retrying failed saves… ${i + 1}/${pendingSaves.length}`);
-      try { await sink.write(p.filename, p.body); saved++; noteSaved(); log(`saved  ${p.filename} (retry)`, "ok"); }
+      try { await sink.write(p.filename, p.body); saved++; noteSaved(); existing.add(p.filename); log(`saved  ${p.filename} (retry)`, "ok"); }
       catch (e) {
         saveFailed++;
         failed.push({ url: p.url, filename: p.filename, num: chapterNum(p.filename), text: "" });
@@ -1657,6 +1669,13 @@ async function run(makeSink, root = null, only = null) {
     /* the fetch phase ends here — translation time must not dilute the
        overall download-speed figure */
     fetchEnd = performance.now();
+
+    /* persist the manifest (chapter files only) so the next run resumes
+       without enumerating the folder */
+    try {
+      await sink.write(MANIFEST_FILE,
+        JSON.stringify({ chapters: [...existing].filter(n => /^Chapter .+\.txt$/.test(n)).sort() }));
+    } catch {}
 
     if (translate && collected.length && !stopRequested) {
       collected.sort((a, b) => (chapterNum(a.filename) ?? 1e9) - (chapterNum(b.filename) ?? 1e9));
