@@ -94,7 +94,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.69";
+const VERSION = "1.70";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1506,14 +1506,29 @@ async function run(makeSink, root = null, only = null) {
 
     const pendingSaves = [];
     const collected = [];
-    /* average download speed over the fetch phase, shown once meaningful */
-    let fetchStart = null;
-    const avgRate = () => {
-      if (!fetchStart || !saved) return "";
-      const secs = (performance.now() - fetchStart) / 1000;
-      return secs > 1 ? ` — avg ${(saved / secs).toFixed(1)} chapters/s` : "";
+    /* download speed: the live status shows a ROLLING average — chapters
+       saved within the last RATE_WINDOW — so it tracks what's happening now
+       (throttling, ramp-up) instead of being diluted by the whole run; the
+       end-of-run summary reports the overall average of the fetch phase */
+    const RATE_WINDOW = 7000;
+    let fetchStart = null, fetchEnd = null;
+    const rateStamps = [];
+    const noteSaved = () => rateStamps.push(performance.now());
+    const liveRate = () => {
+      if (!fetchStart) return "";
+      const now = performance.now();
+      const elapsed = now - fetchStart;
+      if (elapsed < 1000) return "";
+      while (rateStamps.length && rateStamps[0] < now - RATE_WINDOW) rateStamps.shift();
+      const windowSecs = Math.min(RATE_WINDOW, elapsed) / 1000;
+      return ` — ${(rateStamps.length / windowSecs).toFixed(1)} chapters/s`;
     };
-    const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)${avgRate()}`);
+    const overallRate = () => {
+      if (!fetchStart || !saved) return "";
+      const secs = ((fetchEnd ?? performance.now()) - fetchStart) / 1000;
+      return secs > 1 ? ` Avg ${(saved / secs).toFixed(1)} chapters/s.` : "";
+    };
+    const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)${liveRate()}`);
 
     /* Parse a freshly-fetched chapter, keep it for translation, and write it
        to the folder (falling back to the pendingSaves re-write on a write
@@ -1526,7 +1541,7 @@ async function run(makeSink, root = null, only = null) {
       /* the pre-run directory listing (absorb only runs after it's built) —
          an in-memory check instead of a per-chapter filesystem round-trip */
       if (existing.has(filename)) { skipped++; log(`skip   ${filename}`); return; }
-      try { await sink.write(filename, body); saved++; log(`saved  ${filename}${retry ? " (retry)" : ""}`, "ok"); }
+      try { await sink.write(filename, body); saved++; noteSaved(); log(`saved  ${filename}${retry ? " (retry)" : ""}`, "ok"); }
       catch (e) {
         pendingSaves.push({ url: ch.url, filename, body });
         log(`SAVE FAILED ${filename} — ${errMsg(e)} (will retry at the end)`, "err");
@@ -1627,7 +1642,7 @@ async function run(makeSink, root = null, only = null) {
     for (let i = 0; i < pendingSaves.length; i++) {
       const p = pendingSaves[i];
       setStatus(`Retrying failed saves… ${i + 1}/${pendingSaves.length}`);
-      try { await sink.write(p.filename, p.body); saved++; log(`saved  ${p.filename} (retry)`, "ok"); }
+      try { await sink.write(p.filename, p.body); saved++; noteSaved(); log(`saved  ${p.filename} (retry)`, "ok"); }
       catch (e) {
         saveFailed++;
         failed.push({ url: p.url, filename: p.filename, num: chapterNum(p.filename), text: "" });
@@ -1636,6 +1651,10 @@ async function run(makeSink, root = null, only = null) {
     }
     if (saveFailed)
       log(`\n${saveFailed} chapter(s) could not be saved to the folder. If folder saving keeps failing: check Windows Security → Ransomware protection → "Controlled folder access" (it silently blocks Chrome from writing), and note that Desktop/Documents folders are often OneDrive-synced by default even when they look local.`, "err");
+
+    /* the fetch phase ends here — translation time must not dilute the
+       overall download-speed figure */
+    fetchEnd = performance.now();
 
     if (translate && collected.length && !stopRequested) {
       collected.sort((a, b) => (chapterNum(a.filename) ?? 1e9) - (chapterNum(b.filename) ?? 1e9));
@@ -1651,7 +1670,7 @@ async function run(makeSink, root = null, only = null) {
     }
 
     await sink.finish();
-    const summary = `${saved} saved, ${skipped} skipped, ${failed.length} failed.${avgRate().replace(" — ", " ")}`;
+    const summary = `${saved} saved, ${skipped} skipped, ${failed.length} failed.${overallRate()}`;
     setStatus(`${stopRequested ? "Stopped" : "Done"}: ${summary}`);
     /* always end with a clear finish line in the log so it's obvious the run
        is complete (not still running / stuck) */
