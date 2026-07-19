@@ -36,6 +36,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        findViewById<TextView>(R.id.versionText).text = "v" + try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+        } catch (e: Exception) { "?" }
+
         val urlInput = findViewById<EditText>(R.id.urlInput)
         urlInput.setText(prefs.getString("url", ""))
         handleShare(intent)

@@ -1,3 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- palette mirrored from the web app (index.html :root) -->
+    <color name="bg">#111418</color>
+    <color name="card">#1B2026</color>
+    <color name="fg">#E8EAED</color>
+    <color name="muted">#9AA0A6</color>
+    <color name="accent">#4F8CFF</color>
+    <color name="err">#FF6B6B</color>
+    <color name="btn_secondary">#2A313A</color>
+    <color name="input_bg">#12161B</color>
+    <color name="input_stroke">#333A42</color>
+    <color name="log_bg">#0D1013</color>
     <color name="ic_launcher_background">#111418</color>
 </resources>
