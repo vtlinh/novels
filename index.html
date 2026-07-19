@@ -95,7 +95,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.74";
+const VERSION = "1.75";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1567,7 +1567,21 @@ async function run(makeSink, root = null, only = null) {
     let existing = null, manifest = {};
     if (root) {
       try { manifest = JSON.parse(await root.read(MANIFEST_FILE) ?? "{}") || {}; } catch {}
-      if (Array.isArray(manifest[slug])) existing = new Set(manifest[slug]);
+      const entry = manifest[slug];
+      if (Array.isArray(entry)) {
+        /* trust the entry only after a spot-check: the first and last listed
+           chapters must actually be on disk. If the novel folder was deleted
+           (or its files pruned) the entry is stale — drop it and fall back to
+           a real listing, so a removed novel re-downloads instead of being
+           silently skipped. */
+        if (!entry.length) existing = new Set();
+        else if (await sink.exists(entry[0]) && await sink.exists(entry[entry.length - 1])) {
+          existing = new Set(entry);
+        } else {
+          delete manifest[slug];
+          log("Saved-chapter cache entry was stale (folder removed or pruned) — re-checking the folder.");
+        }
+      }
     }
     if (!existing) existing = await sink.list();
     const toFetch = [];
