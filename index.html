@@ -95,7 +95,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.76";
+const VERSION = "1.77";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1525,16 +1525,22 @@ async function run(makeSink, root = null, only = null) {
        end-of-run summary reports the overall average of the fetch phase */
     const RATE_WINDOW = 7000;
     let fetchStart = null, fetchEnd = null;
-    const rateStamps = [];
-    const noteSaved = () => rateStamps.push(performance.now());
-    const liveRate = () => {
-      if (!fetchStart) return "";
+    /* two rolling rates so the bottleneck is visible at a glance: fetched
+       (chapters that arrived from the Worker) vs saved (written to the
+       folder). fetched high + saved low = device storage is the limit;
+       both low = the site/network is */
+    const savedStamps = [], fetchedStamps = [];
+    const noteSaved = () => savedStamps.push(performance.now());
+    const noteFetched = n => { const t = performance.now(); for (let i = 0; i < n; i++) fetchedStamps.push(t); };
+    const windowRate = stamps => {
       const now = performance.now();
-      const elapsed = now - fetchStart;
-      if (elapsed < 1000) return "";
-      while (rateStamps.length && rateStamps[0] < now - RATE_WINDOW) rateStamps.shift();
-      const windowSecs = Math.min(RATE_WINDOW, elapsed) / 1000;
-      return `\n${(rateStamps.length / windowSecs).toFixed(1)} chapters/s`;   // own line (#status is pre-line)
+      while (stamps.length && stamps[0] < now - RATE_WINDOW) stamps.shift();
+      const windowSecs = Math.min(RATE_WINDOW, now - fetchStart) / 1000;
+      return (stamps.length / windowSecs).toFixed(1);
+    };
+    const liveRate = () => {
+      if (!fetchStart || performance.now() - fetchStart < 1000) return "";
+      return `\nsaved ${windowRate(savedStamps)}/s · fetched ${windowRate(fetchedStamps)}/s`;   // own line (#status is pre-line)
     };
     const overallRate = () => {
       if (!fetchStart || !saved) return "";
@@ -1629,6 +1635,7 @@ async function run(makeSink, root = null, only = null) {
         log(`batch: ${failures.length} of ${group.length} failed (${desc})${throttling ? " — site appears to be rate limiting" : ""}`, "err");
       }
       adaptConc(htmls.size, failures.map(f => f.status));
+      noteFetched(htmls.size);
       for (const ch of group) {
         try { await absorb(ch, htmls.get(ch.url), retry); }
         catch (e) { failed.push(ch); log(`DOWNLOAD FAILED ${ch.url} — ${errMsg(e)}${retry ? " (retry)" : ""}`, "err"); }
