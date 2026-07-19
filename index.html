@@ -103,7 +103,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.60";
+const VERSION = "1.61";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -340,7 +340,11 @@ async function collectBgJobs(root) {
   let total = 0;
   for (const job of jobs) {
     try {
-      if (Date.now() - (job.created || 0) > 7 * 864e5) { await bgJobs.remove(job.id); continue; }
+      if (Date.now() - (job.created || 0) > 7 * 864e5) {
+        try { await caches.delete("bgjob-" + job.id); } catch {}
+        await bgJobs.remove(job.id);
+        continue;
+      }
       if (!(await caches.has("bgjob-" + job.id))) continue;   // still downloading
       const site = siteFor(job.novelUrl);
       if (!site) { await bgJobs.remove(job.id); continue; }
