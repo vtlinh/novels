@@ -95,7 +95,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.75";
+const VERSION = "1.76";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -723,14 +723,20 @@ function folderSink(rootHandle, folderName) {
     /* all non-empty filenames in one directory listing — vastly faster than
        per-file exists() when checking thousands of chapters on a resume */
     async list(sub) {
-      /* names only — no per-file getFile() probe. Writes are atomic (the
-         browser commits the swap file on close), so a file that exists is a
-         complete file; the old size>0 check cost one storage-framework
-         round-trip PER CHAPTER and dominated resume time on Android. */
+      /* Enumerate AND verify each file is non-empty: this path only runs
+         when there's no manifest entry (first run, stale entry, translated/
+         dir) and the folder may contain files copied from elsewhere that
+         never went through our atomic writer — an empty file must count as
+         not-downloaded. Ordinary resumes use the manifest and never pay for
+         these per-file probes. */
       const out = new Set();
       try {
         const d = await dirFor(sub);
-        for await (const [n, h] of d.entries()) if (h.kind === "file") out.add(n);
+        const entries = [];
+        for await (const [n, h] of d.entries()) if (h.kind === "file") entries.push([n, h]);
+        await Promise.all(entries.map(async ([n, h]) => {
+          try { if ((await h.getFile()).size > 0) out.add(n); } catch {}
+        }));
       } catch {}
       return out;
     },
