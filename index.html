@@ -95,7 +95,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.77";
+const VERSION = "1.78";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -368,6 +368,7 @@ $("btn-stop").addEventListener("click", () => {
   log("Stop requested.", "err");
 });
 
+const LOG_MAX_LINES = 400;
 function log(msg, cls) {
   logEl.style.display = "block";
   /* follow the tail only when already scrolled to the bottom — if the user
@@ -378,6 +379,10 @@ function log(msg, cls) {
   if (cls) line.className = cls;
   line.textContent = msg;
   logEl.appendChild(line);
+  /* keep the log bounded: with thousands of lines every append re-layouts an
+     ever-larger container, progressively slowing the whole run (this sat on
+     the critical path of every chapter save) */
+  while (logEl.childElementCount > LOG_MAX_LINES) logEl.firstElementChild.remove();
   if (follow) logEl.scrollTop = logEl.scrollHeight;
 }
 function setStatus(msg) { statusEl.textContent = msg; }
@@ -1547,7 +1552,15 @@ async function run(makeSink, root = null, only = null) {
       const secs = ((fetchEnd ?? performance.now()) - fetchStart) / 1000;
       return secs > 1 ? ` Avg ${(saved / secs).toFixed(1)} chapters/s.` : "";
     };
-    const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)${liveRate()}`);
+    /* status repaints are throttled: it's called for every chapter, and on a
+       long run per-chapter DOM updates measurably drag down save speed */
+    let lastStatusPaint = 0;
+    const status = () => {
+      const now = performance.now();
+      if (now - lastStatusPaint < 250) return;
+      lastStatusPaint = now;
+      setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)${liveRate()}`);
+    };
 
     /* Parse a freshly-fetched chapter, keep it for translation, and write it
        to the folder (falling back to the pendingSaves re-write on a write
