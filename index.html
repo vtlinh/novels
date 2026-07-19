@@ -94,7 +94,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.68";
+const VERSION = "1.69";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1506,7 +1506,14 @@ async function run(makeSink, root = null, only = null) {
 
     const pendingSaves = [];
     const collected = [];
-    const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)`);
+    /* average download speed over the fetch phase, shown once meaningful */
+    let fetchStart = null;
+    const avgRate = () => {
+      if (!fetchStart || !saved) return "";
+      const secs = (performance.now() - fetchStart) / 1000;
+      return secs > 1 ? ` — avg ${(saved / secs).toFixed(1)} chapters/s` : "";
+    };
+    const status = () => setStatus(`${done}/${chapters.length} done (${saved} saved, ${skipped} skipped, ${failed.length + pendingSaves.length} failed)${avgRate()}`);
 
     /* Parse a freshly-fetched chapter, keep it for translation, and write it
        to the folder (falling back to the pendingSaves re-write on a write
@@ -1583,6 +1590,7 @@ async function run(makeSink, root = null, only = null) {
       groups.push(toFetch.slice(i, i + FETCH_BATCH));
     if (groups.length) {
       setStatus(`Fetching ${toFetch.length} chapter(s)…`);
+      fetchStart = performance.now();
       await fetchInPool(groups, () => conc, fetchGroup(false));
     }
 
@@ -1643,7 +1651,7 @@ async function run(makeSink, root = null, only = null) {
     }
 
     await sink.finish();
-    const summary = `${saved} saved, ${skipped} skipped, ${failed.length} failed.`;
+    const summary = `${saved} saved, ${skipped} skipped, ${failed.length} failed.${avgRate().replace(" — ", " ")}`;
     setStatus(`${stopRequested ? "Stopped" : "Done"}: ${summary}`);
     /* always end with a clear finish line in the log so it's obvious the run
        is complete (not still running / stuck) */
