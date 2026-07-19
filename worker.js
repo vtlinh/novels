@@ -103,7 +103,10 @@ export default {
         `var t=e.target;while(t&&!(t.tagName==="A"&&t.getAttribute("href")))t=t.parentElement;` +
         `if(!t)return;var href;try{href=new URL(t.getAttribute("href"),ORIG).href;}catch(err){return;}` +
         `e.preventDefault();` +
-        `if(${BROWSABLE_SITES.toString()}.test(href))location.href="/browse?url="+encodeURIComponent(href);` +
+        // location.origin, NOT a relative URL: the injected <base> makes
+        // relative navigation resolve against the NOVEL SITE (whose /browse
+        // is a 404), while location.origin is immune to <base>.
+        `if(${BROWSABLE_SITES.toString()}.test(href))location.href=location.origin+"/browse?url="+encodeURIComponent(href);` +
         `},true);})();</scr` + `ipt>`;
       const cleaned = new HTMLRewriter()
         .on("script, noscript, iframe, ins", { element(e) { e.remove(); } })
