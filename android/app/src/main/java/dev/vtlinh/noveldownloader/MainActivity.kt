@@ -95,33 +95,43 @@ class MainActivity : AppCompatActivity() {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
 
-        checkForUpdate()
+        findViewById<TextView>(R.id.updateBanner).setOnClickListener { installUpdate() }
+        startUpdatePolling()
     }
 
-    /* on every launch: compare this build's versionCode against the latest
-       published release; offer to download + install when newer */
-    private fun checkForUpdate() {
+    private var updateFound = false
+
+    /* Poll for a newer published version on launch and then hourly. Once one
+       is found, stop polling and reveal the sticky banner; the user upgrades
+       by tapping it. */
+    private fun startUpdatePolling() {
         lifecycleScope.launch {
-            val latest = Updater.latestVersion() ?: return@launch
-            if (latest.first <= Updater.currentVersionCode(this@MainActivity)) return@launch
-            androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
-                .setTitle("Update available")
-                .setMessage("Version ${latest.second} is available. Download and install?")
-                .setPositiveButton("Update") { _, _ ->
-                    lifecycleScope.launch {
-                        val statusText = findViewById<TextView>(R.id.statusText)
-                        statusText.text = "Downloading update…"
-                        val apk = Updater.downloadApk(this@MainActivity)
-                        if (apk != null) {
-                            statusText.text = "Opening installer…"
-                            Updater.install(this@MainActivity, apk)
-                        } else {
-                            statusText.text = "Update download failed — try again later."
-                        }
+            while (!updateFound) {
+                val latest = Updater.latestVersion()
+                if (latest != null && latest.first > Updater.currentVersionCode(this@MainActivity)) {
+                    updateFound = true
+                    findViewById<TextView>(R.id.updateBanner).apply {
+                        text = "New version ${latest.second} available — tap to upgrade"
+                        visibility = View.VISIBLE
                     }
+                    break   // stop polling
                 }
-                .setNegativeButton("Later", null)
-                .show()
+                kotlinx.coroutines.delay(60 * 60 * 1000L)   // 60 minutes
+            }
+        }
+    }
+
+    private fun installUpdate() {
+        lifecycleScope.launch {
+            val statusText = findViewById<TextView>(R.id.statusText)
+            statusText.text = "Downloading update…"
+            val apk = Updater.downloadApk(this@MainActivity)
+            if (apk != null) {
+                statusText.text = "Opening installer…"
+                Updater.install(this@MainActivity, apk)
+            } else {
+                statusText.text = "Update download failed — try again later."
+            }
         }
     }
 
