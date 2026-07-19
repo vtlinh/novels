@@ -29,8 +29,14 @@ class BrowserActivity : AppCompatActivity() {
         val urlEdit = findViewById<EditText>(R.id.browseUrl)
         val downloadBtn = findViewById<Button>(R.id.browseDownload)
 
-        val start = prefs.getString("url", "")?.takeIf { Sites.forUrl(it) != null }
-            ?: "https://truyenfull.today/"
+        /* always open at the domain level: the front page of the site the
+           saved URL belongs to, or the default site */
+        val saved = prefs.getString("url", "") ?: ""
+        val start = try {
+            val u = java.net.URI(saved)
+            if (Sites.forUrl(saved) != null && u.host != null) "${u.scheme}://${u.host}/"
+            else "https://truyenfull.today/"
+        } catch (e: Exception) { "https://truyenfull.today/" }
 
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
