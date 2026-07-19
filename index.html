@@ -68,7 +68,7 @@
   <div class="card">
     <label for="url">Novel URL</label>
     <input id="url" type="url" placeholder="https://novelfull.com/god-of-crime.html" spellcheck="false">
-    <button id="open-browser">Use browser mode</button>
+    <button id="open-browser">Browser mode</button>
     <button id="btn-apk">Download app</button>
     <label class="check"><input type="checkbox" id="translate"> Translate to English (Claude)</label>
     <div id="tr-opts">
@@ -98,7 +98,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.82";
+const VERSION = "1.83";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
