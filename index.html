@@ -31,7 +31,9 @@
            font-size:14px; font-weight:600; cursor:pointer; }
   #btn-folder { background:var(--accent); color:#fff; margin-right:8px; }
   #btn-stop { background:var(--err); color:#fff; display:none; }
-  #open-browser { background:#2a313a; color:var(--fg); margin-top:12px; padding:9px 14px; }
+  #open-browser { background:#2a313a; color:var(--fg); margin-top:12px; padding:9px 14px;
+                  margin-right:8px; }
+  #btn-apk { background:#2a313a; color:var(--fg); margin-top:12px; padding:9px 14px; }
   #btn-restart { background:var(--accent); color:#fff; display:none; margin-right:8px; }
   #btn-retry { background:#e0a33e; color:#1b2026; display:none; margin-right:8px; }
   button:disabled { opacity:.45; cursor:not-allowed; }
@@ -67,6 +69,7 @@
     <label for="url">Novel URL</label>
     <input id="url" type="url" placeholder="https://novelfull.com/god-of-crime.html" spellcheck="false">
     <button id="open-browser">Use browser mode</button>
+    <button id="btn-apk">Download Android app</button>
     <label class="check"><input type="checkbox" id="translate"> Translate to English (Claude)</label>
     <div id="tr-opts">
       <label for="apikey">Anthropic API key (kept in this browser only)</label>
@@ -95,7 +98,7 @@
 <script>
 "use strict";
 
-const VERSION = "1.80";
+const VERSION = "1.81";
 const $ = id => document.getElementById(id);
 const statusEl = $("status"), logEl = $("log"), bar = $("bar");
 $("ver").textContent = `v${VERSION}`;
@@ -1827,6 +1830,12 @@ $("open-browser").addEventListener("click", e => {
   $("browser").style.display = "flex";
 });
 $("browse-close").addEventListener("click", closeBrowser);
+
+/* stable URL: the android workflow publishes every main build's APK to the
+   fixed "android-latest" release, so this link never changes */
+$("btn-apk").addEventListener("click", () => {
+  location.href = "https://github.com/vtlinh/novels/releases/download/android-latest/app-debug.apk";
+});
 window.addEventListener("message", e => {
   if (e.origin !== PROXY || !e.data || e.data.type !== "browse-url") return;
   browseUrl = String(e.data.url || "");
