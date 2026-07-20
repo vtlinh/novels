@@ -33,10 +33,11 @@ data class NovelRec(
     val complete: Boolean,
     val diskCount: Int,  // chapters counted on disk at scan time (for unindexed novels)
     val lastDl: Long,    // when it last downloaded (0 = unknown/legacy)
+    val lastRead: Long,  // when it was last opened in the reader (0 = never)
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 8) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 9) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -45,7 +46,7 @@ class DownloadStore(context: Context) :
                 "folder TEXT, slug TEXT, url TEXT, title TEXT, " +
                 "started INTEGER, total INTEGER DEFAULT -1, complete INTEGER DEFAULT 0, " +
                 "author TEXT DEFAULT '', disk_count INTEGER DEFAULT 0, " +
-                "last_dl INTEGER DEFAULT 0, " +
+                "last_dl INTEGER DEFAULT 0, last_read INTEGER DEFAULT 0, " +
                 "PRIMARY KEY(folder, slug))"
         /* folders whose one-time root scan has been folded into the registry */
         private const val SCANNED_TABLE =
@@ -95,6 +96,14 @@ class DownloadStore(context: Context) :
         if (oldVersion in 5..6) db.execSQL("ALTER TABLE novels ADD COLUMN disk_count INTEGER DEFAULT 0")
         if (oldVersion < 7) db.execSQL(SCANNED_TABLE)
         if (oldVersion in 5..7) db.execSQL("ALTER TABLE novels ADD COLUMN last_dl INTEGER DEFAULT 0")
+        if (oldVersion in 5..8) db.execSQL("ALTER TABLE novels ADD COLUMN last_read INTEGER DEFAULT 0")
+    }
+
+    /* stamp a novel as just-opened in the reader */
+    fun setLastRead(folder: String, slug: String, now: Long) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET last_read=? WHERE folder=? AND slug=?", arrayOf(now, folder, slug),
+        )
     }
 
     /* stamp a novel as just-downloaded (list sorts newest first) */
@@ -144,7 +153,7 @@ class DownloadStore(context: Context) :
         val out = ArrayList<NovelRec>()
         readableDatabase.query(
             "novels",
-            arrayOf("slug", "url", "title", "started", "total", "complete", "author", "disk_count", "last_dl"),
+            arrayOf("slug", "url", "title", "started", "total", "complete", "author", "disk_count", "last_dl", "last_read"),
             "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
             while (c.moveToNext()) {
@@ -153,6 +162,7 @@ class DownloadStore(context: Context) :
                         c.getString(0), c.getString(1) ?: "", c.getString(2) ?: "",
                         c.getString(6) ?: "",
                         c.getLong(3), c.getInt(4), c.getInt(5) != 0, c.getInt(7), c.getLong(8),
+                        c.getLong(9),
                     ),
                 )
             }
