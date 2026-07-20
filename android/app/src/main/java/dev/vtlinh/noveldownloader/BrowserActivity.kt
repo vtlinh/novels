@@ -245,7 +245,11 @@ class BrowserActivity : AppCompatActivity() {
             finish()
         }
 
-        findViewById<Button>(R.id.browseClose).setOnClickListener { finish() }
+        /* header back behaves like a browser back button: page history first,
+           then out of browser mode */
+        findViewById<android.widget.TextView>(R.id.browseBack).setOnClickListener {
+            if (web.canGoBack()) web.goBack() else finish()
+        }
     }
 
     override fun onBackPressed() {

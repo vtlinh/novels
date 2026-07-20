@@ -16,24 +16,25 @@
         android:padding="8dp"
         android:gravity="center_vertical">
 
-        <Button
-            android:id="@+id/browseDownload"
+        <TextView
+            android:id="@+id/browseBack"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Download"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="#ffffff"
-            app:backgroundTint="@color/btn_accent"
-            app:cornerRadius="8dp"
-            android:enabled="false" />
+            android:paddingStart="8dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="←"
+            android:textSize="22sp"
+            android:textColor="@color/fg"
+            android:clickable="true"
+            android:focusable="true" />
 
         <EditText
             android:id="@+id/browseUrl"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="8dp"
             android:background="@drawable/bg_input"
             android:padding="8dp"
             android:hint="Enter URL"
@@ -45,15 +46,22 @@
             android:imeOptions="actionGo"
             android:importantForAutofill="no" />
 
+        <!-- icon-only download -->
         <Button
-            android:id="@+id/browseClose"
+            android:id="@+id/browseDownload"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="✕"
-            android:textSize="14sp"
-            android:textColor="@color/fg"
-            app:backgroundTint="@color/btn_secondary"
-            app:cornerRadius="8dp" />
+            android:layout_marginStart="8dp"
+            android:minWidth="0dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="↓"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#ffffff"
+            app:backgroundTint="@color/btn_accent"
+            app:cornerRadius="8dp"
+            android:enabled="false" />
     </LinearLayout>
 
     <FrameLayout
