@@ -80,6 +80,10 @@ class ChapterListActivity : AppCompatActivity() {
             )
             finish()
         }
+        findViewById<TextView>(R.id.navBrowser).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+            startActivity(Intent(this, BrowserActivity::class.java))
+        }
         findViewById<TextView>(R.id.navNovels).setOnClickListener {
             startActivity(Intent(this, NovelListActivity::class.java))
             finish()

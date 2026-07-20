@@ -62,10 +62,6 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.downloadBtn).setOnClickListener { startDownload() }
 
-        findViewById<Button>(R.id.browserBtn).setOnClickListener {
-            startActivity(Intent(this, BrowserActivity::class.java))
-        }
-
         /* navigation drawer: Home (this screen) and Novels (the list) */
         val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
         findViewById<TextView>(R.id.menuBtn).setOnClickListener {
@@ -73,6 +69,10 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<TextView>(R.id.navHome).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+        }
+        findViewById<TextView>(R.id.navBrowser).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+            startActivity(Intent(this, BrowserActivity::class.java))
         }
         findViewById<TextView>(R.id.navNovels).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
