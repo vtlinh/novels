@@ -66,7 +66,16 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, BrowserActivity::class.java))
         }
 
-        findViewById<Button>(R.id.listBtn).setOnClickListener {
+        /* navigation drawer: Home (this screen) and Novels (the list) */
+        val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
+        findViewById<TextView>(R.id.menuBtn).setOnClickListener {
+            drawer.openDrawer(androidx.core.view.GravityCompat.START)
+        }
+        findViewById<TextView>(R.id.navHome).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+        }
+        findViewById<TextView>(R.id.navNovels).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, NovelListActivity::class.java))
         }
 

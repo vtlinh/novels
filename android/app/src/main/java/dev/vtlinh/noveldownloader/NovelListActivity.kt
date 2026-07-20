@@ -43,6 +43,17 @@ class NovelListActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.statusText).text = "Pick a download folder first."
         }
         findViewById<Button>(R.id.checkBtn).setOnClickListener { checkStatuses() }
+
+        /* navigation drawer: Home returns to the main screen */
+        val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
+        findViewById<TextView>(R.id.menuBtn).setOnClickListener {
+            drawer.openDrawer(androidx.core.view.GravityCompat.START)
+        }
+        findViewById<TextView>(R.id.navHome).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.navNovels).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+        }
+
         render()
     }
 

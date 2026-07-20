@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="270dp"
+    android:layout_height="match_parent"
+    android:layout_gravity="start"
+    android:orientation="vertical"
+    android:background="@color/card"
+    android:paddingTop="28dp">
+
+    <TextView
+        android:id="@+id/navHome"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Home"
+        android:textSize="16sp"
+        android:textColor="@color/fg"
+        android:padding="16dp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <TextView
+        android:id="@+id/navNovels"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Novels"
+        android:textSize="16sp"
+        android:textColor="@color/fg"
+        android:padding="16dp"
+        android:clickable="true"
+        android:focusable="true" />
+</LinearLayout>
