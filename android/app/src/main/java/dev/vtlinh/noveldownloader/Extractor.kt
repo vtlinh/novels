@@ -110,6 +110,36 @@ object Extractor {
         return singleNewlines(cleanEncoding("$heading\n$content"))
     }
 
+    /* diacritic-insensitive key for name comparison */
+    private fun nameKey(s: String): String =
+        Normalizer.normalize(s, Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace('đ', 'd').replace('Đ', 'D')
+            .lowercase().replace(Regex("[^a-z0-9]+"), "")
+
+    private fun stripAuthorPlain(title: String, author: String): String {
+        val m = Regex("^(.*?)\\s*[-–—]\\s*([^-–—]+)$").find(title.trim()) ?: return title.trim()
+        return if (nameKey(m.groupValues[2]) == nameKey(author)) m.groupValues[1].trim() else title.trim()
+    }
+
+    /* Sites often append the author to the title ("Cối Xay Gió Màu Xanh -
+       Mộng Tiêu Nhị"); drop that suffix (diacritic-insensitively) so folder
+       names and the novel list show the bare title. Handles the translated
+       "English (Vietnamese - Author)" folder format too. */
+    fun stripAuthor(title: String, author: String?): String {
+        if (author.isNullOrBlank() || nameKey(author).isEmpty()) return title
+        val t = title.trim()
+        val paren = Regex("^(.*)\\(([^)]*)\\)\\s*$").find(t)
+        if (paren != null) {
+            val inner = stripAuthorPlain(paren.groupValues[2], author)
+            val outer = stripAuthorPlain(paren.groupValues[1], author)
+            return if (inner != paren.groupValues[2].trim() || outer != paren.groupValues[1].trim()) {
+                "$outer ($inner)"
+            } else t
+        }
+        return stripAuthorPlain(t, author)
+    }
+
     /* fold folder names to plain ASCII, same rules as the web app */
     fun sanitize(name: String): String =
         Normalizer.normalize(name, Normalizer.Form.NFD)

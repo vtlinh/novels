@@ -210,10 +210,16 @@ class DownloadEngine(
             return@withContext
         }
         val doc = Jsoup.parse(first.html, base)
-        val title = doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
-            ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
-            ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
-            ?: slug
+        val author = Sites.author(doc)
+        /* sites often append "- {author}" to the title — folder names and the
+           novels list carry the bare title, the author is stored separately */
+        val title = Extractor.stripAuthor(
+            doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
+                ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
+                ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
+                ?: slug,
+            author,
+        )
 
         val seen = LinkedHashMap<String, Chapter>()
         fun addLinks(d: org.jsoup.nodes.Document) {
@@ -282,7 +288,7 @@ class DownloadEngine(
            last_dl always bumps so the list sorts newest download first) */
         store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
         store.touchNovel(folderKey, slug, System.currentTimeMillis())
-        Sites.author(doc)?.let { store.setAuthor(folderKey, slug, it) }
+        author?.let { store.setAuthor(folderKey, slug, it) }
 
         /* When translating, render the English folder name up front (Sonnet,
            Batches API) so chapters save straight into an "English (Vietnamese)"
