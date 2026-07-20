@@ -141,10 +141,12 @@ class DownloadEngine(
         var filename: String? = null
     }
 
+    class SiteStatus(val total: Int, val completed: Boolean, val author: String?)
+
     /* Status probe for the List Novels screen: list the novel's chapters the
-       same way run() would and return (site chapter count, site says
-       completed), or null if the URL doesn't load as a novel page. */
-    suspend fun checkStatus(novelUrl: String): Pair<Int, Boolean>? = withContext(Dispatchers.IO) {
+       same way run() would and return the site chapter count, finished flag,
+       and author — or null if the URL doesn't load as a novel page. */
+    suspend fun checkStatus(novelUrl: String): SiteStatus? = withContext(Dispatchers.IO) {
         val site = Sites.forUrl(novelUrl) ?: return@withContext null
         val (base, slug) = site.normalize(novelUrl)
         val first = fetch(base)
@@ -179,7 +181,7 @@ class DownloadEngine(
             fetched = batch.last()
         }
         if (urls.isEmpty()) return@withContext null
-        Pair(urls.size, site.isCompleted(doc))
+        SiteStatus(urls.size, site.isCompleted(doc), Sites.author(doc))
     }
 
     suspend fun run(
@@ -278,6 +280,7 @@ class DownloadEngine(
         val folderKey = treeUri.toString()
         /* register for the List Novels screen (first run keeps its timestamp) */
         store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
+        Sites.author(doc)?.let { store.setAuthor(folderKey, slug, it) }
 
         /* When translating, render the English folder name up front (Sonnet,
            Batches API) so chapters save straight into an "English (Vietnamese)"

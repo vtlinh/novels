@@ -27,13 +27,14 @@ data class NovelRec(
     val slug: String,
     val url: String,
     val title: String,
+    val author: String,  // "" when unknown
     val started: Long,   // when its download was first started (0 = unknown/legacy)
     val total: Int,      // site chapter count from the last status check (-1 = never checked)
     val complete: Boolean,
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 5) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 6) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -41,6 +42,7 @@ class DownloadStore(context: Context) :
             "CREATE TABLE IF NOT EXISTS novels (" +
                 "folder TEXT, slug TEXT, url TEXT, title TEXT, " +
                 "started INTEGER, total INTEGER DEFAULT -1, complete INTEGER DEFAULT 0, " +
+                "author TEXT DEFAULT '', " +
                 "PRIMARY KEY(folder, slug))"
     }
 
@@ -79,9 +81,10 @@ class DownloadStore(context: Context) :
             onCreate(db)
             return
         }
-        /* v4 -> v5 only adds the novels table; keep everything else (the
-           names glossary especially is not rebuildable) */
+        /* v4+ upgrades are additive; keep everything else (the names
+           glossary especially is not rebuildable) */
         if (oldVersion < 5) db.execSQL(NOVELS_TABLE)
+        if (oldVersion == 5) db.execSQL("ALTER TABLE novels ADD COLUMN author TEXT DEFAULT ''")
     }
 
     /* ---- novels registry (List Novels screen) ---- */
@@ -103,19 +106,27 @@ class DownloadStore(context: Context) :
     fun novels(folder: String): List<NovelRec> {
         val out = ArrayList<NovelRec>()
         readableDatabase.query(
-            "novels", arrayOf("slug", "url", "title", "started", "total", "complete"),
+            "novels", arrayOf("slug", "url", "title", "started", "total", "complete", "author"),
             "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(
                     NovelRec(
                         c.getString(0), c.getString(1) ?: "", c.getString(2) ?: "",
+                        c.getString(6) ?: "",
                         c.getLong(3), c.getInt(4), c.getInt(5) != 0,
                     ),
                 )
             }
         }
         return out
+    }
+
+    fun setAuthor(folder: String, slug: String, author: String) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET author=? WHERE folder=? AND slug=?",
+            arrayOf(author, folder, slug),
+        )
     }
 
     fun updateNovelCheck(folder: String, slug: String, total: Int, complete: Boolean) {

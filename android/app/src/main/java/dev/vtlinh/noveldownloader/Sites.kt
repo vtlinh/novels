@@ -90,4 +90,10 @@ object Sites {
     )
 
     fun forUrl(url: String): Site? = all.firstOrNull { it.matches(url) }
+
+    /* author name from a novel page: truyenfull marks it itemprop=author,
+       novelfull links it under /author/ */
+    fun author(doc: Document): String? =
+        doc.selectFirst("a[itemprop=author]")?.text()?.trim()?.ifEmpty { null }
+            ?: doc.selectFirst("a[href*=/author/], a[href*=tac-gia]")?.text()?.trim()?.ifEmpty { null }
 }
