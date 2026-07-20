@@ -39,6 +39,22 @@ class ReaderActivity : AppCompatActivity() {
     private var treeUri: Uri? = null
     private var firstIdx = 0   // first loaded chapter
     private var nextIdx = 0    // next chapter to append
+
+    /* each loaded chapter's character offset in the text + its heading line,
+       so the header can show the chapter actually being READ */
+    private class LoadedChapter(val idx: Int, var start: Int, val heading: String)
+    private val loadedChapters = ArrayList<LoadedChapter>()
+
+    private fun headingOf(body: String): String = body.substringBefore('\n').trim()
+
+    /* which chapter is at the top of the viewport right now */
+    private fun updateHeader() {
+        val layout = text.layout ?: return
+        val y = (scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)
+        val off = layout.getLineStart(layout.getLineForVertical(y))
+        val cur = loadedChapters.lastOrNull { it.start <= off } ?: return
+        titleBar.text = cur.heading
+    }
     @Volatile private var loading = false
     private var english = true
     private var fontSp = 16f
@@ -107,6 +123,7 @@ class ReaderActivity : AppCompatActivity() {
             val content = text.height
             if (content > 0 && (scrollY + scroll.height) * 2 > content) appendNext()
             if (scrollY < 300) prependPrev()
+            updateHeader()
         }
 
         findViewById<TextView>(R.id.chaptersBtn).setOnClickListener {
@@ -212,9 +229,6 @@ class ReaderActivity : AppCompatActivity() {
         return withContext(Dispatchers.IO) { Saf.readText(contentResolver, treeUri!!, docId) }
     }
 
-    private fun chapterLabel(i: Int): String =
-        chapters?.ordered?.getOrNull(i)?.removeSuffix(".txt") ?: ""
-
     /* jump to a chapter: load it, append the next, prepend the previous */
     private fun openAt(pos: Int) {
         val ch = chapters ?: return
@@ -225,9 +239,18 @@ class ReaderActivity : AppCompatActivity() {
             firstIdx = p
             nextIdx = p
             text.text = ""
-            readAt(p)?.let { text.append(it); nextIdx = p + 1 }
-            titleBar.text = "${intent.getStringExtra("title")} — ${chapterLabel(p)}"
-            readAt(p + 1)?.let { text.append(SEP + it); nextIdx = p + 2 }
+            loadedChapters.clear()
+            readAt(p)?.let {
+                loadedChapters.add(LoadedChapter(p, 0, headingOf(it)))
+                text.append(it)
+                nextIdx = p + 1
+                titleBar.text = headingOf(it)
+            }
+            readAt(p + 1)?.let {
+                loadedChapters.add(LoadedChapter(p + 1, text.text.length + SEP.length, headingOf(it)))
+                text.append(SEP + it)
+                nextIdx = p + 2
+            }
             scroll.scrollTo(0, 0)
             loading = false
             prependPrev()   // lands the view back at the opened chapter's top
@@ -242,14 +265,16 @@ class ReaderActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val body = readAt(idx)
             if (body != null) {
+                val start = if (text.text.isEmpty()) 0 else text.text.length + SEP.length
+                loadedChapters.add(LoadedChapter(idx, start, headingOf(body)))
                 text.append(if (text.text.isEmpty()) body else SEP + body)
-                titleBar.text = "${intent.getStringExtra("title")} — ${chapterLabel(idx)}"
             }
             nextIdx = idx + 1
             loading = false
             /* short chapters may not fill the screen — keep filling */
             scroll.post {
                 if (text.height > 0 && (scroll.scrollY + scroll.height) * 2 > text.height) appendNext()
+                updateHeader()
             }
         }
     }
@@ -270,11 +295,15 @@ class ReaderActivity : AppCompatActivity() {
             }
             val oldHeight = text.height
             val oldY = scroll.scrollY
+            val shift = body.length + SEP.length
+            for (l in loadedChapters) l.start += shift
+            loadedChapters.add(0, LoadedChapter(idx, 0, headingOf(body)))
             text.text = body + SEP + text.text.toString()
             firstIdx = idx
             scroll.post {
                 scroll.scrollTo(0, oldY + (text.height - oldHeight))
                 loading = false
+                updateHeader()
             }
         }
     }
