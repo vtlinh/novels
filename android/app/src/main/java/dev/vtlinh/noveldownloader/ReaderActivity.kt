@@ -467,7 +467,8 @@ class ReaderActivity : AppCompatActivity() {
             val layout = text.layout ?: return@post
             val line = layout.getLineForOffset(target.coerceIn(0, text.length()))
             val y = layout.getLineTop(line) + text.totalPaddingTop
-            scroll.smoothScrollTo(0, (y - scroll.height / 2).coerceAtLeast(0))
+            /* keep the spoken line at ~20% of the viewport height */
+            scroll.smoothScrollTo(0, (y - scroll.height / 5).coerceAtLeast(0))
         }
     }
 
