@@ -73,12 +73,16 @@ class ReaderActivity : AppCompatActivity() {
         titleBar.text = cur.heading
         if (cur.idx != currentChapterIdx) {
             currentChapterIdx = cur.idx
-            /* remember the chapter being read, per novel — the chapter list
-               reopens scrolled to (and highlighting) it */
-            intent.getStringExtra("slug")?.let { slug ->
-                chapters?.ordered?.getOrNull(cur.idx)?.let { name ->
-                    prefs.edit().putString("lastCh:$slug", name).apply()
-                }
+            saveLastChapter(cur.idx)
+        }
+    }
+
+    /* remember the chapter being read, per novel — the chapter list reopens
+       scrolled to (and highlighting) it */
+    private fun saveLastChapter(idx: Int) {
+        intent.getStringExtra("slug")?.let { slug ->
+            chapters?.ordered?.getOrNull(idx)?.let { name ->
+                prefs.edit().putString("lastCh:$slug", name).apply()
             }
         }
     }
@@ -289,6 +293,8 @@ class ReaderActivity : AppCompatActivity() {
                 chapterLen = it.length
                 nextIdx = p + 1
                 titleBar.text = headingOf(it)
+                currentChapterIdx = p
+                saveLastChapter(p)
             }
             readAt(p + 1)?.let {
                 loadedChapters.add(LoadedChapter(p + 1, text.text.length + SEP.length, headingOf(it)))
