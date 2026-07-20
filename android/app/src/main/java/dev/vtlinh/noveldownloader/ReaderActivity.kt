@@ -493,8 +493,11 @@ class ReaderActivity : AppCompatActivity() {
         updatePlayBtn()
     }
 
+    /* U+FE0E forces text presentation so both glyphs render as plain
+       theme-colored symbols instead of the pause turning into an emoji */
     private fun updatePlayBtn() {
-        findViewById<TextView>(R.id.ttsPlayBtn)?.text = if (speaking) "\u23f8" else "\u25b6"
+        findViewById<TextView>(R.id.ttsPlayBtn)?.text =
+            if (speaking) "\u23f8\ufe0e" else "\u25b6\ufe0e"
     }
 
     override fun onDestroy() {

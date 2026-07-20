@@ -102,7 +102,7 @@
                 android:paddingEnd="24dp"
                 android:paddingTop="8dp"
                 android:paddingBottom="8dp"
-                android:text="▶"
+                android:text="&#x25B6;&#xFE0E;"
                 android:textSize="22sp"
                 android:textColor="@color/fg"
                 android:clickable="true"
