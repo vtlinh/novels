@@ -4,12 +4,12 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
@@ -90,15 +90,45 @@ class NovelListActivity : AppCompatActivity() {
             }
         } catch (e: Exception) { err += " index:${e.message}" }
 
-        /* one root listing, reused for the scan and the count fallback */
+        /* Fast SAF listing: ONE ContentResolver query per directory.
+           (DocumentFile's .name is a separate provider query per file —
+           counting a few thousand-chapter folders that way takes minutes
+           and left this screen blank.) */
+        val treeUri = Uri.parse(folder)
+        fun children(docId: String): List<Triple<String, String, Boolean>> {   // (docId, name, isDir)
+            val out = ArrayList<Triple<String, String, Boolean>>()
+            val uri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+            contentResolver.query(
+                uri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                ),
+                null, null, null,
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    out.add(
+                        Triple(
+                            c.getString(0), c.getString(1) ?: "",
+                            c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
+                        ),
+                    )
+                }
+            }
+            return out
+        }
         val dirs = try {
-            val root = DocumentFile.fromTreeUri(this, Uri.parse(folder))
-            if (root == null || !root.canRead()) err += " folder-access-lost"
-            root?.listFiles()?.filter { it.isDirectory }?.associateBy { it.name ?: "" } ?: emptyMap()
-        } catch (e: Exception) { err += " folders:${e.message}"; emptyMap() }
-        fun countIn(name: String): Int = try {
-            dirs[name]?.listFiles()?.count { chapterFileRe.matches(it.name ?: "") } ?: 0
-        } catch (e: Exception) { 0 }
+            children(DocumentsContract.getTreeDocumentId(treeUri))
+                .filter { it.third }.associate { it.second to it.first }   // name -> docId
+        } catch (e: Exception) { err += " folder-access-lost(${e.message})"; emptyMap() }
+        val countCache = HashMap<String, Int>()
+        fun countIn(name: String): Int = countCache.getOrPut(name) {
+            val id = dirs[name] ?: return@getOrPut 0
+            try {
+                children(id).count { !it.third && chapterFileRe.matches(it.second) }
+            } catch (e: Exception) { 0 }
+        }
 
         /* the on-disk folder name each known novel saves into */
         val folderName = HashMap<String, String>()
@@ -135,6 +165,7 @@ class NovelListActivity : AppCompatActivity() {
     private fun render() {
         val list = findViewById<LinearLayout>(R.id.novelList)
         val status = findViewById<TextView>(R.id.statusText)
+        status.text = "Loading…"
         lifecycleScope.launch {
             val rs = try {
                 withContext(Dispatchers.IO) { rows() }
