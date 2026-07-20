@@ -33,6 +33,26 @@ object Extractor {
     fun singleNewlines(s: String): String =
         s.replace("\r", "").replace(Regex("\n{2,}"), "\n").trim('\n')
 
+    private val ENTITY_RE = Regex("&(#\\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);")
+
+    /* Fix encoding leftovers in extracted text: HTML entities that survive
+       Jsoup's one decode because the site double-encoded them ("&amp;gt;"
+       decodes to "&gt;" and was saved literally as "-&gt;"), plus
+       non-breaking spaces, zero-width characters, and Unicode line
+       separators. Decoding repeats until stable (max 3 rounds). */
+    fun cleanEncoding(s: String): String {
+        var t = s
+        var i = 0
+        while (i++ < 3 && ENTITY_RE.containsMatchIn(t)) {
+            val u = org.jsoup.parser.Parser.unescapeEntities(t, false)
+            if (u == t) break
+            t = u
+        }
+        return t.replace('\u00A0', ' ')
+            .replace(Regex("[\\u200B\\u200C\\u200D\\uFEFF]"), "")
+            .replace('\u2028', '\n').replace('\u2029', '\n')
+    }
+
     /* returns (cleaned text, raw text before filtering) */
     private fun extractContent(doc: Document): Pair<String, String> {
         var div: Element? = null
@@ -87,7 +107,7 @@ object Extractor {
             )
         }
         val heading = if (title.isNotEmpty()) "$headingWord $num: $title" else "$headingWord $num"
-        return singleNewlines("$heading\n$content")
+        return singleNewlines(cleanEncoding("$heading\n$content"))
     }
 
     /* fold folder names to plain ASCII, same rules as the web app */

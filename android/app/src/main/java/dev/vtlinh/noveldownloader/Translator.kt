@@ -245,7 +245,9 @@ class Translator(
         return try {
             val f = tdir.createFile("text/plain", name) ?: return false
             context.contentResolver.openOutputStream(f.uri)?.use {
-                it.write(Extractor.singleNewlines(text).toByteArray(Charsets.UTF_8))
+                it.write(
+                    Extractor.singleNewlines(Extractor.cleanEncoding(text)).toByteArray(Charsets.UTF_8),
+                )
             } ?: return false
             true
         } catch (e: Exception) { false }
