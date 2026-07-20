@@ -185,34 +185,8 @@ class BrowserActivity : AppCompatActivity() {
         /* start screen: the last 20 domains we visited, newest first. Tapping
            one opens its front page. With no history yet, load the old default
            start page directly. */
-        val history = domainHistory().entries.sortedByDescending { it.value }.map { it.key }
-        if (history.isEmpty()) {
-            web.loadUrl(start)
-        } else {
-            val panel = findViewById<android.view.View>(R.id.recentPanel)
-            val list = findViewById<android.widget.ListView>(R.id.recentList)
-            list.adapter = object : android.widget.ArrayAdapter<String>(
-                this, android.R.layout.simple_list_item_1, history,
-            ) {
-                override fun getView(
-                    position: Int,
-                    convertView: android.view.View?,
-                    parent: android.view.ViewGroup,
-                ): android.view.View {
-                    val v = super.getView(position, convertView, parent) as android.widget.TextView
-                    v.setTextColor(getColor(R.color.fg))
-                    return v
-                }
-            }
-            list.setOnItemClickListener { _, _, pos, _ ->
-                web.loadUrl("https://${history[pos]}/")
-            }
-            findViewById<android.view.View>(R.id.recentBack).setOnClickListener { finish() }
-            /* the start screen has its own header; the browser one comes back
-               once a page loads */
-            findViewById<android.view.View>(R.id.browserHeader).visibility = android.view.View.GONE
-            panel.visibility = android.view.View.VISIBLE
-        }
+        findViewById<android.view.View>(R.id.recentBack).setOnClickListener { finish() }
+        if (domainHistory().isEmpty()) web.loadUrl(start) else showRecentPanel()
 
         /* typing a URL and hitting Go navigates the WebView */
         urlEdit.setOnEditorActionListener { v, actionId, _ ->
@@ -245,14 +219,46 @@ class BrowserActivity : AppCompatActivity() {
             finish()
         }
 
-        /* header back behaves like a browser back button: page history first,
-           then out of browser mode */
+        /* header back exits straight to the domain list; the system back
+           button is the one that walks page history */
         findViewById<android.widget.TextView>(R.id.browseBack).setOnClickListener {
-            if (web.canGoBack()) web.goBack() else finish()
+            showRecentPanel()
         }
     }
 
+    /* show the recent-domains start screen, rebuilt fresh so just-visited
+       domains appear; the browser header hides until a page loads again */
+    private fun showRecentPanel() {
+        val web = findViewById<WebView>(R.id.webview)
+        val history = domainHistory().entries.sortedByDescending { it.value }.map { it.key }
+        if (history.isEmpty()) { finish(); return }
+        val list = findViewById<android.widget.ListView>(R.id.recentList)
+        list.adapter = object : android.widget.ArrayAdapter<String>(
+            this, android.R.layout.simple_list_item_1, history,
+        ) {
+            override fun getView(
+                position: Int,
+                convertView: android.view.View?,
+                parent: android.view.ViewGroup,
+            ): android.view.View {
+                val v = super.getView(position, convertView, parent) as android.widget.TextView
+                v.setTextColor(getColor(R.color.fg))
+                return v
+            }
+        }
+        list.setOnItemClickListener { _, _, pos, _ ->
+            web.loadUrl("https://${history[pos]}/")
+        }
+        findViewById<android.view.View>(R.id.browserHeader).visibility = android.view.View.GONE
+        findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.VISIBLE
+    }
+
     override fun onBackPressed() {
+        /* on the domain list the system back exits browser mode */
+        if (findViewById<android.view.View>(R.id.recentPanel).visibility == android.view.View.VISIBLE) {
+            super.onBackPressed()
+            return
+        }
         val web = findViewById<WebView>(R.id.webview)
         if (web.canGoBack()) web.goBack() else super.onBackPressed()
     }
