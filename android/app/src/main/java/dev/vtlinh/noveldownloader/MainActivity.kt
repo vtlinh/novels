@@ -35,6 +35,28 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        /* app opened from the launcher while a reading session was live →
+           resume straight into the reader at the saved spot (the marker is
+           cleared when the user backs out of reading mode) */
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN) {
+            prefs.getString("lastReading", null)?.let { saved ->
+                try {
+                    val o = org.json.JSONObject(saved)
+                    val slug = o.getString("slug")
+                    val startCh = prefs.getString("lastCh:$slug", null)
+                    if (startCh != null) {
+                        startActivity(
+                            Intent(this, ReaderActivity::class.java)
+                                .putExtra("dir", o.getString("dir"))
+                                .putExtra("title", o.getString("title"))
+                                .putExtra("slug", slug)
+                                .putExtra("start", startCh),
+                        )
+                    }
+                } catch (e: Exception) {}
+            }
+        }
+
         findViewById<TextView>(R.id.versionText).text = "v" + try {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
         } catch (e: Exception) { "?" }

@@ -557,6 +557,26 @@ class ReaderActivity : AppCompatActivity() {
             if (speaking) "\u275a\u275a" else "\u25b6\ufe0e"
     }
 
+    /* While this screen is live, remember we're in the middle of reading —
+       the launcher resumes straight into it. Deliberately leaving (back or
+       navigation → isFinishing) clears the marker; backgrounding or a
+       process kill does not. */
+    override fun onResume() {
+        super.onResume()
+        val dir = intent.getStringExtra("dir") ?: return
+        val slug = intent.getStringExtra("slug") ?: return
+        val o = org.json.JSONObject()
+        o.put("dir", dir)
+        o.put("title", intent.getStringExtra("title") ?: dir)
+        o.put("slug", slug)
+        prefs.edit().putString("lastReading", o.toString()).apply()
+    }
+
+    override fun onPause() {
+        if (isFinishing) prefs.edit().remove("lastReading").apply()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
         TtsService.stop(this)
