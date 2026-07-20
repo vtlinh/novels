@@ -47,6 +47,7 @@ class NovelListActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.statusText).text = "Pick a download folder first."
         }
         findViewById<Button>(R.id.checkBtn).setOnClickListener { checkStatuses() }
+        findViewById<Button>(R.id.fixBtn).setOnClickListener { fixAll() }
 
         /* navigation drawer: Home returns to the main screen */
         val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
@@ -143,31 +144,35 @@ class NovelListActivity : AppCompatActivity() {
        took minutes on big folders). Registers every unaccounted novel folder
        and records on-disk chapter counts, then marks the folder scanned so
        this never runs again. Returns an error tag or "". */
+    /* Fast SAF listing: one ContentResolver query per directory returning
+       (docId, name, isDir) for every child. */
+    private fun children(treeUri: Uri, docId: String): List<Triple<String, String, Boolean>> {
+        val out = ArrayList<Triple<String, String, Boolean>>()
+        val uri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+        contentResolver.query(
+            uri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            ),
+            null, null, null,
+        )?.use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    Triple(
+                        c.getString(0), c.getString(1) ?: "",
+                        c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
     private fun scanFolder(folder: String): String {
         val treeUri = Uri.parse(folder)
-        fun children(docId: String): List<Triple<String, String, Boolean>> {   // (docId, name, isDir)
-            val out = ArrayList<Triple<String, String, Boolean>>()
-            val uri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
-            contentResolver.query(
-                uri,
-                arrayOf(
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    DocumentsContract.Document.COLUMN_MIME_TYPE,
-                ),
-                null, null, null,
-            )?.use { c ->
-                while (c.moveToNext()) {
-                    out.add(
-                        Triple(
-                            c.getString(0), c.getString(1) ?: "",
-                            c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
-                        ),
-                    )
-                }
-            }
-            return out
-        }
+        fun children(docId: String) = children(treeUri, docId)
 
         val dirs = try {
             children(DocumentsContract.getTreeDocumentId(treeUri))
@@ -367,6 +372,68 @@ class NovelListActivity : AppCompatActivity() {
             status.text = "Status checked (${targets.size} novel(s))."
             btn.isEnabled = true
             render()
+        }
+    }
+
+    /* TEMPORARY one-time repair: rewrite every saved chapter (and translated
+       file) in place through Extractor.cleanEncoding, fixing files written
+       before the encoding cleanup existed. Only changed files are rewritten.
+       Remove this button once the library has been fixed. */
+    private fun fixAll() {
+        val folder = folderKey ?: return
+        val fixBtn = findViewById<Button>(R.id.fixBtn)
+        val checkBtn = findViewById<Button>(R.id.checkBtn)
+        val status = findViewById<TextView>(R.id.statusText)
+        fixBtn.isEnabled = false
+        checkBtn.isEnabled = false
+        lifecycleScope.launch {
+            var fixed = 0
+            var failed = 0
+            var scanned = 0
+            withContext(Dispatchers.IO) {
+                val treeUri = Uri.parse(folder)
+                /* collect every chapter file: novel folders + their translated/ */
+                val fileIds = ArrayList<String>()
+                try {
+                    for ((dirId, _, isDir) in children(treeUri, DocumentsContract.getTreeDocumentId(treeUri))) {
+                        if (!isDir) continue
+                        for ((childId, name, childDir) in children(treeUri, dirId)) {
+                            if (childDir && name == "translated") {
+                                for ((tid, tname, tdir) in children(treeUri, childId)) {
+                                    if (!tdir && tname.endsWith(".txt")) fileIds.add(tid)
+                                }
+                            } else if (!childDir && chapterFileRe.matches(name)) {
+                                fileIds.add(childId)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {}
+                for (id in fileIds) {
+                    scanned++
+                    try {
+                        val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
+                        val text = contentResolver.openInputStream(uri)?.use {
+                            it.readBytes().toString(Charsets.UTF_8)
+                        } ?: continue
+                        val cleaned = Extractor.singleNewlines(Extractor.cleanEncoding(text))
+                        if (cleaned != text) {
+                            contentResolver.openOutputStream(uri, "wt")?.use {
+                                it.write(cleaned.toByteArray(Charsets.UTF_8))
+                            } ?: continue
+                            fixed++
+                        }
+                    } catch (e: Exception) { failed++ }
+                    if (scanned % 100 == 0) {
+                        withContext(Dispatchers.Main) {
+                            status.text = "Fixing… $scanned/${fileIds.size} ($fixed fixed)"
+                        }
+                    }
+                }
+            }
+            status.text = "Fix done: $scanned file(s) checked, $fixed fixed" +
+                (if (failed > 0) ", $failed failed" else "") + "."
+            fixBtn.isEnabled = true
+            checkBtn.isEnabled = true
         }
     }
 
