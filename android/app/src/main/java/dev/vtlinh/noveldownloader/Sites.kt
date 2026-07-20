@@ -15,6 +15,7 @@ class Site(
     val isChapterPath: (String, String) -> Boolean,         // (path, slug)
     val maxPage: (Document, String) -> Int,                 // (doc, slug)
     val chapterNumFromUrl: (String) -> Int?,
+    val isCompleted: (Document) -> Boolean,                 // novel page says finished
 ) {
     fun matches(url: String) = urlRe.containsMatchIn(url.trim())
 }
@@ -46,6 +47,13 @@ object Sites {
             chapterNumFromUrl = { url ->
                 Regex("chuong-(\\d+)").findAll(url).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
             },
+            /* novel page: <h3>Trạng thái:</h3><span class="text-success">Full</span> */
+            isCompleted = { doc ->
+                doc.select("span.text-success").any {
+                    val t = it.text().trim()
+                    t.equals("Full", true) || t.contains("Hoàn", true)
+                }
+            },
         ),
         Site(
             name = "novelfull",
@@ -73,6 +81,10 @@ object Sites {
             chapterNumFromUrl = { url ->
                 Regex("chapter-(\\d+)", RegexOption.IGNORE_CASE)
                     .findAll(url).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
+            },
+            /* novel page: <h3>Status:</h3><a href=".../status/Completed">Completed</a> */
+            isCompleted = { doc ->
+                doc.select("a[href*=/status/]").any { it.text().trim().equals("Completed", true) }
             },
         ),
     )

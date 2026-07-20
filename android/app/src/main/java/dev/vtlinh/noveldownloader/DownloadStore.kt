@@ -22,11 +22,26 @@ data class PendingBatch(
    row stores the chapter's document URI so existence can be checked in O(1)
    (no directory listing). On a new device / reinstall / copied folder the
    index is simply empty and DownloadEngine rebuilds it from one listing. */
+/* one downloaded novel, as shown on the List Novels screen */
+data class NovelRec(
+    val slug: String,
+    val url: String,
+    val title: String,
+    val started: Long,   // when its download was first started (0 = unknown/legacy)
+    val total: Int,      // site chapter count from the last status check (-1 = never checked)
+    val complete: Boolean,
+)
+
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 4) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 5) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
+        private const val NOVELS_TABLE =
+            "CREATE TABLE IF NOT EXISTS novels (" +
+                "folder TEXT, slug TEXT, url TEXT, title TEXT, " +
+                "started INTEGER, total INTEGER DEFAULT -1, complete INTEGER DEFAULT 0, " +
+                "PRIMARY KEY(folder, slug))"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -50,14 +65,81 @@ class DownloadStore(context: Context) :
                 "folder TEXT, slug TEXT, english TEXT, " +
                 "PRIMARY KEY(folder, slug))",
         )
+        db.execSQL(NOVELS_TABLE)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS chapters")
-        db.execSQL("DROP TABLE IF EXISTS names")
-        db.execSQL("DROP TABLE IF EXISTS pending_batches")
-        db.execSQL("DROP TABLE IF EXISTS titles")
-        onCreate(db)
+        if (oldVersion < 4) {
+            /* pre-v4 schemas differ in place — rebuild (it's all cache/index) */
+            db.execSQL("DROP TABLE IF EXISTS chapters")
+            db.execSQL("DROP TABLE IF EXISTS names")
+            db.execSQL("DROP TABLE IF EXISTS pending_batches")
+            db.execSQL("DROP TABLE IF EXISTS titles")
+            db.execSQL("DROP TABLE IF EXISTS novels")
+            onCreate(db)
+            return
+        }
+        /* v4 -> v5 only adds the novels table; keep everything else (the
+           names glossary especially is not rebuildable) */
+        if (oldVersion < 5) db.execSQL(NOVELS_TABLE)
+    }
+
+    /* ---- novels registry (List Novels screen) ---- */
+
+    /* record a novel the first time it downloads; url/title refresh each run
+       but the original started timestamp is kept */
+    fun registerNovel(folder: String, slug: String, url: String, title: String, now: Long) {
+        val db = writableDatabase
+        db.execSQL(
+            "INSERT OR IGNORE INTO novels(folder,slug,url,title,started,total,complete) VALUES(?,?,?,?,?,-1,0)",
+            arrayOf(folder, slug, url, title, now),
+        )
+        db.execSQL(
+            "UPDATE novels SET url=?, title=? WHERE folder=? AND slug=?",
+            arrayOf(url, title, folder, slug),
+        )
+    }
+
+    fun novels(folder: String): List<NovelRec> {
+        val out = ArrayList<NovelRec>()
+        readableDatabase.query(
+            "novels", arrayOf("slug", "url", "title", "started", "total", "complete"),
+            "folder=?", arrayOf(folder), null, null, null,
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    NovelRec(
+                        c.getString(0), c.getString(1) ?: "", c.getString(2) ?: "",
+                        c.getLong(3), c.getInt(4), c.getInt(5) != 0,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    fun updateNovelCheck(folder: String, slug: String, total: Int, complete: Boolean) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET total=?, complete=? WHERE folder=? AND slug=?",
+            arrayOf(total, if (complete) 1 else 0, folder, slug),
+        )
+    }
+
+    /* distinct novels present in the chapter index but never registered
+       (downloaded by an app version before the novels table existed) */
+    fun chapterSlugs(folder: String): List<String> {
+        val out = ArrayList<String>()
+        readableDatabase.query(
+            true, "chapters", arrayOf("slug"), "folder=?", arrayOf(folder), null, null, "slug", null,
+        ).use { c -> while (c.moveToNext()) out.add(c.getString(0)) }
+        return out
+    }
+
+    fun chapterCount(folder: String, slug: String): Int {
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM chapters WHERE folder=? AND slug=?", arrayOf(folder, slug),
+        ).use { c -> if (c.moveToNext()) return c.getInt(0) }
+        return 0
     }
 
     /* ---- translated novel-folder name cache: slug -> "English (Vietnamese)" ---- */

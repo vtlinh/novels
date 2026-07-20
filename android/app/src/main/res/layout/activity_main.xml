@@ -74,17 +74,35 @@
             android:inputType="textUri"
             android:importantForAutofill="no" />
 
-        <Button
-            android:id="@+id/browserBtn"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Browser mode"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/fg"
-            app:backgroundTint="@color/btn_secondary"
-            app:cornerRadius="8dp" />
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/browserBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Browser mode"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg"
+                app:backgroundTint="@color/btn_secondary"
+                app:cornerRadius="8dp" />
+
+            <Button
+                android:id="@+id/listBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="List novels"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg"
+                app:backgroundTint="@color/btn_secondary"
+                app:cornerRadius="8dp" />
+        </LinearLayout>
 
         <CheckBox
             android:id="@+id/translateCheck"

@@ -66,6 +66,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, BrowserActivity::class.java))
         }
 
+        findViewById<Button>(R.id.listBtn).setOnClickListener {
+            startActivity(Intent(this, NovelListActivity::class.java))
+        }
+
         findViewById<Button>(R.id.stopBtn).setOnClickListener {
             (it as Button).text = "Stopping…"
             startService(Intent(this, DownloadService::class.java).setAction(DownloadService.ACTION_STOP))
