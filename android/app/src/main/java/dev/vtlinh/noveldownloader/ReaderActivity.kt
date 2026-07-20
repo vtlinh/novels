@@ -454,12 +454,20 @@ class ReaderActivity : AppCompatActivity() {
         t.speak(sentence, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
     }
 
-    /* keep the line being read vertically centered while TTS plays */
+    /* Keep the line being read vertically centered while TTS plays. Posted a
+       frame so the layout reflects any chapter text just appended; without
+       that, centering right after a chapter append computes against the old
+       layout and jumps to the buffer end. */
     private fun scrollToSpoken(off: Int) {
-        val layout = text.layout ?: return
-        val line = layout.getLineForOffset(off.coerceIn(0, text.length()))
-        val y = layout.getLineTop(line) + text.totalPaddingTop
-        scroll.smoothScrollTo(0, (y - scroll.height / 2).coerceAtLeast(0))
+        scroll.post {
+            /* a prepend may have shifted offsets since the call — resumeCursor
+               is kept shifted, so prefer it over the captured value */
+            val target = if (speaking && resumeCursor >= 0) resumeCursor else off
+            val layout = text.layout ?: return@post
+            val line = layout.getLineForOffset(target.coerceIn(0, text.length()))
+            val y = layout.getLineTop(line) + text.totalPaddingTop
+            scroll.smoothScrollTo(0, (y - scroll.height / 2).coerceAtLeast(0))
+        }
     }
 
     private fun setHighlight(s0: Int, s1: Int) {
@@ -797,6 +805,11 @@ class ReaderActivity : AppCompatActivity() {
                 }
                 loading = false
                 updateHeader()
+                /* a smooth scroll in flight when the prepend landed still
+                   animates toward pre-shift coordinates — restart it against
+                   the new layout so TTS centering doesn't jump into the
+                   freshly inserted chapter */
+                if (speaking && resumeCursor >= 0) scrollToSpoken(resumeCursor)
             }
         }
     }
