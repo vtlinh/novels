@@ -531,11 +531,20 @@ class ReaderActivity : AppCompatActivity() {
             setPadding(0, dp(12), 0, dp(4))
         }
 
-        /* settings are per language; edit the profile of what's being read */
+        /* settings are per language; edit the profile of what's being read.
+           The language is named once in the header, not on every row. */
         val lang = curTtsLang.ifEmpty { detectLang(text.text.toString().take(600)) }
-        val langLabel = lang.uppercase()
+        root.addView(
+            TextView(ctx).apply {
+                text = "TTS — " + if (lang == "vi") "Tiếng Việt" else "English"
+                textSize = 15f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(getColor(R.color.fg))
+                setPadding(0, 0, 0, dp(4))
+            },
+        )
 
-        root.addView(label("TTS voice ($langLabel)"))
+        root.addView(label("Voice"))
         val voices = try {
             val all = tts?.voices.orEmpty()
             val forLang = all.filter { it.locale.language == lang }
@@ -615,10 +624,10 @@ class ReaderActivity : AppCompatActivity() {
             row.addView(valueTv)
             root.addView(row)
         }
-        sliderRow("Rate ($langLabel)", { prefs.getFloat("ttsRate:$lang", 1f) }) {
+        sliderRow("Rate", { prefs.getFloat("ttsRate:$lang", 1f) }) {
             prefs.edit().putFloat("ttsRate:$lang", it).apply()
         }
-        sliderRow("Pitch ($langLabel)", { prefs.getFloat("ttsPitch:$lang", 1f) }) {
+        sliderRow("Pitch", { prefs.getFloat("ttsPitch:$lang", 1f) }) {
             prefs.edit().putFloat("ttsPitch:$lang", it).apply()
         }
 
