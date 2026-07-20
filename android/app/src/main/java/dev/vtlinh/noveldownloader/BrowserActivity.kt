@@ -33,9 +33,22 @@ class BrowserActivity : AppCompatActivity() {
             "mgid.com", "taboola.com", "outbrain.com", "criteo", "zedo.com",
             "adform.net", "smartadserver", "openx.net", "rubiconproject",
             "pubmatic.com", "onclickads", "clickadu", "galaksion", "adskeeper",
+            /* Vietnamese networks the novel sites actually use */
+            "admicro", "adtima", "eclick", "ants.vn", "ambientplatform",
+            "blueseed", "yomedia", "adsota", "novanet", "adsplay", "netlink.vn",
         )
         private fun isAdHost(host: String) =
             AD_HOSTS.any { host == it || host.endsWith(".$it") || host.contains(it) }
+
+        /* legitimate third-party CDNs sites need; every OTHER third-party
+           script or iframe is treated as an ad delivery vehicle */
+        private val CDN_ALLOW = listOf(
+            "googleapis.com", "gstatic.com", "cloudflare.com", "cloudflareinsights.com",
+            "jsdelivr.net", "jquery.com", "unpkg.com", "bootstrapcdn.com",
+            "fontawesome.com", "cdnjs.com",
+        )
+        private fun isAllowedCdn(host: String) =
+            CDN_ALLOW.any { host == it || host.endsWith(".$it") }
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -79,14 +92,56 @@ class BrowserActivity : AppCompatActivity() {
                 }
             }
 
-            /* ad filtering: swallow every request to a known ad network */
+            /* Ad filtering: swallow requests to known ad networks, and — since
+               ads arrive via scripts and iframes — any THIRD-party script or
+               sub-frame that isn't a whitelisted CDN. */
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                 val host = request?.url?.host ?: return null
-                return if (isAdHost(host)) {
-                    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
-                } else {
-                    null
+                val empty = { WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0))) }
+                if (isAdHost(host)) return empty()
+                val curHost = try { java.net.URI(currentUrl).host } catch (e: Exception) { null }
+                val curBase = curHost?.split('.')?.takeLast(2)?.joinToString(".")
+                val thirdParty = curBase != null && host != curBase && !host.endsWith(".$curBase")
+                if (thirdParty && !isAllowedCdn(host)) {
+                    val path = (request.url.path ?: "").lowercase()
+                    val accept = request.requestHeaders?.get("Accept") ?: ""
+                    if (path.endsWith(".js")) return empty()                       // foreign script
+                    if (!request.isForMainFrame && accept.contains("text/html")) {
+                        return empty()                                             // foreign iframe
+                    }
                 }
+                return null
+            }
+
+            /* cosmetic sweep: interstitial overlays are fixed, huge, and
+               high-z — remove them and unlock scrolling; repeated because ad
+               scripts often inject after load */
+            override fun onPageFinished(view: WebView?, url: String?) {
+                view?.evaluateJavascript(
+                    """
+                    (function(){
+                      function sweep(){
+                        try{
+                          var vw=window.innerWidth, vh=window.innerHeight;
+                          var els=document.querySelectorAll('div,section,aside,ins,iframe');
+                          for (var i=0;i<els.length;i++){
+                            var e=els[i], s=getComputedStyle(e);
+                            if ((s.position==='fixed'||s.position==='sticky') && (parseInt(s.zIndex)||0)>=1000){
+                              var r=e.getBoundingClientRect();
+                              if (r.width*r.height > vw*vh*0.35){
+                                e.remove();
+                                document.body.style.overflow='auto';
+                                document.documentElement.style.overflow='auto';
+                              }
+                            }
+                          }
+                        }catch(err){}
+                      }
+                      sweep(); setTimeout(sweep,1500); setTimeout(sweep,4000); setTimeout(sweep,8000);
+                    })();
+                    """.trimIndent(),
+                    null,
+                )
             }
 
             /* popup-redirect filtering: a main-frame navigation to a different
