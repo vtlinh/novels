@@ -460,14 +460,21 @@ class ReaderActivity : AppCompatActivity() {
        layout and jumps to the buffer end. */
     private fun scrollToSpoken(off: Int) {
         scroll.post {
+            if (!speaking) return@post   // paused since this was queued
             /* a prepend may have shifted offsets since the call — resumeCursor
                is kept shifted, so prefer it over the captured value */
-            val target = if (speaking && resumeCursor >= 0) resumeCursor else off
+            val target = if (resumeCursor >= 0) resumeCursor else off
             val layout = text.layout ?: return@post
             val line = layout.getLineForOffset(target.coerceIn(0, text.length()))
             val y = layout.getLineTop(line) + text.totalPaddingTop
             scroll.smoothScrollTo(0, (y - scroll.height / 2).coerceAtLeast(0))
         }
+    }
+
+    /* freeze the page where it is: a zero-delta smooth scroll replaces any
+       in-flight centering animation so pausing doesn't keep gliding */
+    private fun cancelAutoScroll() {
+        scroll.smoothScrollBy(0, 0)
     }
 
     private fun setHighlight(s0: Int, s1: Int) {
@@ -499,6 +506,7 @@ class ReaderActivity : AppCompatActivity() {
     /* pause replays the interrupted sentence on resume */
     private fun pauseTts() {
         speaking = false
+        cancelAutoScroll()
         tts?.stop()
         TtsService.stop(this)
         if (resumeCursor >= 0) speakCursor = resumeCursor
@@ -508,6 +516,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun stopTts() {
         speaking = false
+        cancelAutoScroll()
         tts?.stop()
         TtsService.stop(this)
         clearHighlight()
