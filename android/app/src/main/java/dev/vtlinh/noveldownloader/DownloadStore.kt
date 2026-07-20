@@ -31,10 +31,11 @@ data class NovelRec(
     val started: Long,   // when its download was first started (0 = unknown/legacy)
     val total: Int,      // site chapter count from the last status check (-1 = never checked)
     val complete: Boolean,
+    val diskCount: Int,  // chapters counted on disk at scan time (for unindexed novels)
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 6) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 7) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -42,8 +43,11 @@ class DownloadStore(context: Context) :
             "CREATE TABLE IF NOT EXISTS novels (" +
                 "folder TEXT, slug TEXT, url TEXT, title TEXT, " +
                 "started INTEGER, total INTEGER DEFAULT -1, complete INTEGER DEFAULT 0, " +
-                "author TEXT DEFAULT '', " +
+                "author TEXT DEFAULT '', disk_count INTEGER DEFAULT 0, " +
                 "PRIMARY KEY(folder, slug))"
+        /* folders whose one-time root scan has been folded into the registry */
+        private const val SCANNED_TABLE =
+            "CREATE TABLE IF NOT EXISTS scanned (folder TEXT PRIMARY KEY, at INTEGER)"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -68,6 +72,7 @@ class DownloadStore(context: Context) :
                 "PRIMARY KEY(folder, slug))",
         )
         db.execSQL(NOVELS_TABLE)
+        db.execSQL(SCANNED_TABLE)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -83,8 +88,30 @@ class DownloadStore(context: Context) :
         }
         /* v4+ upgrades are additive; keep everything else (the names
            glossary especially is not rebuildable) */
-        if (oldVersion < 5) db.execSQL(NOVELS_TABLE)
+        if (oldVersion < 5) db.execSQL(NOVELS_TABLE)   // creates the full current shape
         if (oldVersion == 5) db.execSQL("ALTER TABLE novels ADD COLUMN author TEXT DEFAULT ''")
+        if (oldVersion in 5..6) db.execSQL("ALTER TABLE novels ADD COLUMN disk_count INTEGER DEFAULT 0")
+        if (oldVersion < 7) db.execSQL(SCANNED_TABLE)
+    }
+
+    /* ---- one-time root-folder scan marker ---- */
+
+    fun isScanned(folder: String): Boolean {
+        readableDatabase.query(
+            "scanned", arrayOf("at"), "folder=?", arrayOf(folder), null, null, null,
+        ).use { c -> return c.moveToNext() }
+    }
+
+    fun markScanned(folder: String, now: Long) {
+        writableDatabase.execSQL(
+            "INSERT OR REPLACE INTO scanned(folder,at) VALUES(?,?)", arrayOf(folder, now),
+        )
+    }
+
+    fun setDiskCount(folder: String, slug: String, n: Int) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET disk_count=? WHERE folder=? AND slug=?", arrayOf(n, folder, slug),
+        )
     }
 
     /* ---- novels registry (List Novels screen) ---- */
@@ -106,7 +133,7 @@ class DownloadStore(context: Context) :
     fun novels(folder: String): List<NovelRec> {
         val out = ArrayList<NovelRec>()
         readableDatabase.query(
-            "novels", arrayOf("slug", "url", "title", "started", "total", "complete", "author"),
+            "novels", arrayOf("slug", "url", "title", "started", "total", "complete", "author", "disk_count"),
             "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
             while (c.moveToNext()) {
@@ -114,7 +141,7 @@ class DownloadStore(context: Context) :
                     NovelRec(
                         c.getString(0), c.getString(1) ?: "", c.getString(2) ?: "",
                         c.getString(6) ?: "",
-                        c.getLong(3), c.getInt(4), c.getInt(5) != 0,
+                        c.getLong(3), c.getInt(4), c.getInt(5) != 0, c.getInt(7),
                     ),
                 )
             }
