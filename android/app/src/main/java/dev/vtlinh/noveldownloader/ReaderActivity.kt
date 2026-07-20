@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.util.TypedValue
 import android.widget.ArrayAdapter
 import android.widget.ListView
-import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -114,24 +113,77 @@ class ReaderActivity : AppCompatActivity() {
             drawer.openDrawer(GravityCompat.END)
         }
         findViewById<TextView>(R.id.langBtn).setOnClickListener { toggleLanguage() }
-        findViewById<TextView>(R.id.settingsBtn).setOnClickListener { v ->
-            val pm = PopupMenu(this, v)
-            if (chapters?.translated?.isNotEmpty() == true) {
-                pm.menu.add(0, 1, 0, if (english) "Switch to Tiếng Việt" else "Switch to English")
-            }
-            pm.menu.add(0, 2, 1, "Font size +")
-            pm.menu.add(0, 3, 2, "Font size −")
-            pm.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    1 -> toggleLanguage()
-                    2 -> adjustFont(+1f)
-                    3 -> adjustFont(-1f)
-                }
-                true
-            }
-            pm.show()
-        }
+        findViewById<TextView>(R.id.settingsBtn).setOnClickListener { v -> showSettings(v) }
     }
+
+    /* Custom settings popup (a PopupMenu can't do this): the font controls
+       sit on ONE line — "Font size  −  +" — and adjusting the size keeps the
+       popup open so the effect can be watched live. */
+    private fun showSettings(anchor: android.view.View) {
+        val root = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(getColor(R.color.card))
+                setStroke(dp(1), 0xFF333A42.toInt())
+            }
+        }
+        val popup = android.widget.PopupWindow(
+            root,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            true,
+        )
+        popup.elevation = dp(8).toFloat()
+
+        if (chapters?.translated?.isNotEmpty() == true) {
+            root.addView(
+                TextView(this).apply {
+                    text = if (english) "Switch to Tiếng Việt" else "Switch to English"
+                    textSize = 15f
+                    setTextColor(getColor(R.color.fg))
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        popup.dismiss()
+                        toggleLanguage()
+                    }
+                },
+            )
+        }
+
+        val row = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        row.addView(
+            TextView(this).apply {
+                text = "Font size"
+                textSize = 15f
+                setTextColor(getColor(R.color.fg))
+                setPadding(dp(12), dp(10), dp(18), dp(10))
+            },
+        )
+        fun sizeBtn(label: String, delta: Float) = TextView(this).apply {
+            text = label
+            textSize = 20f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(getColor(R.color.accent))
+            setPadding(dp(16), dp(6), dp(16), dp(6))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { adjustFont(delta) }   // popup stays open
+        }
+        row.addView(sizeBtn("−", -1f))
+        row.addView(sizeBtn("+", +1f))
+        root.addView(row)
+
+        popup.showAsDropDown(anchor, 0, dp(4), android.view.Gravity.END)
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun updateLangBtn() {
         findViewById<TextView>(R.id.langBtn).text = if (english) "EN" else "VI"
