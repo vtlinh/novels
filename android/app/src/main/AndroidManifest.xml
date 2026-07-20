@@ -62,6 +62,10 @@
             android:name=".ReaderActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false" />
+
         <!-- Foreground service: downloads keep running with the screen off -->
         <service
             android:name=".DownloadService"

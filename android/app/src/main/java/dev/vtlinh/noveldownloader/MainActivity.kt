@@ -28,7 +28,6 @@ class MainActivity : AppCompatActivity() {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
                 prefs.edit().putString("tree", uri.toString()).apply()
-                updateFolderLabel()
             }
         }
 
@@ -44,21 +43,12 @@ class MainActivity : AppCompatActivity() {
         urlInput.setText(prefs.getString("url", ""))
         handleShare(intent)
 
-        // translation toggle: reveal the key field, remember both
+        // translation toggle (the API key itself lives in Settings)
         val translateCheck = findViewById<android.widget.CheckBox>(R.id.translateCheck)
-        val apiKeyInput = findViewById<EditText>(R.id.apiKeyInput)
         translateCheck.isChecked = prefs.getBoolean("translate", false)
-        apiKeyInput.setText(prefs.getString("apiKey", ""))
-        apiKeyInput.visibility = if (translateCheck.isChecked) View.VISIBLE else View.GONE
         translateCheck.setOnCheckedChangeListener { _, checked ->
             prefs.edit().putBoolean("translate", checked).apply()
-            apiKeyInput.visibility = if (checked) View.VISIBLE else View.GONE
         }
-        apiKeyInput.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) prefs.edit().putString("apiKey", apiKeyInput.text.toString().trim()).apply()
-        }
-
-        findViewById<TextView>(R.id.folderBtn).setOnClickListener { pickFolder.launch(null) }
 
         findViewById<Button>(R.id.downloadBtn).setOnClickListener { startDownload() }
 
@@ -82,13 +72,16 @@ class MainActivity : AppCompatActivity() {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, ReadingListActivity::class.java))
         }
+        findViewById<TextView>(R.id.navSettings).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
         findViewById<Button>(R.id.stopBtn).setOnClickListener {
             (it as Button).text = "Stopping…"
             startService(Intent(this, DownloadService::class.java).setAction(DownloadService.ACTION_STOP))
         }
 
-        updateFolderLabel()
         maybeAutoStartFromShare()
 
         val statusText = findViewById<TextView>(R.id.statusText)
@@ -212,12 +205,13 @@ class MainActivity : AppCompatActivity() {
         val tree = prefs.getString("tree", null)
         if (tree == null) { pickFolder.launch(null); return }
         val translate = findViewById<android.widget.CheckBox>(R.id.translateCheck).isChecked
-        val apiKey = findViewById<EditText>(R.id.apiKeyInput).text.toString().trim()
+        val apiKey = (prefs.getString("apiKey", "") ?: "").trim()
         if (translate && apiKey.isEmpty()) {
-            findViewById<TextView>(R.id.statusText).text = "Enter your Anthropic API key to translate."
+            findViewById<TextView>(R.id.statusText).text =
+                "Set your Anthropic API key in Settings to translate."
             return
         }
-        prefs.edit().putBoolean("translate", translate).putString("apiKey", apiKey).apply()
+        prefs.edit().putBoolean("translate", translate).apply()
         startForegroundService(
             Intent(this, DownloadService::class.java)
                 .putExtra("url", url).putExtra("tree", tree)
@@ -225,16 +219,4 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun updateFolderLabel() {
-        val tree = prefs.getString("tree", null)
-        findViewById<TextView>(R.id.folderLabel).text =
-            if (tree == null) "No folder selected"
-            else "Saved folder: " + folderDisplayName(tree)
-    }
-
-    /* "primary:Documents/Novels" -> "Novels" */
-    private fun folderDisplayName(tree: String): String {
-        val seg = Uri.parse(tree).lastPathSegment ?: return tree
-        return seg.substringAfterLast(':').substringAfterLast('/').ifEmpty { seg }
-    }
 }

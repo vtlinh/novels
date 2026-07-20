@@ -42,6 +42,10 @@ class ReadingListActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.navReading).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
         }
+        findViewById<TextView>(R.id.navSettings).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
         render()
     }
