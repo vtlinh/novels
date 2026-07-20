@@ -66,6 +66,26 @@ class ChapterListActivity : AppCompatActivity() {
         val dirName = intent.getStringExtra("dir") ?: return finish()
         val title = intent.getStringExtra("title") ?: dirName
         findViewById<TextView>(R.id.chapterTitle).text = title
+
+        /* same navigation drawer as the other list screens */
+        val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
+        findViewById<TextView>(R.id.menuBtn).setOnClickListener {
+            drawer.openDrawer(androidx.core.view.GravityCompat.START)
+        }
+        findViewById<TextView>(R.id.navHome).setOnClickListener {
+            startActivity(
+                Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            )
+            finish()
+        }
+        findViewById<TextView>(R.id.navNovels).setOnClickListener {
+            startActivity(Intent(this, NovelListActivity::class.java))
+            finish()
+        }
+        findViewById<TextView>(R.id.navReading).setOnClickListener {
+            startActivity(Intent(this, ReadingListActivity::class.java))
+            finish()
+        }
         val status = findViewById<TextView>(R.id.statusText)
         val listView = findViewById<ListView>(R.id.chapterListView)
         val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null) ?: return finish()
