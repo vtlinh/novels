@@ -764,10 +764,19 @@ class ReaderActivity : AppCompatActivity() {
                 text.append(SEP + it)
                 nextIdx = p + 2
             }
-            scroll.post {
+            /* Place the viewport only once the layout reflects the FINAL
+               text. On a cold start the first posted frame can still see the
+               "Loading…" layout — computing the restore position against it
+               landed near the top of the buffer. Retry frame by frame until
+               the layout catches up (or give up and place best-effort). */
+            fun place(attempt: Int) {
+                val layout = text.layout
+                if ((layout == null || layout.text.length != text.text.length) && attempt < 20) {
+                    scroll.post { place(attempt + 1) }
+                    return
+                }
                 var y = 0
                 var targetOff = 0
-                val layout = text.layout
                 if (layout != null && targetPara > 0 && chapterLen > 0) {
                     /* char offset of paragraph N within the opened chapter */
                     val body = text.text.toString()
@@ -793,6 +802,7 @@ class ReaderActivity : AppCompatActivity() {
                    TTS starts is a guaranteed position jump */
                 if (!speaking) prependPrev()
             }
+            scroll.post { place(0) }
         }
     }
 
