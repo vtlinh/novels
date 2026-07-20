@@ -110,6 +110,23 @@ class ReadingListActivity : AppCompatActivity() {
                         )
                     }
                 }
+                val cover = DownloadEngine.coverFile(this@ReadingListActivity, rec.slug)
+                if (cover.exists()) {
+                    line.addView(
+                        android.widget.ImageView(this@ReadingListActivity).apply {
+                            layoutParams = LinearLayout.LayoutParams(dp(44), dp(60)).apply {
+                                marginEnd = dp(12)
+                            }
+                            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                            setImageBitmap(
+                                android.graphics.BitmapFactory.decodeFile(
+                                    cover.path,
+                                    android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 },
+                                ),
+                            )
+                        },
+                    )
+                }
                 line.addView(
                     TextView(this@ReadingListActivity).apply {
                         text = buildString {

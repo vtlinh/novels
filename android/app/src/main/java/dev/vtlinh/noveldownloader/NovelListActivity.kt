@@ -269,6 +269,23 @@ class NovelListActivity : AppCompatActivity() {
                 if (row.rec.url.isEmpty()) append(" — tap Check status to locate")
             }
         }
+        val cover = DownloadEngine.coverFile(ctx, row.rec.slug)
+        if (cover.exists()) {
+            line.addView(
+                android.widget.ImageView(ctx).apply {
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(60)).apply {
+                        marginEnd = dp(12)
+                    }
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    setImageBitmap(
+                        android.graphics.BitmapFactory.decodeFile(
+                            cover.path,
+                            android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 },
+                        ),
+                    )
+                },
+            )
+        }
         line.addView(
             TextView(ctx).apply {
                 this.text = text
