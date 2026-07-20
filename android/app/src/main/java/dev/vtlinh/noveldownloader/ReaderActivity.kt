@@ -506,11 +506,12 @@ class ReaderActivity : AppCompatActivity() {
         updatePlayBtn()
     }
 
-    /* U+FE0E forces text presentation so both glyphs render as plain
-       theme-colored symbols instead of the pause turning into an emoji */
+    /* pause is drawn as two Dingbats bars \u2014 U+23F8 falls back to the emoji
+       font on many devices even with the text-presentation selector, so it
+       would render in a different style and color than the play triangle */
     private fun updatePlayBtn() {
         findViewById<TextView>(R.id.ttsPlayBtn)?.text =
-            if (speaking) "\u23f8\ufe0e" else "\u25b6\ufe0e"
+            if (speaking) "\u275a\u275a" else "\u25b6\ufe0e"
     }
 
     override fun onDestroy() {
@@ -585,30 +586,31 @@ class ReaderActivity : AppCompatActivity() {
                 orientation = android.widget.LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
             }
+            /* 0.05 steps: SeekBar progress p <-> value 0.5 + p/20 */
             val valueTv = TextView(ctx).apply {
                 textSize = 14f
                 setTextColor(getColor(R.color.fg))
-                text = "%.1f".format(get())
-                minWidth = dp(40)
+                text = "%.2f".format(get())
+                minWidth = dp(46)
                 setPadding(dp(8), 0, 0, 0)
             }
             val seek = android.widget.SeekBar(ctx).apply {
-                max = 25
-                progress = ((get() - 0.5f) * 10f + 0.5f).toInt()
+                max = 50
+                progress = ((get() - 0.5f) * 20f + 0.5f).toInt()
                 layoutParams = android.widget.LinearLayout.LayoutParams(
                     0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
                 )
             }
             fun applyValue(v: Float, fromSeek: Boolean) {
-                val clamped = (Math.round(v * 10f) / 10f).coerceIn(0.5f, 3f)
+                val clamped = (Math.round(v * 20f) / 20f).coerceIn(0.5f, 3f)
                 set(clamped)
-                valueTv.text = "%.1f".format(clamped)
-                if (!fromSeek) seek.progress = ((clamped - 0.5f) * 10f + 0.5f).toInt()
+                valueTv.text = "%.2f".format(clamped)
+                if (!fromSeek) seek.progress = ((clamped - 0.5f) * 20f + 0.5f).toInt()
                 applyTtsConfig(lang)
             }
             seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: android.widget.SeekBar?, pr: Int, fromUser: Boolean) {
-                    if (fromUser) applyValue(0.5f + pr / 10f, true)
+                    if (fromUser) applyValue(0.5f + pr / 20f, true)
                 }
                 override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
                 override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
@@ -623,9 +625,9 @@ class ReaderActivity : AppCompatActivity() {
                 isFocusable = true
                 setOnClickListener { applyValue(get() + delta, false) }
             }
-            row.addView(stepBtn("<", -0.1f))
+            row.addView(stepBtn("<", -0.05f))
             row.addView(seek)
-            row.addView(stepBtn(">", +0.1f))
+            row.addView(stepBtn(">", +0.05f))
             row.addView(valueTv)
             root.addView(row)
         }
