@@ -140,7 +140,14 @@ class NovelListActivity : AppCompatActivity() {
         btn.isEnabled = false
         val engine = DownloadEngine(this, {}, {}, { _, _ -> })
         lifecycleScope.launch {
-            val targets = rows()
+            /* a complete novel (site finished + everything on disk) can never
+               regress — no need to ever recheck it */
+            val targets = rows().filter { !it.rec.complete }
+            if (targets.isEmpty()) {
+                status.text = "Nothing to check — all novels are complete."
+                btn.isEnabled = true
+                return@launch
+            }
             val done = java.util.concurrent.atomic.AtomicInteger(0)
             withContext(Dispatchers.IO) {
                 coroutineScope {
