@@ -17,6 +17,9 @@
 
 ## Workflow
 
-- After completing a fix, always merge it: push the branch, open the PR
-  (ready, not draft), and squash-merge as soon as the android workflow is
-  green — do not wait for the user to ask.
+- After completing a fix, always merge it RIGHT AWAY: push the branch, open
+  the PR (ready, not draft), and squash-merge immediately — do not wait for
+  CI or for the user to ask. Fix forward: check the android workflow on main
+  after merging and, if red, fix on a fresh branch and merge that the same
+  way. A red main build is safe — it just doesn't publish a new APK, the
+  previous release stays live.
