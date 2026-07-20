@@ -447,8 +447,17 @@ class ReaderActivity : AppCompatActivity() {
         val lang = detectLang(sentence)
         if (lang != curTtsLang) applyTtsConfig(lang)
         setHighlight(s0, s1)
+        scrollToSpoken(s0)
         saveTtsPos(s0)
         t.speak(sentence, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
+    }
+
+    /* keep the line being read vertically centered while TTS plays */
+    private fun scrollToSpoken(off: Int) {
+        val layout = text.layout ?: return
+        val line = layout.getLineForOffset(off.coerceIn(0, text.length()))
+        val y = layout.getLineTop(line) + text.totalPaddingTop
+        scroll.smoothScrollTo(0, (y - scroll.height / 2).coerceAtLeast(0))
     }
 
     private fun setHighlight(s0: Int, s1: Int) {
