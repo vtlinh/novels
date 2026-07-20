@@ -165,6 +165,7 @@ class ReaderActivity : AppCompatActivity() {
             updateHeader()
         }
 
+        findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
         findViewById<TextView>(R.id.chaptersBtn).setOnClickListener {
             drawerAdapter?.notifyDataSetChanged()
             drawer.openDrawer(GravityCompat.END)

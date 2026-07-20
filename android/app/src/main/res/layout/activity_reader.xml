@@ -18,6 +18,20 @@
             android:gravity="center_vertical">
 
             <TextView
+                android:id="@+id/backBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="12dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="←"
+                android:textSize="20sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
                 android:id="@+id/readerTitle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
