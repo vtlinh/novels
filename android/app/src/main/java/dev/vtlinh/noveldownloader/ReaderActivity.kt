@@ -60,7 +60,10 @@ class ReaderActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             chapters = withContext(Dispatchers.IO) {
-                ChapterListActivity.chapterNames(contentResolver, treeUri!!, dirName)
+                val order = intent.getStringExtra("slug")?.let {
+                    try { store.getChapterOrder(folder, it) } catch (e: Exception) { null }
+                } ?: emptyMap()
+                ChapterListActivity.chapterNames(contentResolver, treeUri!!, dirName, order)
             }
             nextIdx = (chapters?.ordered?.indexOf(start) ?: 0).coerceAtLeast(0)
             text.text = ""
