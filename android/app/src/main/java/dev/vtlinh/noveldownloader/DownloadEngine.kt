@@ -141,6 +141,47 @@ class DownloadEngine(
         var filename: String? = null
     }
 
+    /* Status probe for the List Novels screen: list the novel's chapters the
+       same way run() would and return (site chapter count, site says
+       completed), or null if the URL doesn't load as a novel page. */
+    suspend fun checkStatus(novelUrl: String): Pair<Int, Boolean>? = withContext(Dispatchers.IO) {
+        val site = Sites.forUrl(novelUrl) ?: return@withContext null
+        val (base, slug) = site.normalize(novelUrl)
+        val first = fetch(base)
+        if (first.html == null) return@withContext null
+        val doc = Jsoup.parse(first.html, base)
+        val urls = HashSet<String>()
+        fun addLinks(d: org.jsoup.nodes.Document) {
+            for (a in d.select("a[href]")) {
+                val href = a.absUrl("href").substringBefore('#')
+                if (href.isEmpty()) continue
+                val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
+                if (site.isChapterPath(path, slug)) urls.add(href)
+            }
+        }
+        addLinks(doc)
+        var last = site.maxPage(doc, slug)
+        var fetched = 1
+        while (fetched < last) {
+            val batch = ((fetched + 1)..last).toList()
+            val htmls = arrayOfNulls<String>(batch.size)
+            coroutineScope {
+                val sem = Semaphore(10)
+                for ((i, p) in batch.withIndex()) {
+                    launch { sem.withPermit { htmls[i] = fetch(site.listPageUrl(base, slug, p)).html } }
+                }
+            }
+            for (html in htmls) {
+                val d = Jsoup.parse(html ?: continue, base)
+                addLinks(d)
+                last = maxOf(last, site.maxPage(d, slug))
+            }
+            fetched = batch.last()
+        }
+        if (urls.isEmpty()) return@withContext null
+        Pair(urls.size, site.isCompleted(doc))
+    }
+
     suspend fun run(
         novelUrl: String,
         treeUri: Uri,
@@ -235,6 +276,8 @@ class DownloadEngine(
         }
         val store = DownloadStore(context)
         val folderKey = treeUri.toString()
+        /* register for the List Novels screen (first run keeps its timestamp) */
+        store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
 
         /* When translating, render the English folder name up front (Sonnet,
            Batches API) so chapters save straight into an "English (Vietnamese)"

@@ -33,6 +33,10 @@
             android:name=".BrowserActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".NovelListActivity"
+            android:exported="false" />
+
         <!-- Foreground service: downloads keep running with the screen off -->
         <service
             android:name=".DownloadService"
