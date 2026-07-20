@@ -78,6 +78,10 @@ class MainActivity : AppCompatActivity() {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, NovelListActivity::class.java))
         }
+        findViewById<TextView>(R.id.navReading).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+            startActivity(Intent(this, ReadingListActivity::class.java))
+        }
 
         findViewById<Button>(R.id.stopBtn).setOnClickListener {
             (it as Button).text = "Stopping…"

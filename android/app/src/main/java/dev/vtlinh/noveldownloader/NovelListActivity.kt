@@ -57,6 +57,10 @@ class NovelListActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.navNovels).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
         }
+        findViewById<TextView>(R.id.navReading).setOnClickListener {
+            startActivity(Intent(this, ReadingListActivity::class.java))
+            finish()
+        }
 
         render()
     }

@@ -39,6 +39,18 @@
             android:name=".NovelListActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".ReadingListActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ChapterListActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ReaderActivity"
+            android:exported="false" />
+
         <!-- Foreground service: downloads keep running with the screen off -->
         <service
             android:name=".DownloadService"
