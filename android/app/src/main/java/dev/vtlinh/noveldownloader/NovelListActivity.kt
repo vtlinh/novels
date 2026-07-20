@@ -61,15 +61,16 @@ class NovelListActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.navNovels).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
         }
-        findViewById<TextView>(R.id.navReading).setOnClickListener {
-            startActivity(Intent(this, ReadingListActivity::class.java))
-            finish()
-        }
         findViewById<TextView>(R.id.navSettings).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+    }
 
+    /* re-render on every return so the RECENTLY READ section reflects the
+       chapter we just came back from (onResume also follows onCreate) */
+    override fun onResume() {
+        super.onResume()
         render()
     }
 
@@ -251,11 +252,33 @@ class NovelListActivity : AppCompatActivity() {
                 return@launch
             }
             status.text = "${rs.size} novel(s)"
-            for (row in rs) {
+            /* the 3 most recently READ novels get their own section on top */
+            val recent = rs.filter { it.rec.lastRead > 0 }
+                .sortedByDescending { it.rec.lastRead }.take(3)
+            val recentSlugs = recent.map { it.rec.slug }.toSet()
+            val others = rs.filter { it.rec.slug !in recentSlugs }
+            if (recent.isNotEmpty()) {
+                list.addView(sectionHeader("RECENTLY READ"))
+                for (row in recent) {
+                    try { list.addView(buildRow(row)) } catch (e: Exception) {}
+                }
+                list.addView(sectionHeader("ALL NOVELS"))
+            }
+            for (row in others) {
                 try { list.addView(buildRow(row)) } catch (e: Exception) {}
             }
         }
     }
+
+    private fun sectionHeader(label: String): TextView =
+        TextView(this).apply {
+            text = label
+            textSize = 11f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(getColor(R.color.muted))
+            letterSpacing = 0.08f
+            setPadding(0, dp(14), 0, dp(2))
+        }
 
     private fun buildRow(row: Row): View {
         val ctx = this
@@ -263,6 +286,19 @@ class NovelListActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, dp(10), 0, dp(10))
+            /* tapping the row starts (or continues) reading this novel */
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val folder = folderKey ?: return@setOnClickListener
+                val dirName = store.getTitle(folder, row.rec.slug)
+                    ?: Extractor.sanitize(row.rec.title.ifEmpty { row.rec.slug })
+                startActivity(
+                    Intent(ctx, ChapterListActivity::class.java)
+                        .putExtra("dir", dirName).putExtra("title", row.display)
+                        .putExtra("slug", row.rec.slug),
+                )
+            }
         }
         /* checked, still-ongoing novel with every site chapter on disk:
            nothing to download until the site adds more */
