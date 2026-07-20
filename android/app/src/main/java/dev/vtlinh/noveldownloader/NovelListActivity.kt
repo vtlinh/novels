@@ -75,10 +75,15 @@ class NovelListActivity : AppCompatActivity() {
        so an unexpectedly empty list can explain itself */
     @Volatile private var sourceInfo = ""
 
+    /* The list itself is pure DB reads — the root folder is listed exactly
+       ONCE per picked folder (scanFolder below), its findings folded into
+       the registry, and never listed again. */
     private fun rows(): List<Row> {
         val folder = folderKey ?: return emptyList()
-        val all = LinkedHashMap<String, NovelRec>()
         var err = ""
+        if (!store.isScanned(folder)) err += scanFolder(folder)
+
+        val all = LinkedHashMap<String, NovelRec>()
         try {
             for (rec in store.novels(folder)) all[rec.slug] = rec
         } catch (e: Exception) { err += " registry:${e.message}" }
@@ -86,14 +91,28 @@ class NovelListActivity : AppCompatActivity() {
         /* chapter index knows novels the registry may not */
         try {
             for (slug in store.chapterSlugs(folder)) {
-                if (slug !in all) all[slug] = NovelRec(slug, "", slug, "", 0L, -1, false)
+                if (slug !in all) all[slug] = NovelRec(slug, "", slug, "", 0L, -1, false, 0)
             }
         } catch (e: Exception) { err += " index:${e.message}" }
+        sourceInfo = "registry $registryN · index ${all.size - registryN}" +
+            (if (err.isNotEmpty()) " · errors:$err" else "")
 
-        /* Fast SAF listing: ONE ContentResolver query per directory.
-           (DocumentFile's .name is a separate provider query per file —
-           counting a few thousand-chapter folders that way takes minutes
-           and left this screen blank.) */
+        return all.values.map { rec ->
+            val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
+            Row(
+                rec,
+                store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
+                maxOf(dbCount, rec.diskCount),
+            )
+        }.sortedWith(compareBy<Row> { it.rec.complete }.thenByDescending { it.rec.started })
+    }
+
+    /* One-time root scan, single ContentResolver query per directory (all
+       child names in one cursor — DocumentFile's per-file metadata queries
+       took minutes on big folders). Registers every unaccounted novel folder
+       and records on-disk chapter counts, then marks the folder scanned so
+       this never runs again. Returns an error tag or "". */
+    private fun scanFolder(folder: String): String {
         val treeUri = Uri.parse(folder)
         fun children(docId: String): List<Triple<String, String, Boolean>> {   // (docId, name, isDir)
             val out = ArrayList<Triple<String, String, Boolean>>()
@@ -118,48 +137,45 @@ class NovelListActivity : AppCompatActivity() {
             }
             return out
         }
+
         val dirs = try {
             children(DocumentsContract.getTreeDocumentId(treeUri))
                 .filter { it.third }.associate { it.second to it.first }   // name -> docId
-        } catch (e: Exception) { err += " folder-access-lost(${e.message})"; emptyMap() }
-        val countCache = HashMap<String, Int>()
-        fun countIn(name: String): Int = countCache.getOrPut(name) {
-            val id = dirs[name] ?: return@getOrPut 0
-            try {
-                children(id).count { !it.third && chapterFileRe.matches(it.second) }
-            } catch (e: Exception) { 0 }
+        } catch (e: Exception) {
+            /* don't mark scanned — retry next open once access is back */
+            return " folder-access-lost(${e.message})"
         }
+        fun countIn(docId: String): Int = try {
+            children(docId).count { !it.third && chapterFileRe.matches(it.second) }
+        } catch (e: Exception) { 0 }
 
-        /* the on-disk folder name each known novel saves into */
-        val folderName = HashMap<String, String>()
-        for (rec in all.values) {
-            folderName[rec.slug] = store.getTitle(folder, rec.slug) ?: Extractor.sanitize(rec.title)
-        }
-        /* root-folder scan: subdirectories not accounted for by any known
-           novel — downloaded before the registry existed, or copied in */
-        val known = folderName.values.toHashSet()
-        val indexN = all.size
         try {
-            for ((name, _) in dirs) {
-                if (name.isEmpty() || name in known) continue
-                val slug = slugify(name)
-                if (slug.isEmpty() || slug in all) continue
-                if (countIn(name) == 0) continue   // not a novel folder
-                all[slug] = NovelRec(slug, "", name, "", 0L, -1, false)
-                folderName[slug] = name
+            val known = store.novels(folder).associateBy {
+                store.getTitle(folder, it.slug) ?: Extractor.sanitize(it.title)
             }
-        } catch (e: Exception) { err += " scan:${e.message}" }
-        sourceInfo = "registry $registryN · index ${indexN - registryN} · folders ${all.size - indexN}" +
-            (if (err.isNotEmpty()) " · errors:$err" else "")
-
-        return all.values.map { rec ->
-            val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
-            Row(
-                rec,
-                store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
-                if (dbCount > 0) dbCount else countIn(folderName[rec.slug] ?: ""),
-            )
-        }.sortedWith(compareBy<Row> { it.rec.complete }.thenByDescending { it.rec.started })
+            val knownSlugs = store.novels(folder).map { it.slug }.toHashSet()
+            for ((name, docId) in dirs) {
+                if (name.isEmpty()) continue
+                val rec = known[name]
+                if (rec != null) {
+                    /* known novel: refresh its on-disk count once if unindexed */
+                    if (store.chapterCount(folder, rec.slug) == 0) {
+                        store.setDiskCount(folder, rec.slug, countIn(docId))
+                    }
+                    continue
+                }
+                val slug = slugify(name)
+                if (slug.isEmpty() || slug in knownSlugs) continue
+                val count = countIn(docId)
+                if (count == 0) continue   // not a novel folder
+                store.registerNovel(folder, slug, "", name, 0L)
+                store.setDiskCount(folder, slug, count)
+            }
+            store.markScanned(folder, System.currentTimeMillis())
+        } catch (e: Exception) {
+            return " scan:${e.message}"
+        }
+        return ""
     }
 
     private fun render() {
