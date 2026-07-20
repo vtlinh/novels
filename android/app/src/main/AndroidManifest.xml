@@ -9,6 +9,15 @@
     <!-- silent self-updates on Android 12+ once this app is its own installer of record -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
+    <!-- Android 11+ package visibility: without these, TTS engines (and their
+         voice lists) are invisible to the app and tts.voices comes back empty -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <package android:name="com.google.android.tts" />
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
