@@ -71,20 +71,31 @@ class NovelListActivity : AppCompatActivity() {
 
     private val chapterFileRe = Regex("Chapter \\d+.*\\.txt")
 
+    /* set by rows(): how many entries each source contributed + any error,
+       so an unexpectedly empty list can explain itself */
+    @Volatile private var sourceInfo = ""
+
     private fun rows(): List<Row> {
         val folder = folderKey ?: return emptyList()
         val all = LinkedHashMap<String, NovelRec>()
-        for (rec in store.novels(folder)) all[rec.slug] = rec
+        var err = ""
+        try {
+            for (rec in store.novels(folder)) all[rec.slug] = rec
+        } catch (e: Exception) { err += " registry:${e.message}" }
+        val registryN = all.size
         /* chapter index knows novels the registry may not */
-        for (slug in store.chapterSlugs(folder)) {
-            if (slug !in all) all[slug] = NovelRec(slug, "", slug, "", 0L, -1, false)
-        }
+        try {
+            for (slug in store.chapterSlugs(folder)) {
+                if (slug !in all) all[slug] = NovelRec(slug, "", slug, "", 0L, -1, false)
+            }
+        } catch (e: Exception) { err += " index:${e.message}" }
 
         /* one root listing, reused for the scan and the count fallback */
         val dirs = try {
-            DocumentFile.fromTreeUri(this, Uri.parse(folder))?.listFiles()
-                ?.filter { it.isDirectory }?.associateBy { it.name ?: "" } ?: emptyMap()
-        } catch (e: Exception) { emptyMap() }
+            val root = DocumentFile.fromTreeUri(this, Uri.parse(folder))
+            if (root == null || !root.canRead()) err += " folder-access-lost"
+            root?.listFiles()?.filter { it.isDirectory }?.associateBy { it.name ?: "" } ?: emptyMap()
+        } catch (e: Exception) { err += " folders:${e.message}"; emptyMap() }
         fun countIn(name: String): Int = try {
             dirs[name]?.listFiles()?.count { chapterFileRe.matches(it.name ?: "") } ?: 0
         } catch (e: Exception) { 0 }
@@ -97,17 +108,22 @@ class NovelListActivity : AppCompatActivity() {
         /* root-folder scan: subdirectories not accounted for by any known
            novel — downloaded before the registry existed, or copied in */
         val known = folderName.values.toHashSet()
-        for ((name, _) in dirs) {
-            if (name.isEmpty() || name in known) continue
-            val slug = slugify(name)
-            if (slug.isEmpty() || slug in all) continue
-            if (countIn(name) == 0) continue   // not a novel folder
-            all[slug] = NovelRec(slug, "", name, "", 0L, -1, false)
-            folderName[slug] = name
-        }
+        val indexN = all.size
+        try {
+            for ((name, _) in dirs) {
+                if (name.isEmpty() || name in known) continue
+                val slug = slugify(name)
+                if (slug.isEmpty() || slug in all) continue
+                if (countIn(name) == 0) continue   // not a novel folder
+                all[slug] = NovelRec(slug, "", name, "", 0L, -1, false)
+                folderName[slug] = name
+            }
+        } catch (e: Exception) { err += " scan:${e.message}" }
+        sourceInfo = "registry $registryN · index ${indexN - registryN} · folders ${all.size - indexN}" +
+            (if (err.isNotEmpty()) " · errors:$err" else "")
 
         return all.values.map { rec ->
-            val dbCount = store.chapterCount(folder, rec.slug)
+            val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
             Row(
                 rec,
                 store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
@@ -120,13 +136,22 @@ class NovelListActivity : AppCompatActivity() {
         val list = findViewById<LinearLayout>(R.id.novelList)
         val status = findViewById<TextView>(R.id.statusText)
         lifecycleScope.launch {
-            val rs = withContext(Dispatchers.IO) { rows() }
-            list.removeAllViews()
-            if (rs.isEmpty()) {
-                status.text = "No downloaded novels yet."
+            val rs = try {
+                withContext(Dispatchers.IO) { rows() }
+            } catch (e: Exception) {
+                status.text = "List error: ${e.message}"
                 return@launch
             }
-            for (row in rs) list.addView(buildRow(row))
+            list.removeAllViews()
+            if (rs.isEmpty()) {
+                /* explain WHICH source came up empty instead of a blank shrug */
+                status.text = "No novels found. ($sourceInfo)"
+                return@launch
+            }
+            status.text = "${rs.size} novel(s)"
+            for (row in rs) {
+                try { list.addView(buildRow(row)) } catch (e: Exception) {}
+            }
         }
     }
 
