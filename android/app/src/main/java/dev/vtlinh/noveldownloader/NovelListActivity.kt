@@ -335,11 +335,17 @@ class NovelListActivity : AppCompatActivity() {
         btn.isEnabled = false
         val engine = DownloadEngine(this, {}, {}, { _, _ -> })
         lifecycleScope.launch {
-            /* a complete novel (site finished + everything on disk) can never
-               regress — no need to ever recheck it */
-            val targets = withContext(Dispatchers.IO) { rows() }.filter { !it.rec.complete }
+            /* A complete novel (site finished + everything on disk) can never
+               regress — no need to recheck it — EXCEPT when its site chapter
+               order was never indexed: those are checked once more so the
+               reader gets its ordering. */
+            val targets = withContext(Dispatchers.IO) {
+                rows().filter {
+                    !it.rec.complete || store.chapterOrderCount(folder, it.rec.slug) == 0
+                }
+            }
             if (targets.isEmpty()) {
-                status.text = "Nothing to check — all novels are complete."
+                status.text = "Nothing to check — all novels are complete and indexed."
                 btn.isEnabled = true
                 return@launch
             }
