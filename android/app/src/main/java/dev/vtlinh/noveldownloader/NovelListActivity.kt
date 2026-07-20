@@ -209,12 +209,16 @@ class NovelListActivity : AppCompatActivity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, dp(10), 0, dp(10))
         }
+        /* checked, still-ongoing novel with every site chapter on disk:
+           nothing to download until the site adds more */
+        val upToDate = !row.rec.complete && row.rec.total > 0 && row.local >= row.rec.total
         val text = buildString {
             append(row.display)
             if (row.rec.author.isNotEmpty()) append("\n${row.rec.author}")
             if (!row.rec.complete) {
                 append("\n${row.local} chapter(s)")
                 if (row.rec.total > 0) append(" of ${row.rec.total}")
+                if (upToDate) append(" — up to date")
                 if (row.rec.url.isEmpty()) append(" — tap Check status to locate")
             }
         }
@@ -241,7 +245,7 @@ class NovelListActivity : AppCompatActivity() {
                     }
                 },
             )
-        } else if (row.rec.url.isNotEmpty()) {
+        } else if (row.rec.url.isNotEmpty() && !upToDate) {
             line.addView(
                 MaterialButton(ctx).apply {
                     this.text = "Download"
