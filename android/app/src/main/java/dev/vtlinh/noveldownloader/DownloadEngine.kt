@@ -43,6 +43,11 @@ class DownloadEngine(
         const val CONC_MIN = 5
         const val CONC_MAX = 50
         const val FETCH_BATCH = 50
+
+        /* app-private cover thumbnail for a novel */
+        fun coverFile(context: Context, slug: String): java.io.File =
+            java.io.File(context.filesDir, "covers/$slug.jpg")
+
         private const val UA =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
     }
@@ -141,6 +146,25 @@ class DownloadEngine(
         var filename: String? = null
     }
 
+    /* fetch the novel-page cover once into app-private storage (non-fatal) */
+    private fun saveCover(slug: String, doc: org.jsoup.nodes.Document) {
+        try {
+            val f = coverFile(context, slug)
+            if (f.exists()) return
+            val url = doc.selectFirst("meta[property=og:image]")?.attr("content")?.ifEmpty { null }
+                ?: doc.selectFirst(".book img")?.absUrl("src")?.ifEmpty { null }
+                ?: return
+            client.newCall(
+                Request.Builder().url(url).header("User-Agent", UA).build(),
+            ).execute().use { r ->
+                if (!r.isSuccessful) return
+                val bytes = r.body?.bytes() ?: return
+                f.parentFile?.mkdirs()
+                f.writeBytes(bytes)
+            }
+        } catch (e: Exception) {}
+    }
+
     class SiteStatus(
         val total: Int,
         val completed: Boolean,
@@ -158,6 +182,7 @@ class DownloadEngine(
         val first = fetch(base)
         if (first.html == null) return@withContext null
         val doc = Jsoup.parse(first.html, base)
+        saveCover(slug, doc)
         val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
         /* Collect chapter links from the REAL chapter list only — pages also
            carry a "latest chapters" widget whose links come first in the HTML
@@ -333,6 +358,7 @@ class DownloadEngine(
         store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
         store.touchNovel(folderKey, slug, System.currentTimeMillis())
         author?.let { store.setAuthor(folderKey, slug, it) }
+        saveCover(slug, doc)
         /* index the site's chapter order for the reader */
         store.setChapterOrder(folderKey, slug, siteOrdered.mapNotNull { it.filename })
 
