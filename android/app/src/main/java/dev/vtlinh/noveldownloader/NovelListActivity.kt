@@ -71,6 +71,11 @@ class NovelListActivity : AppCompatActivity() {
 
     private val chapterFileRe = Regex("Chapter \\d+.*\\.txt")
 
+    /* Slug equality must survive punctuation drift: "Heaven's Path" is slug
+       "library-of-heavens-path" on the site but the sanitized folder name
+       slugifies to "library-of-heaven-s-path". Letters+digits only. */
+    private fun normKey(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+
     /* set by rows(): how many entries each source contributed + any error,
        so an unexpectedly empty list can explain itself */
     @Volatile private var sourceInfo = ""
@@ -94,10 +99,31 @@ class NovelListActivity : AppCompatActivity() {
                 if (slug !in all) all[slug] = NovelRec(slug, "", slug, "", 0L, -1, false, 0)
             }
         } catch (e: Exception) { err += " index:${e.message}" }
+
+        /* merge duplicates whose slugs differ only in punctuation (folder-scan
+           slug vs site slug); the richer record wins, a scan-created loser is
+           deleted from the registry so the pair never reappears */
+        fun score(r: NovelRec) = (if (r.url.isNotEmpty()) 4 else 0) +
+            (if (r.complete) 2 else 0) + (if (r.started > 0) 1 else 0)
+        val byNorm = LinkedHashMap<String, NovelRec>()
+        for (rec in all.values) {
+            val k = normKey(rec.slug)
+            val prev = byNorm[k]
+            if (prev == null) { byNorm[k] = rec; continue }
+            val win = if (score(rec) >= score(prev)) rec else prev
+            val lose = if (win === rec) prev else rec
+            byNorm[k] = win
+            if (lose.diskCount > win.diskCount) {
+                try { store.setDiskCount(folder, win.slug, lose.diskCount) } catch (e: Exception) {}
+            }
+            if (lose.url.isEmpty()) {
+                try { store.removeNovel(folder, lose.slug) } catch (e: Exception) {}
+            }
+        }
         sourceInfo = "registry $registryN · index ${all.size - registryN}" +
             (if (err.isNotEmpty()) " · errors:$err" else "")
 
-        return all.values.map { rec ->
+        return byNorm.values.map { rec ->
             val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
             Row(
                 rec,
@@ -150,22 +176,27 @@ class NovelListActivity : AppCompatActivity() {
         } catch (e: Exception) { 0 }
 
         try {
-            val known = store.novels(folder).associateBy {
-                store.getTitle(folder, it.slug) ?: Extractor.sanitize(it.title)
+            val recs = store.novels(folder)
+            val known = recs.associateBy { store.getTitle(folder, it.slug) ?: Extractor.sanitize(it.title) }
+            /* match by punctuation-insensitive key, so "Heaven s Path" folders
+               find their "heavens-path" site slug (chapter index included) */
+            val knownByNorm = HashMap<String, NovelRec>()
+            for (r in recs) knownByNorm[normKey(r.slug)] = r
+            for (slug in store.chapterSlugs(folder)) {
+                knownByNorm.putIfAbsent(normKey(slug), NovelRec(slug, "", slug, "", 0L, -1, false, 0))
             }
-            val knownSlugs = store.novels(folder).map { it.slug }.toHashSet()
             for ((name, docId) in dirs) {
                 if (name.isEmpty()) continue
-                val rec = known[name]
+                val slug = slugify(name)
+                if (slug.isEmpty()) continue
+                val rec = known[name] ?: knownByNorm[normKey(slug)]
                 if (rec != null) {
                     /* known novel: refresh its on-disk count once if unindexed */
-                    if (store.chapterCount(folder, rec.slug) == 0) {
+                    if (store.chapterCount(folder, rec.slug) == 0 && rec.diskCount == 0) {
                         store.setDiskCount(folder, rec.slug, countIn(docId))
                     }
                     continue
                 }
-                val slug = slugify(name)
-                if (slug.isEmpty() || slug in knownSlugs) continue
                 val count = countIn(docId)
                 if (count == 0) continue   // not a novel folder
                 store.registerNovel(folder, slug, "", name, 0L)
