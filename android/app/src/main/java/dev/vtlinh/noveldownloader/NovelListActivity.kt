@@ -128,7 +128,10 @@ class NovelListActivity : AppCompatActivity() {
             val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
             Row(
                 rec,
-                store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
+                Extractor.stripAuthor(
+                    store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
+                    rec.author,
+                ),
                 maxOf(dbCount, rec.diskCount),
             )
         }.sortedWith(
