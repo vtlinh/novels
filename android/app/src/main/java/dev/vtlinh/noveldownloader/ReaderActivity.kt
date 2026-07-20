@@ -94,11 +94,14 @@ class ReaderActivity : AppCompatActivity() {
     private var tts: android.speech.tts.TextToSpeech? = null
     private var ttsReady = false
     private var speaking = false
-    private var speakCursor = 0        // char offset of the NEXT paragraph to speak
-    private var resumeCursor = -1      // start of the paragraph being/last spoken
+    private var speakCursor = 0        // char offset where the NEXT sentence starts
+    private var resumeCursor = -1      // start of the sentence being/last spoken
     private var pendingSpeakContinue = false
-    private var ttsRate = 1f
-    private var ttsPitch = 1f
+    private var pendingSpeakAfterOpen = false
+    private var curTtsLang = ""        // language profile currently applied ("en"/"vi")
+    private var curSentStart = -1
+    private var curSentEnd = -1
+    private val highlightSpan = android.text.style.BackgroundColorSpan(0x554F8CFF.toInt())
 
     private lateinit var text: TextView
     private lateinit var titleBar: TextView
@@ -180,11 +183,8 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         /* TTS: double-tap anywhere in the text starts reading from there */
-        ttsRate = prefs.getFloat("ttsRate", 1f)
-        ttsPitch = prefs.getFloat("ttsPitch", 1f)
         tts = android.speech.tts.TextToSpeech(this) { st ->
             ttsReady = st == android.speech.tts.TextToSpeech.SUCCESS
-            if (ttsReady) applyTtsConfig()
         }
         tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
@@ -213,17 +213,38 @@ class ReaderActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener {
             if (speaking) {
                 pauseTts()
-            } else {
-                val off = if (resumeCursor >= 0) resumeCursor else {
-                    val layout = text.layout
-                    if (layout != null) {
-                        layout.getLineStart(
-                            layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
-                        )
-                    } else 0
-                }
-                startTtsFrom(off)
+                return@setOnClickListener
             }
+            if (resumeCursor >= 0) {
+                startTtsFrom(resumeCursor)
+                return@setOnClickListener
+            }
+            /* saved position from a previous session: continue from it */
+            val slugX = intent.getStringExtra("slug")
+            val saved = slugX?.let { prefs.getString("ttsPos:$it", null) }
+            val ord = chapters?.ordered
+            if (saved != null && ord != null) {
+                val name = saved.substringBefore('|')
+                val para = saved.substringAfter('|').toIntOrNull() ?: 0
+                val idx = ord.indexOf(name)
+                if (idx >= 0) {
+                    val lc = loadedChapters.firstOrNull { it.idx == idx }
+                    if (lc != null) {
+                        startTtsFrom(offsetOfPara(lc.start, para))
+                    } else {
+                        pendingSpeakAfterOpen = true
+                        openAt(idx, para)
+                    }
+                    return@setOnClickListener
+                }
+            }
+            val layout = text.layout
+            val off = if (layout != null) {
+                layout.getLineStart(
+                    layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
+                )
+            } else 0
+            startTtsFrom(off)
         }
         findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
 
@@ -307,18 +328,28 @@ class ReaderActivity : AppCompatActivity() {
 
     /* ---- TTS engine ---- */
 
-    private fun applyTtsConfig() {
+    private val viCharsRe = Regex(
+        "[\u0103\u00e2\u0111\u00ea\u00f4\u01a1\u01b0\u00e0\u1ea3\u00e3\u00e1\u1ea1\u1eb1\u1eb3\u1eb5\u1eaf\u1eb7\u1ea7\u1ea9\u1eab\u1ea5\u1ead\u00e8\u1ebb\u1ebd\u00e9\u1eb9\u1ec1\u1ec3\u1ec5\u1ebf\u1ec7\u00ec\u1ec9\u0129\u00ed\u1ecb\u00f2\u1ecf\u00f5\u00f3\u1ecd\u1ed3\u1ed5\u1ed7\u1ed1\u1ed9\u1edd\u1edf\u1ee1\u1edb\u1ee3\u00f9\u1ee7\u0169\u00fa\u1ee5\u1eeb\u1eed\u1eef\u1ee9\u1ef1\u1ef3\u1ef7\u1ef9\u00fd\u1ef5]",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /* Vietnamese text always carries diacritics within a sentence or two */
+    private fun detectLang(sentence: String) = if (viCharsRe.containsMatchIn(sentence)) "vi" else "en"
+
+    /* voice/rate/pitch are stored PER LANGUAGE ("ttsRate:en", ...) */
+    private fun applyTtsConfig(lang: String) {
         val t = tts ?: return
-        t.setSpeechRate(ttsRate)
-        t.setPitch(ttsPitch)
-        val saved = prefs.getString("ttsVoice", null)
+        curTtsLang = lang
+        t.setSpeechRate(prefs.getFloat("ttsRate:$lang", 1f))
+        t.setPitch(prefs.getFloat("ttsPitch:$lang", 1f))
+        val saved = prefs.getString("ttsVoice:$lang", null)
         val v = saved?.let { name ->
             try { t.voices?.firstOrNull { it.name == name } } catch (e: Exception) { null }
         }
         if (v != null) {
             t.voice = v
         } else {
-            t.language = if (english) java.util.Locale.US else java.util.Locale("vi", "VN")
+            t.language = if (lang == "vi") java.util.Locale("vi", "VN") else java.util.Locale.US
         }
     }
 
@@ -328,55 +359,118 @@ class ReaderActivity : AppCompatActivity() {
         return body.lastIndexOf('\n', (o - 1).coerceAtLeast(0)) + 1
     }
 
+    private fun offsetOfPara(chapterStart: Int, para: Int): Int {
+        val body = text.text.toString()
+        var off = chapterStart
+        var n = 0
+        while (n < para) {
+            val i = body.indexOf('\n', off)
+            if (i == -1) break
+            off = i + 1
+            n++
+        }
+        return off
+    }
+
+    /* next sentence at/after `from`: bounded by paragraph breaks, split on
+       terminator punctuation followed by a space (so "3.5" stays intact) */
+    private fun nextSentence(body: String, from: Int): Pair<Int, Int>? {
+        var i = from.coerceAtLeast(0)
+        while (i < body.length && (body[i] == '\n' || body[i] == ' ' || body[i] == '\u2042')) i++
+        if (i >= body.length) return null
+        var j = i
+        while (j < body.length) {
+            val c = body[j]
+            if (c == '\n') break
+            if (c == '.' || c == '!' || c == '?' || c == '\u2026') {
+                var k = j + 1
+                while (k < body.length && (body[k] == '"' || body[k] == '\u201d' || body[k] == '\u2019' || body[k] == ')' || body[k] == '\u3011' || body[k] == '\u300f')) k++
+                if (k >= body.length || body[k] == ' ' || body[k] == '\n') { j = k; break }
+            }
+            j++
+        }
+        return Pair(i, j.coerceAtMost(body.length))
+    }
+
     private fun startTtsFrom(off: Int) {
         if (!ttsReady) return
-        applyTtsConfig()
         speakCursor = paraStartOf(off)
         speaking = true
         updatePlayBtn()
         speakNext()
     }
 
-    /* speak the next non-empty paragraph; load the next chapter when the
-       loaded text runs out */
+    /* speak the next sentence: auto-detect its language (switching the whole
+       voice profile when it changes), highlight it, and remember the spot */
     private fun speakNext() {
         val t = tts ?: return
         val body = text.text.toString()
-        while (speakCursor < body.length) {
-            var end = body.indexOf('\n', speakCursor)
-            if (end == -1) end = body.length
-            val para = body.substring(speakCursor, end).trim()
-            resumeCursor = speakCursor
-            speakCursor = end + 1
-            if (para.isNotEmpty() && para != "⁂") {
-                t.speak(para, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
-                return
+        val sent = nextSentence(body, speakCursor)
+        if (sent == null) {
+            clearHighlight()
+            if (nextIdx < (chapters?.ordered?.size ?: 0)) {
+                pendingSpeakContinue = true
+                appendNext()
+            } else {
+                stopTts()
             }
+            return
         }
-        if (nextIdx < (chapters?.ordered?.size ?: 0)) {
-            pendingSpeakContinue = true
-            appendNext()
-        } else {
-            stopTts()
+        val (s0, s1) = sent
+        resumeCursor = s0
+        speakCursor = s1
+        val sentence = body.substring(s0, s1)
+        val lang = detectLang(sentence)
+        if (lang != curTtsLang) applyTtsConfig(lang)
+        setHighlight(s0, s1)
+        saveTtsPos(s0)
+        t.speak(sentence, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
+    }
+
+    private fun setHighlight(s0: Int, s1: Int) {
+        curSentStart = s0
+        curSentEnd = s1
+        val sp = text.text as? android.text.Spannable ?: return
+        sp.removeSpan(highlightSpan)
+        if (s1 > s0 && s1 <= sp.length) {
+            sp.setSpan(highlightSpan, s0, s1, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
     }
 
-    /* pause replays the interrupted paragraph on resume */
+    private fun clearHighlight() {
+        curSentStart = -1
+        curSentEnd = -1
+        (text.text as? android.text.Spannable)?.removeSpan(highlightSpan)
+    }
+
+    /* persist "chapter file | paragraph in chapter" so the next session's
+       play button continues from here (paragraphs map 1:1 across EN/VI) */
+    private fun saveTtsPos(off: Int) {
+        val slug = intent.getStringExtra("slug") ?: return
+        val ch = loadedChapters.lastOrNull { it.start <= off } ?: return
+        val name = chapters?.ordered?.getOrNull(ch.idx) ?: return
+        val para = text.text.subSequence(ch.start, off.coerceAtLeast(ch.start)).count { it == '\n' }
+        prefs.edit().putString("ttsPos:$slug", "$name|$para").apply()
+    }
+
+    /* pause replays the interrupted sentence on resume */
     private fun pauseTts() {
         speaking = false
         tts?.stop()
         if (resumeCursor >= 0) speakCursor = resumeCursor
+        clearHighlight()
         updatePlayBtn()
     }
 
     private fun stopTts() {
         speaking = false
         tts?.stop()
+        clearHighlight()
         updatePlayBtn()
     }
 
     private fun updatePlayBtn() {
-        findViewById<TextView>(R.id.ttsPlayBtn)?.text = if (speaking) "⏸" else "▶"
+        findViewById<TextView>(R.id.ttsPlayBtn)?.text = if (speaking) "\u23f8" else "\u25b6"
     }
 
     override fun onDestroy() {
@@ -401,9 +495,13 @@ class ReaderActivity : AppCompatActivity() {
             setPadding(0, dp(12), 0, dp(4))
         }
 
-        root.addView(label("TTS voice"))
+        /* settings are per language; edit the profile of what's being read */
+        val lang = curTtsLang.ifEmpty { detectLang(text.text.toString().take(600)) }
+        val langLabel = lang.uppercase()
+
+        root.addView(label("TTS voice ($langLabel)"))
         val voices = try {
-            tts?.voices?.filter { it.locale.language in listOf("en", "vi") }?.sortedBy { it.name }
+            tts?.voices?.filter { it.locale.language == lang }?.sortedBy { it.name }
                 ?: emptyList()
         } catch (e: Exception) { emptyList() }
         val spinner = android.widget.Spinner(ctx)
@@ -411,7 +509,7 @@ class ReaderActivity : AppCompatActivity() {
             ctx, android.R.layout.simple_spinner_dropdown_item,
             listOf("Default") + voices.map { "${it.locale} — ${it.name}" },
         )
-        val savedVoice = prefs.getString("ttsVoice", null)
+        val savedVoice = prefs.getString("ttsVoice:$lang", null)
         val savedIdx = voices.indexOfFirst { it.name == savedVoice }
         spinner.setSelection(if (savedIdx >= 0) savedIdx + 1 else 0)
         spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
@@ -421,9 +519,9 @@ class ReaderActivity : AppCompatActivity() {
                 pos: Int,
                 id: Long,
             ) {
-                if (pos == 0) prefs.edit().remove("ttsVoice").apply()
-                else prefs.edit().putString("ttsVoice", voices[pos - 1].name).apply()
-                applyTtsConfig()
+                if (pos == 0) prefs.edit().remove("ttsVoice:$lang").apply()
+                else prefs.edit().putString("ttsVoice:$lang", voices[pos - 1].name).apply()
+                applyTtsConfig(lang)
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
@@ -454,7 +552,7 @@ class ReaderActivity : AppCompatActivity() {
                 set(clamped)
                 valueTv.text = "%.1f".format(clamped)
                 if (!fromSeek) seek.progress = ((clamped - 0.5f) * 10f + 0.5f).toInt()
-                applyTtsConfig()
+                applyTtsConfig(lang)
             }
             seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: android.widget.SeekBar?, pr: Int, fromUser: Boolean) {
@@ -479,8 +577,12 @@ class ReaderActivity : AppCompatActivity() {
             row.addView(valueTv)
             root.addView(row)
         }
-        sliderRow("Rate", { ttsRate }) { ttsRate = it; prefs.edit().putFloat("ttsRate", it).apply() }
-        sliderRow("Pitch", { ttsPitch }) { ttsPitch = it; prefs.edit().putFloat("ttsPitch", it).apply() }
+        sliderRow("Rate ($langLabel)", { prefs.getFloat("ttsRate:$lang", 1f) }) {
+            prefs.edit().putFloat("ttsRate:$lang", it).apply()
+        }
+        sliderRow("Pitch ($langLabel)", { prefs.getFloat("ttsPitch:$lang", 1f) }) {
+            prefs.edit().putFloat("ttsPitch:$lang", it).apply()
+        }
 
         sheet.setContentView(root)
         sheet.show()
@@ -544,6 +646,7 @@ class ReaderActivity : AppCompatActivity() {
             }
             scroll.post {
                 var y = 0
+                var targetOff = 0
                 val layout = text.layout
                 if (layout != null && targetPara > 0 && chapterLen > 0) {
                     /* char offset of paragraph N within the opened chapter */
@@ -556,10 +659,15 @@ class ReaderActivity : AppCompatActivity() {
                         off = n + 1
                         count++
                     }
+                    targetOff = off
                     y = layout.getLineTop(layout.getLineForOffset(off)) + text.totalPaddingTop
                 }
                 scroll.scrollTo(0, y)
                 loading = false
+                if (pendingSpeakAfterOpen) {
+                    pendingSpeakAfterOpen = false
+                    startTtsFrom(targetOff)
+                }
                 prependPrev()   // keeps the position (scroll compensated)
             }
         }
@@ -623,8 +731,11 @@ class ReaderActivity : AppCompatActivity() {
             speakCursor += shift
             if (resumeCursor >= 0) resumeCursor += shift
             loadedChapters.add(0, LoadedChapter(idx, 0, headingOf(body)))
-            text.text = body + SEP + text.text.toString()
+            text.setText(body + SEP + text.text.toString(), TextView.BufferType.EDITABLE)
             firstIdx = idx
+            if (speaking && curSentStart >= 0) {
+                setHighlight(curSentStart + shift, curSentEnd + shift)
+            }
             scroll.post {
                 text.layout?.let { l ->
                     val line = l.getLineForOffset(anchorOff + shift)
