@@ -141,24 +141,30 @@ class DownloadEngine(
         var filename: String? = null
     }
 
-    class SiteStatus(val total: Int, val completed: Boolean, val author: String?)
+    class SiteStatus(
+        val total: Int,
+        val completed: Boolean,
+        val author: String?,
+        val orderedFilenames: List<String>,   // site listing order, engine filenames
+    )
 
     /* Status probe for the List Novels screen: list the novel's chapters the
        same way run() would and return the site chapter count, finished flag,
-       and author — or null if the URL doesn't load as a novel page. */
+       author, and the chapters' filenames in the SITE's order — or null if
+       the URL doesn't load as a novel page. */
     suspend fun checkStatus(novelUrl: String): SiteStatus? = withContext(Dispatchers.IO) {
         val site = Sites.forUrl(novelUrl) ?: return@withContext null
         val (base, slug) = site.normalize(novelUrl)
         val first = fetch(base)
         if (first.html == null) return@withContext null
         val doc = Jsoup.parse(first.html, base)
-        val urls = HashSet<String>()
+        val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
         fun addLinks(d: org.jsoup.nodes.Document) {
             for (a in d.select("a[href]")) {
                 val href = a.absUrl("href").substringBefore('#')
-                if (href.isEmpty()) continue
+                if (href.isEmpty() || seen.containsKey(href)) continue
                 val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                if (site.isChapterPath(path, slug)) urls.add(href)
+                if (site.isChapterPath(path, slug)) seen[href] = Chapter(href, a.text().trim())
             }
         }
         addLinks(doc)
@@ -180,8 +186,23 @@ class DownloadEngine(
             }
             fetched = batch.last()
         }
-        if (urls.isEmpty()) return@withContext null
-        SiteStatus(urls.size, site.isCompleted(doc), Sites.author(doc))
+        if (seen.isEmpty()) return@withContext null
+        /* assign filenames exactly like run(): numeric sort decides the
+           duplicate suffixes, site order is what we report */
+        val siteOrdered = seen.values.toList()
+        for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
+        val sorted = siteOrdered.sortedBy { it.num ?: Int.MAX_VALUE }
+        val counts = HashMap<Int, Int>()
+        for (ch in sorted) {
+            val n = ch.num ?: continue
+            val c = (counts[n] ?: 0) + 1
+            counts[n] = c
+            ch.filename = "Chapter $n" + (if (c > 1) "-$c" else "") + ".txt"
+        }
+        SiteStatus(
+            siteOrdered.size, site.isCompleted(doc), Sites.author(doc),
+            siteOrdered.mapNotNull { it.filename },
+        )
     }
 
     suspend fun run(
@@ -260,6 +281,9 @@ class DownloadEngine(
         if (stopRequested) { status("Stopped."); return@withContext }
 
         val chapters = seen.values.toMutableList()
+        /* the site's exact order (listing-page sequence) — captured before the
+           numeric sort so the reader can present chapters as the site does */
+        val siteOrdered = chapters.toList()
         for (ch in chapters) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         chapters.sortBy { it.num ?: Int.MAX_VALUE }
         val counts = HashMap<Int, Int>()
@@ -289,6 +313,8 @@ class DownloadEngine(
         store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
         store.touchNovel(folderKey, slug, System.currentTimeMillis())
         author?.let { store.setAuthor(folderKey, slug, it) }
+        /* index the site's chapter order for the reader */
+        store.setChapterOrder(folderKey, slug, siteOrdered.mapNotNull { it.filename })
 
         /* When translating, render the English folder name up front (Sonnet,
            Batches API) so chapters save straight into an "English (Vietnamese)"

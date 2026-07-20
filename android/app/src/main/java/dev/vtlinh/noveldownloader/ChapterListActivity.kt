@@ -25,11 +25,14 @@ class ChapterListActivity : AppCompatActivity() {
             val translated: Map<String, String>,     // name -> English translated docId
         )
 
-        /* the chapters of one novel dir, with docIds for both languages */
+        /* The chapters of one novel dir, with docIds for both languages.
+           Ordered by the site's own listing sequence (the chapter_order
+           index) when known; numeric filename order as fallback. */
         fun chapterNames(
             cr: android.content.ContentResolver,
             treeUri: Uri,
             dirName: String,
+            siteOrder: Map<String, Int> = emptyMap(),
         ): Chapters {
             val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri))
             val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
@@ -47,7 +50,11 @@ class ChapterListActivity : AppCompatActivity() {
                 }
             }
             val ordered = source.keys.sortedWith(
-                compareBy({ CHAPTER_RE.find(it)?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE }, { it }),
+                compareBy(
+                    { siteOrder[it] ?: Int.MAX_VALUE },
+                    { CHAPTER_RE.find(it)?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE },
+                    { it },
+                ),
             )
             return Chapters(ordered, source, translated)
         }
@@ -64,9 +71,13 @@ class ChapterListActivity : AppCompatActivity() {
         val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null) ?: return finish()
 
         status.text = "Loading…"
+        val slug = intent.getStringExtra("slug")
         lifecycleScope.launch {
             val chapters = withContext(Dispatchers.IO) {
-                chapterNames(contentResolver, Uri.parse(folder), dirName)
+                val order = slug?.let {
+                    try { DownloadStore(this@ChapterListActivity).getChapterOrder(folder, it) } catch (e: Exception) { null }
+                } ?: emptyMap()
+                chapterNames(contentResolver, Uri.parse(folder), dirName, order)
             }
             val ordered = chapters.ordered
             if (ordered.isEmpty()) {

@@ -37,7 +37,7 @@ data class NovelRec(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 9) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 10) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -51,6 +51,11 @@ class DownloadStore(context: Context) :
         /* folders whose one-time root scan has been folded into the registry */
         private const val SCANNED_TABLE =
             "CREATE TABLE IF NOT EXISTS scanned (folder TEXT PRIMARY KEY, at INTEGER)"
+        /* the site's exact chapter order (listing-page sequence), per novel */
+        private const val ORDER_TABLE =
+            "CREATE TABLE IF NOT EXISTS chapter_order (" +
+                "folder TEXT, slug TEXT, filename TEXT, ord INTEGER, " +
+                "PRIMARY KEY(folder, slug, filename))"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -76,6 +81,7 @@ class DownloadStore(context: Context) :
         )
         db.execSQL(NOVELS_TABLE)
         db.execSQL(SCANNED_TABLE)
+        db.execSQL(ORDER_TABLE)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -97,6 +103,42 @@ class DownloadStore(context: Context) :
         if (oldVersion < 7) db.execSQL(SCANNED_TABLE)
         if (oldVersion in 5..7) db.execSQL("ALTER TABLE novels ADD COLUMN last_dl INTEGER DEFAULT 0")
         if (oldVersion in 5..8) db.execSQL("ALTER TABLE novels ADD COLUMN last_read INTEGER DEFAULT 0")
+        if (oldVersion < 10) db.execSQL(ORDER_TABLE)
+    }
+
+    /* ---- site chapter order (reader sorts by this, not by filename) ---- */
+
+    fun setChapterOrder(folder: String, slug: String, orderedFilenames: List<String>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("chapter_order", "folder=? AND slug=?", arrayOf(folder, slug))
+            for ((i, fn) in orderedFilenames.withIndex()) {
+                db.execSQL(
+                    "INSERT OR REPLACE INTO chapter_order(folder,slug,filename,ord) VALUES(?,?,?,?)",
+                    arrayOf(folder, slug, fn, i),
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun getChapterOrder(folder: String, slug: String): Map<String, Int> {
+        val out = HashMap<String, Int>()
+        readableDatabase.query(
+            "chapter_order", arrayOf("filename", "ord"),
+            "folder=? AND slug=?", arrayOf(folder, slug), null, null, null,
+        ).use { c -> while (c.moveToNext()) out[c.getString(0)] = c.getInt(1) }
+        return out
+    }
+
+    fun chapterOrderCount(folder: String, slug: String): Int {
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM chapter_order WHERE folder=? AND slug=?", arrayOf(folder, slug),
+        ).use { c -> if (c.moveToNext()) return c.getInt(0) }
+        return 0
     }
 
     /* stamp a novel as just-opened in the reader */

@@ -362,6 +362,11 @@ class NovelListActivity : AppCompatActivity() {
                                         store.registerNovel(folder, row.rec.slug, u, row.display, 0L)
                                     }
                                     res.author?.let { store.setAuthor(folder, row.rec.slug, it) }
+                                    /* index the site's chapter order for the reader —
+                                       skipped when already indexed and unchanged */
+                                    if (store.chapterOrderCount(folder, row.rec.slug) != res.orderedFilenames.size) {
+                                        store.setChapterOrder(folder, row.rec.slug, res.orderedFilenames)
+                                    }
                                     val complete = res.completed && row.local >= res.total
                                     store.updateNovelCheck(folder, row.rec.slug, res.total, complete)
                                     break
