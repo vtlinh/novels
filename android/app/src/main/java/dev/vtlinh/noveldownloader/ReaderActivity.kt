@@ -60,10 +60,14 @@ class ReaderActivity : AppCompatActivity() {
         return Pair(cur.idx, para)
     }
 
-    /* which chapter is at the top of the viewport right now */
+    /* Which chapter is at the top of the viewport right now. The probe
+       point sits slightly BELOW the top edge, so a chapter whose heading is
+       at (or within a line of) the top wins — boundary rounding can no
+       longer resolve to the previous chapter. */
     private fun updateHeader() {
         val layout = text.layout ?: return
-        val y = (scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)
+        val bias = (fontSp * 2f * resources.displayMetrics.scaledDensity).toInt()
+        val y = (scroll.scrollY - text.totalPaddingTop + bias).coerceAtLeast(0)
         val off = layout.getLineStart(layout.getLineForVertical(y))
         val cur = loadedChapters.lastOrNull { it.start <= off } ?: return
         titleBar.text = cur.heading
