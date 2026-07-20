@@ -86,6 +86,10 @@ class ReaderActivity : AppCompatActivity() {
                 ChapterListActivity.chapterNames(contentResolver, treeUri!!, dirName, order)
             }
             val ch = chapters ?: return@launch
+            /* no translation on disk -> nothing to toggle between */
+            if (ch.translated.isEmpty()) {
+                findViewById<TextView>(R.id.langBtn).visibility = android.view.View.GONE
+            }
             /* inline chapter list in the right drawer */
             drawerList.adapter = ArrayAdapter(
                 this@ReaderActivity, android.R.layout.simple_list_item_1,
@@ -112,7 +116,9 @@ class ReaderActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.langBtn).setOnClickListener { toggleLanguage() }
         findViewById<TextView>(R.id.settingsBtn).setOnClickListener { v ->
             val pm = PopupMenu(this, v)
-            pm.menu.add(0, 1, 0, if (english) "Switch to Tiếng Việt" else "Switch to English")
+            if (chapters?.translated?.isNotEmpty() == true) {
+                pm.menu.add(0, 1, 0, if (english) "Switch to Tiếng Việt" else "Switch to English")
+            }
             pm.menu.add(0, 2, 1, "Font size +")
             pm.menu.add(0, 3, 2, "Font size −")
             pm.setOnMenuItemClickListener { item ->
