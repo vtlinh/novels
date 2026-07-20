@@ -278,8 +278,10 @@ class DownloadEngine(
         }
         val store = DownloadStore(context)
         val folderKey = treeUri.toString()
-        /* register for the List Novels screen (first run keeps its timestamp) */
+        /* register for the List Novels screen (first run keeps its timestamp;
+           last_dl always bumps so the list sorts newest download first) */
         store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
+        store.touchNovel(folderKey, slug, System.currentTimeMillis())
         Sites.author(doc)?.let { store.setAuthor(folderKey, slug, it) }
 
         /* When translating, render the English folder name up front (Sonnet,
