@@ -47,7 +47,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun headingOf(body: String): String = body.substringBefore('\n').trim()
 
-    private var currentChapterIdx = 0
+    private var currentChapterIdx = -1
     private var drawerAdapter: ArrayAdapter<String>? = null
 
     /* (chapter index, paragraph within it) at the top of the viewport */
@@ -71,7 +71,16 @@ class ReaderActivity : AppCompatActivity() {
         val off = layout.getLineStart(layout.getLineForVertical(y))
         val cur = loadedChapters.lastOrNull { it.start <= off } ?: return
         titleBar.text = cur.heading
-        currentChapterIdx = cur.idx
+        if (cur.idx != currentChapterIdx) {
+            currentChapterIdx = cur.idx
+            /* remember the chapter being read, per novel — the chapter list
+               reopens scrolled to (and highlighting) it */
+            intent.getStringExtra("slug")?.let { slug ->
+                chapters?.ordered?.getOrNull(cur.idx)?.let { name ->
+                    prefs.edit().putString("lastCh:$slug", name).apply()
+                }
+            }
+        }
     }
     @Volatile private var loading = false
     private var english = true
