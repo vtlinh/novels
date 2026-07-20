@@ -40,19 +40,6 @@
                 android:textColor="@color/fg"
                 android:textStyle="bold" />
 
-            <!-- temporary: one-time in-place encoding fix for existing files -->
-            <Button
-                android:id="@+id/fixBtn"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:text="Fix all"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/fg"
-                app:backgroundTint="@color/btn_secondary"
-                app:cornerRadius="8dp" />
-
             <Button
                 android:id="@+id/checkBtn"
                 android:layout_width="wrap_content"
