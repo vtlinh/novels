@@ -16,6 +16,9 @@ class Site(
     val maxPage: (Document, String) -> Int,                 // (doc, slug)
     val chapterNumFromUrl: (String) -> Int?,
     val isCompleted: (Document) -> Boolean,                 // novel page says finished
+    /* container of the REAL chapter list — pages also carry a "latest
+       chapters" widget whose links must not pollute the chapter order */
+    val listScope: String = "#list-chapter",
 ) {
     fun matches(url: String) = urlRe.containsMatchIn(url.trim())
 }
