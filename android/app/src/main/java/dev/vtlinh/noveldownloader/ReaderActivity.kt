@@ -47,6 +47,19 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun headingOf(body: String): String = body.substringBefore('\n').trim()
 
+    private var currentChapterIdx = 0
+    private var drawerAdapter: ArrayAdapter<String>? = null
+
+    /* (chapter index, paragraph within it) at the top of the viewport */
+    private fun currentPosition(): Pair<Int, Int>? {
+        val layout = text.layout ?: return null
+        val y = (scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)
+        val off = layout.getLineStart(layout.getLineForVertical(y))
+        val cur = loadedChapters.lastOrNull { it.start <= off } ?: return null
+        val para = text.text.subSequence(cur.start, off.coerceAtLeast(cur.start)).count { it == '\n' }
+        return Pair(cur.idx, para)
+    }
+
     /* which chapter is at the top of the viewport right now */
     private fun updateHeader() {
         val layout = text.layout ?: return
@@ -54,6 +67,7 @@ class ReaderActivity : AppCompatActivity() {
         val off = layout.getLineStart(layout.getLineForVertical(y))
         val cur = loadedChapters.lastOrNull { it.start <= off } ?: return
         titleBar.text = cur.heading
+        currentChapterIdx = cur.idx
     }
     @Volatile private var loading = false
     private var english = true
@@ -105,11 +119,28 @@ class ReaderActivity : AppCompatActivity() {
             if (ch.translated.isEmpty()) {
                 findViewById<TextView>(R.id.langBtn).visibility = android.view.View.GONE
             }
-            /* inline chapter list in the right drawer */
-            drawerList.adapter = ArrayAdapter(
+            /* inline chapter list in the right drawer, current one highlighted */
+            drawerAdapter = object : ArrayAdapter<String>(
                 this@ReaderActivity, android.R.layout.simple_list_item_1,
                 ch.ordered.map { it.removeSuffix(".txt") },
-            )
+            ) {
+                override fun getView(
+                    position: Int,
+                    convertView: android.view.View?,
+                    parent: android.view.ViewGroup,
+                ): android.view.View {
+                    val v = super.getView(position, convertView, parent) as TextView
+                    if (position == currentChapterIdx) {
+                        v.setTextColor(getColor(R.color.accent))
+                        v.setTypeface(null, android.graphics.Typeface.BOLD)
+                    } else {
+                        v.setTextColor(getColor(R.color.fg))
+                        v.setTypeface(null, android.graphics.Typeface.NORMAL)
+                    }
+                    return v
+                }
+            }
+            drawerList.adapter = drawerAdapter
             drawerList.setOnItemClickListener { _, _, pos, _ ->
                 drawer.closeDrawer(GravityCompat.END)
                 openAt(pos)
@@ -127,7 +158,11 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.chaptersBtn).setOnClickListener {
+            drawerAdapter?.notifyDataSetChanged()
             drawer.openDrawer(GravityCompat.END)
+            drawerList.post {
+                drawerList.setSelectionFromTop(currentChapterIdx, (drawerList.height * 0.2f).toInt())
+            }
         }
         findViewById<TextView>(R.id.langBtn).setOnClickListener { toggleLanguage() }
         findViewById<TextView>(R.id.settingsBtn).setOnClickListener { v -> showSettings(v) }
@@ -206,12 +241,14 @@ class ReaderActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.langBtn).text = if (english) "EN" else "VI"
     }
 
-    /* switch language and reload around the chapter currently being read */
+    /* switch language and reload at the SAME chapter and paragraph — the
+       translation keeps one paragraph per line, so paragraphs map 1:1 */
     private fun toggleLanguage() {
+        val pos = currentPosition()
         english = !english
         prefs.edit().putString("readerLang", if (english) "en" else "vi").apply()
         updateLangBtn()
-        openAt((nextIdx - 1).coerceAtLeast(0))
+        openAt(pos?.first ?: (nextIdx - 1).coerceAtLeast(0), pos?.second ?: 0)
     }
 
     private fun adjustFont(delta: Float) {
@@ -229,8 +266,10 @@ class ReaderActivity : AppCompatActivity() {
         return withContext(Dispatchers.IO) { Saf.readText(contentResolver, treeUri!!, docId) }
     }
 
-    /* jump to a chapter: load it, append the next, prepend the previous */
-    private fun openAt(pos: Int) {
+    /* jump to a chapter: load it, append the next, prepend the previous.
+       targetPara scrolls to that paragraph of the opened chapter (used by
+       the language toggle to keep the reading position). */
+    private fun openAt(pos: Int, targetPara: Int = 0) {
         val ch = chapters ?: return
         if (loading || ch.ordered.isEmpty()) return
         loading = true
@@ -240,9 +279,11 @@ class ReaderActivity : AppCompatActivity() {
             nextIdx = p
             text.text = ""
             loadedChapters.clear()
+            var chapterLen = 0
             readAt(p)?.let {
                 loadedChapters.add(LoadedChapter(p, 0, headingOf(it)))
                 text.append(it)
+                chapterLen = it.length
                 nextIdx = p + 1
                 titleBar.text = headingOf(it)
             }
@@ -251,9 +292,26 @@ class ReaderActivity : AppCompatActivity() {
                 text.append(SEP + it)
                 nextIdx = p + 2
             }
-            scroll.scrollTo(0, 0)
-            loading = false
-            prependPrev()   // lands the view back at the opened chapter's top
+            scroll.post {
+                var y = 0
+                val layout = text.layout
+                if (layout != null && targetPara > 0 && chapterLen > 0) {
+                    /* char offset of paragraph N within the opened chapter */
+                    val body = text.text.toString()
+                    var off = 0
+                    var count = 0
+                    while (count < targetPara && off < chapterLen) {
+                        val n = body.indexOf('\n', off)
+                        if (n == -1 || n >= chapterLen) break
+                        off = n + 1
+                        count++
+                    }
+                    y = layout.getLineTop(layout.getLineForOffset(off)) + text.totalPaddingTop
+                }
+                scroll.scrollTo(0, y)
+                loading = false
+                prependPrev()   // keeps the position (scroll compensated)
+            }
         }
     }
 
