@@ -340,15 +340,29 @@ class ReaderActivity : AppCompatActivity() {
                 loading = false
                 return@launch
             }
-            val oldHeight = text.height
-            val oldY = scroll.scrollY
+            /* Anchor the viewport by CHARACTER offset, not pixels: with a
+               line-spacing multiplier the text height isn't additive, so a
+               pixel delta lands slightly off and the header shows the wrong
+               chapter after a jump. */
+            val pad = text.totalPaddingTop
+            var anchorOff = 0
+            var withinLine = 0
+            text.layout?.let { l ->
+                val y = (scroll.scrollY - pad).coerceAtLeast(0)
+                val line = l.getLineForVertical(y)
+                anchorOff = l.getLineStart(line)
+                withinLine = y - l.getLineTop(line)
+            }
             val shift = body.length + SEP.length
             for (l in loadedChapters) l.start += shift
             loadedChapters.add(0, LoadedChapter(idx, 0, headingOf(body)))
             text.text = body + SEP + text.text.toString()
             firstIdx = idx
             scroll.post {
-                scroll.scrollTo(0, oldY + (text.height - oldHeight))
+                text.layout?.let { l ->
+                    val line = l.getLineForOffset(anchorOff + shift)
+                    scroll.scrollTo(0, l.getLineTop(line) + withinLine + pad)
+                }
                 loading = false
                 updateHeader()
             }
