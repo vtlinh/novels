@@ -95,7 +95,6 @@ class ReaderActivity : AppCompatActivity() {
         titleBar.text = novelTitle
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
         text.text = "Loading…"
-        updateLangBtn()
 
         /* mark as recently read */
         intent.getStringExtra("slug")?.let { slug ->
@@ -115,10 +114,6 @@ class ReaderActivity : AppCompatActivity() {
                 ChapterListActivity.chapterNames(contentResolver, treeUri!!, dirName, order)
             }
             val ch = chapters ?: return@launch
-            /* no translation on disk -> nothing to toggle between */
-            if (ch.translated.isEmpty()) {
-                findViewById<TextView>(R.id.langBtn).visibility = android.view.View.GONE
-            }
             /* inline chapter list in the right drawer, current one highlighted */
             drawerAdapter = object : ArrayAdapter<String>(
                 this@ReaderActivity, android.R.layout.simple_list_item_1,
@@ -164,7 +159,6 @@ class ReaderActivity : AppCompatActivity() {
                 drawerList.setSelectionFromTop(currentChapterIdx, (drawerList.height * 0.2f).toInt())
             }
         }
-        findViewById<TextView>(R.id.langBtn).setOnClickListener { toggleLanguage() }
         findViewById<TextView>(R.id.settingsBtn).setOnClickListener { v -> showSettings(v) }
     }
 
@@ -237,17 +231,12 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-    private fun updateLangBtn() {
-        findViewById<TextView>(R.id.langBtn).text = if (english) "EN" else "VI"
-    }
-
     /* switch language and reload at the SAME chapter and paragraph — the
        translation keeps one paragraph per line, so paragraphs map 1:1 */
     private fun toggleLanguage() {
         val pos = currentPosition()
         english = !english
         prefs.edit().putString("readerLang", if (english) "en" else "vi").apply()
-        updateLangBtn()
         openAt(pos?.first ?: (nextIdx - 1).coerceAtLeast(0), pos?.second ?: 0)
     }
 
