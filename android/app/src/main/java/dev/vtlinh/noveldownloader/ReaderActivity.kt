@@ -198,12 +198,15 @@ class ReaderActivity : AppCompatActivity() {
             openAt(startIdx, savedParaFor(startIdx))
         }
 
-        /* past half of the loaded content -> append the next chapter;
-           back at the top -> prepend the previous one */
+        /* Past half of the loaded content -> append the next chapter; back at
+           the top -> prepend the previous one. NEVER prepend while TTS is
+           speaking: speech only moves forward, and a prepend shifts every
+           pixel coordinate under the auto-scroll — the exact source of the
+           reading-position jumps. Manual scrolling regains it on pause. */
         scroll.setOnScrollChangeListener { _, _, scrollY, _, _ ->
             val content = text.height
             if (content > 0 && (scrollY + scroll.height) * 2 > content) appendNext()
-            if (scrollY < 300) prependPrev()
+            if (scrollY < 300 && !speaking) prependPrev()
             updateHeader()
         }
 
@@ -785,7 +788,10 @@ class ReaderActivity : AppCompatActivity() {
                     pendingSpeakAfterOpen = false
                     startTtsFrom(targetOff)
                 }
-                prependPrev()   // keeps the position (scroll compensated)
+                /* eager prepend keeps the position for manual reading, but
+                   never under active speech — the coordinate shift right as
+                   TTS starts is a guaranteed position jump */
+                if (!speaking) prependPrev()
             }
         }
     }
