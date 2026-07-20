@@ -420,6 +420,8 @@ class ReaderActivity : AppCompatActivity() {
         if (!ttsReady) return
         speakCursor = paraStartOf(off)
         speaking = true
+        /* foreground service keeps reading alive with the screen off */
+        TtsService.start(this, intent.getStringExtra("title") ?: "")
         updatePlayBtn()
         speakNext()
     }
@@ -490,6 +492,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun pauseTts() {
         speaking = false
         tts?.stop()
+        TtsService.stop(this)
         if (resumeCursor >= 0) speakCursor = resumeCursor
         clearHighlight()
         updatePlayBtn()
@@ -498,6 +501,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun stopTts() {
         speaking = false
         tts?.stop()
+        TtsService.stop(this)
         clearHighlight()
         updatePlayBtn()
     }
@@ -511,6 +515,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
+        TtsService.stop(this)
         super.onDestroy()
     }
 
