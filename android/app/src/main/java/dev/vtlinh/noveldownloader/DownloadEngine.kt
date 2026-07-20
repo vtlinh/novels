@@ -159,13 +159,23 @@ class DownloadEngine(
         if (first.html == null) return@withContext null
         val doc = Jsoup.parse(first.html, base)
         val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
+        /* Collect chapter links from the REAL chapter list only — pages also
+           carry a "latest chapters" widget whose links come first in the HTML
+           and would corrupt the site order. Whole-document fallback when the
+           scoped container is missing or yields nothing new. */
         fun addLinks(d: org.jsoup.nodes.Document) {
-            for (a in d.select("a[href]")) {
-                val href = a.absUrl("href").substringBefore('#')
-                if (href.isEmpty() || seen.containsKey(href)) continue
-                val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                if (site.isChapterPath(path, slug)) seen[href] = Chapter(href, a.text().trim())
+            fun collect(root: org.jsoup.nodes.Element): Int {
+                var added = 0
+                for (a in root.select("a[href]")) {
+                    val href = a.absUrl("href").substringBefore('#')
+                    if (href.isEmpty() || seen.containsKey(href)) continue
+                    val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
+                    if (site.isChapterPath(path, slug)) { seen[href] = Chapter(href, a.text().trim()); added++ }
+                }
+                return added
             }
+            val scope = d.selectFirst(site.listScope)
+            if (scope == null || collect(scope) == 0) collect(d)
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
@@ -243,13 +253,23 @@ class DownloadEngine(
         )
 
         val seen = LinkedHashMap<String, Chapter>()
+        /* Collect chapter links from the REAL chapter list only — pages also
+           carry a "latest chapters" widget whose links come first in the HTML
+           and would corrupt the site order. Whole-document fallback when the
+           scoped container is missing or yields nothing new. */
         fun addLinks(d: org.jsoup.nodes.Document) {
-            for (a in d.select("a[href]")) {
-                val href = a.absUrl("href").substringBefore('#')
-                if (href.isEmpty() || seen.containsKey(href)) continue
-                val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                if (site.isChapterPath(path, slug)) seen[href] = Chapter(href, a.text().trim())
+            fun collect(root: org.jsoup.nodes.Element): Int {
+                var added = 0
+                for (a in root.select("a[href]")) {
+                    val href = a.absUrl("href").substringBefore('#')
+                    if (href.isEmpty() || seen.containsKey(href)) continue
+                    val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
+                    if (site.isChapterPath(path, slug)) { seen[href] = Chapter(href, a.text().trim()); added++ }
+                }
+                return added
             }
+            val scope = d.selectFirst(site.listScope)
+            if (scope == null || collect(scope) == 0) collect(d)
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)

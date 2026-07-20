@@ -37,7 +37,7 @@ data class NovelRec(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 10) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 11) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -104,6 +104,9 @@ class DownloadStore(context: Context) :
         if (oldVersion in 5..7) db.execSQL("ALTER TABLE novels ADD COLUMN last_dl INTEGER DEFAULT 0")
         if (oldVersion in 5..8) db.execSQL("ALTER TABLE novels ADD COLUMN last_read INTEGER DEFAULT 0")
         if (oldVersion < 10) db.execSQL(ORDER_TABLE)
+        /* v10 orders were polluted by the sites' "latest chapters" widget —
+           purge so downloads / Check status re-index with correct scoping */
+        if (oldVersion == 10) db.execSQL("DELETE FROM chapter_order")
     }
 
     /* ---- site chapter order (reader sorts by this, not by filename) ---- */
