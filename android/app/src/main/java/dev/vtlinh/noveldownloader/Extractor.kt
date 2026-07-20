@@ -40,11 +40,26 @@ object Extractor {
        decodes to "&gt;" and was saved literally as "-&gt;"), plus
        non-breaking spaces, zero-width characters, and Unicode line
        separators. Decoding repeats until stable (max 3 rounds). */
+    /* the common named entities, decoded by hand so the fix never depends on
+       parser behavior; "&amp;" last so "&amp;gt;" needs the next round */
+    private fun decodeCommon(s: String): String = s
+        .replace("&nbsp;", " ").replace("&quot;", "\"")
+        .replace("&#39;", "'").replace("&#039;", "'").replace("&apos;", "'")
+        .replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&ldquo;", "\u201C").replace("&rdquo;", "\u201D")
+        .replace("&lsquo;", "\u2018").replace("&rsquo;", "\u2019")
+        .replace("&hellip;", "\u2026").replace("&mdash;", "\u2014").replace("&ndash;", "\u2013")
+        .replace("&amp;", "&")
+
     fun cleanEncoding(s: String): String {
         var t = s
         var i = 0
-        while (i++ < 3 && ENTITY_RE.containsMatchIn(t)) {
-            val u = org.jsoup.parser.Parser.unescapeEntities(t, false)
+        while (i++ < 4 && ENTITY_RE.containsMatchIn(t)) {
+            var u = decodeCommon(t)
+            /* anything the manual table misses (numeric refs, rarer names) */
+            if (ENTITY_RE.containsMatchIn(u)) {
+                u = try { org.jsoup.parser.Parser.unescapeEntities(u, false) } catch (e: Exception) { u }
+            }
             if (u == t) break
             t = u
         }
