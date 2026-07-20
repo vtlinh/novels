@@ -86,11 +86,27 @@ class ChapterListActivity : AppCompatActivity() {
             startActivity(Intent(this, ReadingListActivity::class.java))
             finish()
         }
+    }
+
+    /* (re)load on every return to this screen — onResume also follows
+       onCreate, so the first load happens here too — keeping the
+       current-chapter highlight in sync with what was just read */
+    override fun onResume() {
+        super.onResume()
+        load()
+    }
+
+    private var loadedOnce = false
+
+    private fun load() {
+        val dirName = intent.getStringExtra("dir") ?: return finish()
+        val title = intent.getStringExtra("title") ?: dirName
         val status = findViewById<TextView>(R.id.statusText)
         val listView = findViewById<ListView>(R.id.chapterListView)
         val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null) ?: return finish()
 
-        status.text = "Loading…"
+        if (!loadedOnce) status.text = "Loading…"
+        loadedOnce = true
         val slug = intent.getStringExtra("slug")
         lifecycleScope.launch {
             val chapters = withContext(Dispatchers.IO) {
@@ -106,9 +122,36 @@ class ChapterListActivity : AppCompatActivity() {
             }
             status.text = "${ordered.size} chapter(s)"
             val labels = ordered.map { it.removeSuffix(".txt") }
-            listView.adapter = ArrayAdapter(
+            /* the chapter currently being read: highlighted and scrolled into
+               view (at ~20% of the list height) */
+            val lastName = slug?.let {
+                getSharedPreferences("app", MODE_PRIVATE).getString("lastCh:$it", null)
+            }
+            val currentPos = lastName?.let { ordered.indexOf(it) } ?: -1
+            listView.adapter = object : ArrayAdapter<String>(
                 this@ChapterListActivity, android.R.layout.simple_list_item_1, labels,
-            )
+            ) {
+                override fun getView(
+                    position: Int,
+                    convertView: android.view.View?,
+                    parent: android.view.ViewGroup,
+                ): android.view.View {
+                    val v = super.getView(position, convertView, parent) as TextView
+                    if (position == currentPos) {
+                        v.setTextColor(getColor(R.color.accent))
+                        v.setTypeface(null, android.graphics.Typeface.BOLD)
+                    } else {
+                        v.setTextColor(getColor(R.color.fg))
+                        v.setTypeface(null, android.graphics.Typeface.NORMAL)
+                    }
+                    return v
+                }
+            }
+            if (currentPos >= 0) {
+                listView.post {
+                    listView.setSelectionFromTop(currentPos, (listView.height * 0.2f).toInt())
+                }
+            }
             listView.setOnItemClickListener { _, _, pos, _ ->
                 startActivity(
                     Intent(this@ChapterListActivity, ReaderActivity::class.java)
