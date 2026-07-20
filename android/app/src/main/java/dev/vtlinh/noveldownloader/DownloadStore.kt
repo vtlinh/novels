@@ -149,6 +149,10 @@ class DownloadStore(context: Context) :
         return out
     }
 
+    fun removeNovel(folder: String, slug: String) {
+        writableDatabase.delete("novels", "folder=? AND slug=?", arrayOf(folder, slug))
+    }
+
     fun setAuthor(folder: String, slug: String, author: String) {
         writableDatabase.execSQL(
             "UPDATE novels SET author=? WHERE folder=? AND slug=?",
