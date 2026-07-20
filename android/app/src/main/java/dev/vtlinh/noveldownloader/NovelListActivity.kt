@@ -100,7 +100,7 @@ class NovelListActivity : AppCompatActivity() {
         /* chapter index knows novels the registry may not */
         try {
             for (slug in store.chapterSlugs(folder)) {
-                if (slug !in all) all[slug] = NovelRec(slug, "", slug, "", 0L, -1, false, 0, 0L)
+                if (slug !in all) all[slug] = NovelRec(slug, "", slug, "", 0L, -1, false, 0, 0L, 0L)
             }
         } catch (e: Exception) { err += " index:${e.message}" }
 
@@ -199,7 +199,7 @@ class NovelListActivity : AppCompatActivity() {
             val knownByNorm = HashMap<String, NovelRec>()
             for (r in recs) knownByNorm[normKey(r.slug)] = r
             for (slug in store.chapterSlugs(folder)) {
-                knownByNorm.putIfAbsent(normKey(slug), NovelRec(slug, "", slug, "", 0L, -1, false, 0, 0L))
+                knownByNorm.putIfAbsent(normKey(slug), NovelRec(slug, "", slug, "", 0L, -1, false, 0, 0L, 0L))
             }
             for ((name, docId) in dirs) {
                 if (name.isEmpty()) continue

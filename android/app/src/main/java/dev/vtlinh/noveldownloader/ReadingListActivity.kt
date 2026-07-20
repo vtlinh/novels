@@ -60,7 +60,7 @@ class ReadingListActivity : AppCompatActivity() {
                     )
                     val dirName = store.getTitle(folder, rec.slug) ?: Extractor.sanitize(rec.title)
                     Triple(rec, display, dirName)
-                }.sortedByDescending { maxOf(it.first.lastDl, it.first.started) }
+                }
             }
             list.removeAllViews()
             if (rows.isEmpty()) {
@@ -68,7 +68,34 @@ class ReadingListActivity : AppCompatActivity() {
                 return@launch
             }
             status.text = "${rows.size} novel(s)"
-            for ((rec, display, dirName) in rows) {
+            /* the 3 most recently READ novels get their own section on top */
+            val recent = rows.filter { it.first.lastRead > 0 }
+                .sortedByDescending { it.first.lastRead }.take(3)
+            val recentSlugs = recent.map { it.first.slug }.toSet()
+            val others = rows.filter { it.first.slug !in recentSlugs }
+                .sortedByDescending { maxOf(it.first.lastDl, it.first.started) }
+            if (recent.isNotEmpty()) {
+                list.addView(sectionHeader("RECENTLY READ"))
+                for (r in recent) list.addView(novelRow(r))
+                list.addView(sectionHeader("ALL NOVELS"))
+            }
+            for (r in others) list.addView(novelRow(r))
+        }
+    }
+
+    private fun sectionHeader(label: String): TextView =
+        TextView(this).apply {
+            text = label
+            textSize = 11f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(getColor(R.color.muted))
+            letterSpacing = 0.08f
+            setPadding(0, dp(14), 0, dp(2))
+        }
+
+    private fun novelRow(row: Triple<NovelRec, String, String>): android.view.View {
+        val (rec, display, dirName) = row
+        run {
                 val line = LinearLayout(this@ReadingListActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = android.view.Gravity.CENTER_VERTICAL
@@ -78,7 +105,8 @@ class ReadingListActivity : AppCompatActivity() {
                     setOnClickListener {
                         startActivity(
                             Intent(this@ReadingListActivity, ChapterListActivity::class.java)
-                                .putExtra("dir", dirName).putExtra("title", display),
+                                .putExtra("dir", dirName).putExtra("title", display)
+                                .putExtra("slug", rec.slug),
                         )
                     }
                 }
@@ -107,8 +135,7 @@ class ReadingListActivity : AppCompatActivity() {
                         }
                     },
                 )
-                list.addView(line)
-            }
+            return line
         }
     }
 

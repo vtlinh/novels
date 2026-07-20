@@ -19,30 +19,37 @@ class ChapterListActivity : AppCompatActivity() {
     companion object {
         val CHAPTER_RE = Regex("Chapter (\\d+)(?:-(\\d+))?\\.txt")
 
-        /* ordered chapter names of a novel dir, translated preferred */
+        class Chapters(
+            val ordered: List<String>,               // chapter filenames in order
+            val source: Map<String, String>,         // name -> Vietnamese source docId
+            val translated: Map<String, String>,     // name -> English translated docId
+        )
+
+        /* the chapters of one novel dir, with docIds for both languages */
         fun chapterNames(
             cr: android.content.ContentResolver,
             treeUri: Uri,
             dirName: String,
-        ): Pair<List<String>, Map<String, String>> {   // (ordered names, name -> docId to read)
+        ): Chapters {
             val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri))
-            val dir = dirs.firstOrNull { it.isDir && it.name == dirName } ?: return Pair(emptyList(), emptyMap())
+            val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
+                ?: return Chapters(emptyList(), emptyMap(), emptyMap())
             val source = HashMap<String, String>()
             var translatedId: String? = null
             for (e in Saf.children(cr, treeUri, dir.docId)) {
                 if (e.isDir && e.name == "translated") translatedId = e.docId
                 else if (!e.isDir && CHAPTER_RE.matches(e.name)) source[e.name] = e.docId
             }
-            val read = HashMap<String, String>(source)
+            val translated = HashMap<String, String>()
             translatedId?.let {
                 for (e in Saf.children(cr, treeUri, it)) {
-                    if (!e.isDir && e.name in source) read[e.name] = e.docId   // prefer translated
+                    if (!e.isDir && e.name in source) translated[e.name] = e.docId
                 }
             }
             val ordered = source.keys.sortedWith(
                 compareBy({ CHAPTER_RE.find(it)?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE }, { it }),
             )
-            return Pair(ordered, read)
+            return Chapters(ordered, source, translated)
         }
     }
 
@@ -58,9 +65,10 @@ class ChapterListActivity : AppCompatActivity() {
 
         status.text = "Loading…"
         lifecycleScope.launch {
-            val (ordered, _) = withContext(Dispatchers.IO) {
+            val chapters = withContext(Dispatchers.IO) {
                 chapterNames(contentResolver, Uri.parse(folder), dirName)
             }
+            val ordered = chapters.ordered
             if (ordered.isEmpty()) {
                 status.text = "No chapters found in \"$dirName\"."
                 return@launch
@@ -75,6 +83,7 @@ class ChapterListActivity : AppCompatActivity() {
                     Intent(this@ChapterListActivity, ReaderActivity::class.java)
                         .putExtra("dir", dirName)
                         .putExtra("title", title)
+                        .putExtra("slug", intent.getStringExtra("slug"))
                         .putExtra("start", ordered[pos]),
                 )
             }
