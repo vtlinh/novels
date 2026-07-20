@@ -104,18 +104,6 @@
             android:inputType="textUri"
             android:importantForAutofill="no" />
 
-        <Button
-            android:id="@+id/browserBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Browser mode"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/fg"
-            app:backgroundTint="@color/btn_secondary"
-            app:cornerRadius="8dp" />
-
         <CheckBox
             android:id="@+id/translateCheck"
             android:layout_width="wrap_content"

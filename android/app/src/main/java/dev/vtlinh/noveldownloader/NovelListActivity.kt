@@ -54,6 +54,10 @@ class NovelListActivity : AppCompatActivity() {
             drawer.openDrawer(androidx.core.view.GravityCompat.START)
         }
         findViewById<TextView>(R.id.navHome).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.navBrowser).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+            startActivity(Intent(this, BrowserActivity::class.java))
+        }
         findViewById<TextView>(R.id.navNovels).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
         }
