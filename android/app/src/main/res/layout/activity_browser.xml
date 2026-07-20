@@ -55,9 +55,39 @@
             app:cornerRadius="8dp" />
     </LinearLayout>
 
-    <WebView
-        android:id="@+id/webview"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- start screen: recently visited domains, newest first -->
+        <LinearLayout
+            android:id="@+id/recentPanel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="@color/bg"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="16dp"
+                android:text="Recent sites"
+                android:textSize="13sp"
+                android:textColor="@color/muted" />
+
+            <ListView
+                android:id="@+id/recentList"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:divider="@color/card"
+                android:dividerHeight="1dp" />
+        </LinearLayout>
+    </FrameLayout>
 </LinearLayout>

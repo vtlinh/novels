@@ -54,6 +54,27 @@ class BrowserActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
     private var currentUrl: String = "https://truyenfull.today/"
 
+    /* ---- recent domains (start screen) ---- */
+
+    /* domain -> last access millis, kept to the 20 most recent */
+    private fun domainHistory(): MutableMap<String, Long> {
+        val out = LinkedHashMap<String, Long>()
+        try {
+            val o = org.json.JSONObject(prefs.getString("browserDomains", "{}") ?: "{}")
+            for (k in o.keys()) out[k] = o.getLong(k)
+        } catch (e: Exception) {}
+        return out
+    }
+
+    private fun recordDomainVisit(host: String) {
+        val map = domainHistory()
+        map[host] = System.currentTimeMillis()
+        val trimmed = map.entries.sortedByDescending { it.value }.take(20)
+        val o = org.json.JSONObject()
+        for (e in trimmed) o.put(e.key, e.value)
+        prefs.edit().putString("browserDomains", o.toString()).apply()
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,6 +110,10 @@ class BrowserActivity : AppCompatActivity() {
                     /* don't clobber the field while the user is typing in it */
                     if (!urlEdit.hasFocus()) urlEdit.setText(url)
                     downloadBtn.isEnabled = Sites.forUrl(url) != null
+                    findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.GONE
+                    try {
+                        java.net.URI(url).host?.let { if (it.isNotEmpty()) recordDomainVisit(it) }
+                    } catch (e: Exception) {}
                 }
             }
 
@@ -156,7 +181,33 @@ class BrowserActivity : AppCompatActivity() {
                 return host != curHost && !request.hasGesture()
             }
         }
-        web.loadUrl(start)
+        /* start screen: the last 20 domains we visited, newest first. Tapping
+           one opens its front page. With no history yet, load the old default
+           start page directly. */
+        val history = domainHistory().entries.sortedByDescending { it.value }.map { it.key }
+        if (history.isEmpty()) {
+            web.loadUrl(start)
+        } else {
+            val panel = findViewById<android.view.View>(R.id.recentPanel)
+            val list = findViewById<android.widget.ListView>(R.id.recentList)
+            list.adapter = object : android.widget.ArrayAdapter<String>(
+                this, android.R.layout.simple_list_item_1, history,
+            ) {
+                override fun getView(
+                    position: Int,
+                    convertView: android.view.View?,
+                    parent: android.view.ViewGroup,
+                ): android.view.View {
+                    val v = super.getView(position, convertView, parent) as android.widget.TextView
+                    v.setTextColor(getColor(R.color.fg))
+                    return v
+                }
+            }
+            list.setOnItemClickListener { _, _, pos, _ ->
+                web.loadUrl("https://${history[pos]}/")
+            }
+            panel.visibility = android.view.View.VISIBLE
+        }
 
         /* typing a URL and hitting Go navigates the WebView */
         urlEdit.setOnEditorActionListener { v, actionId, _ ->
