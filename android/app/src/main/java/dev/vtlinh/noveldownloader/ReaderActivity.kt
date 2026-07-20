@@ -182,20 +182,10 @@ class ReaderActivity : AppCompatActivity() {
             updateHeader()
         }
 
-        /* TTS: double-tap anywhere in the text starts reading from there */
-        tts = android.speech.tts.TextToSpeech(this) { st ->
-            ttsReady = st == android.speech.tts.TextToSpeech.SUCCESS
-        }
-        tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) {
-                runOnUiThread { if (speaking) speakNext() }
-            }
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                runOnUiThread { if (speaking) speakNext() }
-            }
-        })
+        /* TTS: double-tap anywhere in the text starts reading from there.
+           Prefer the Google engine (best voices); fall back to the device
+           default engine if it isn't installed. */
+        initTts("com.google.android.tts")
         val doubleTap = android.view.GestureDetector(
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
@@ -327,6 +317,40 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* ---- TTS engine ---- */
+
+    /* engine=null → device default. Tried Google first; if its init fails
+       (engine not installed) we retry once with the default engine. */
+    private fun initTts(engine: String?) {
+        val listener = android.speech.tts.TextToSpeech.OnInitListener { st ->
+            if (st == android.speech.tts.TextToSpeech.SUCCESS) {
+                ttsReady = true
+                curTtsLang = ""   // re-apply the language profile on next speak
+            } else if (engine != null) {
+                /* always post: the failure callback may fire synchronously
+                   inside the constructor, before `tts = t` below runs */
+                android.os.Handler(mainLooper).post {
+                    tts?.shutdown()
+                    initTts(null)
+                }
+            }
+        }
+        val t = if (engine != null) {
+            android.speech.tts.TextToSpeech(this, listener, engine)
+        } else {
+            android.speech.tts.TextToSpeech(this, listener)
+        }
+        t.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                runOnUiThread { if (speaking) speakNext() }
+            }
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                runOnUiThread { if (speaking) speakNext() }
+            }
+        })
+        tts = t
+    }
 
     private val viCharsRe = Regex(
         "[\u0103\u00e2\u0111\u00ea\u00f4\u01a1\u01b0\u00e0\u1ea3\u00e3\u00e1\u1ea1\u1eb1\u1eb3\u1eb5\u1eaf\u1eb7\u1ea7\u1ea9\u1eab\u1ea5\u1ead\u00e8\u1ebb\u1ebd\u00e9\u1eb9\u1ec1\u1ec3\u1ec5\u1ebf\u1ec7\u00ec\u1ec9\u0129\u00ed\u1ecb\u00f2\u1ecf\u00f5\u00f3\u1ecd\u1ed3\u1ed5\u1ed7\u1ed1\u1ed9\u1edd\u1edf\u1ee1\u1edb\u1ee3\u00f9\u1ee7\u0169\u00fa\u1ee5\u1eeb\u1eed\u1eef\u1ee9\u1ef1\u1ef3\u1ef7\u1ef9\u00fd\u1ef5]",
@@ -501,9 +525,11 @@ class ReaderActivity : AppCompatActivity() {
 
         root.addView(label("TTS voice ($langLabel)"))
         val voices = try {
-            tts?.voices?.filter { it.locale.language == lang }?.sortedBy { it.name }
-                ?: emptyList()
-        } catch (e: Exception) { emptyList() }
+            val all = tts?.voices.orEmpty()
+            val forLang = all.filter { it.locale.language == lang }
+            /* nothing for this language → show everything rather than nothing */
+            (forLang.ifEmpty { all }).sortedBy { it.name }
+        } catch (e: Exception) { emptyList<android.speech.tts.Voice>() }
         val spinner = android.widget.Spinner(ctx)
         spinner.adapter = android.widget.ArrayAdapter(
             ctx, android.R.layout.simple_spinner_dropdown_item,
