@@ -75,6 +75,30 @@ class ReaderActivity : AppCompatActivity() {
             currentChapterIdx = cur.idx
             saveLastChapter(cur.idx)
         }
+        /* remember the exact paragraph too, so reopening this chapter
+           returns to where we left off (paragraphs map 1:1 across EN/VI) */
+        if (off != lastProbeOff) {
+            lastProbeOff = off
+            intent.getStringExtra("slug")?.let { slug ->
+                chapters?.ordered?.getOrNull(cur.idx)?.let { name ->
+                    val para = text.text.subSequence(cur.start, off.coerceAtLeast(cur.start))
+                        .count { it == '\n' }
+                    prefs.edit().putString("readPos:$slug", "$name|$para").apply()
+                }
+            }
+        }
+    }
+
+    private var lastProbeOff = -1
+
+    /* the saved paragraph for a chapter — 0 unless it's the chapter we
+       last left off in */
+    private fun savedParaFor(idx: Int): Int {
+        val slug = intent.getStringExtra("slug") ?: return 0
+        val saved = prefs.getString("readPos:$slug", null) ?: return 0
+        val name = chapters?.ordered?.getOrNull(idx) ?: return 0
+        if (saved.substringBefore('|') != name) return 0
+        return saved.substringAfter('|').toIntOrNull() ?: 0
     }
 
     /* remember the chapter being read, per novel — the chapter list reopens
@@ -168,9 +192,10 @@ class ReaderActivity : AppCompatActivity() {
             drawerList.adapter = drawerAdapter
             drawerList.setOnItemClickListener { _, _, pos, _ ->
                 drawer.closeDrawer(GravityCompat.END)
-                openAt(pos)
+                openAt(pos, savedParaFor(pos))
             }
-            openAt(ch.ordered.indexOf(start).coerceAtLeast(0))
+            val startIdx = ch.ordered.indexOf(start).coerceAtLeast(0)
+            openAt(startIdx, savedParaFor(startIdx))
         }
 
         /* past half of the loaded content -> append the next chapter;
