@@ -41,18 +41,6 @@
                 android:focusable="true" />
 
             <TextView
-                android:id="@+id/langBtn"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:padding="10dp"
-                android:text="EN"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:textColor="@color/accent"
-                android:clickable="true"
-                android:focusable="true" />
-
-            <TextView
                 android:id="@+id/settingsBtn"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
