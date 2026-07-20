@@ -82,5 +82,7 @@
         android:layout_gravity="end"
         android:background="@color/card"
         android:divider="@color/bg"
-        android:dividerHeight="1dp" />
+        android:dividerHeight="1dp"
+        android:fastScrollEnabled="true"
+        android:fastScrollAlwaysVisible="true" />
 </androidx.drawerlayout.widget.DrawerLayout>
