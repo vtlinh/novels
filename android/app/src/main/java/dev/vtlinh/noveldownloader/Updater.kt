@@ -1,8 +1,10 @@
 package dev.vtlinh.noveldownloader
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import androidx.core.content.FileProvider
+import android.content.pm.PackageInstaller
+import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,9 +15,13 @@ import java.util.concurrent.TimeUnit
 
 /* Self-update against the fixed "android-latest" GitHub release: CI uploads
    the APK plus a version.json carrying the build's versionCode. On app start
-   the two are compared; if the release is newer the app offers to download
-   the APK and hand it to the system installer. Installation works because
-   every CI build is signed with the same committed key. */
+   and each return to the foreground the two are compared; if the release is
+   newer the APK is downloaded and committed through a PackageInstaller
+   session with USER_ACTION_NOT_REQUIRED. Once this app is the installer of
+   record of itself (true from the first self-performed update on), Android
+   12+ installs the update silently — before that the system shows its
+   one-tap confirmation (via InstallReceiver). Every CI build is signed with
+   the same committed key, so updates always install over the existing app. */
 object Updater {
     private const val BASE = "https://github.com/vtlinh/novels/releases/download/android-latest"
     private const val VERSION_URL = "$BASE/version.json"
@@ -61,11 +67,29 @@ object Updater {
         }
     }
 
+    /* Commit the update through PackageInstaller. Silent when permitted
+       (Android 12+, this app is its own installer of record); otherwise the
+       system posts its confirmation UI via InstallReceiver. The process is
+       killed by the system as the update applies. */
     fun install(context: Context, apk: File) {
-        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", apk)
-        val i = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(i)
+        val pi = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(context.packageName)
+        if (Build.VERSION.SDK_INT >= 31) {
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
+        val sessionId = pi.createSession(params)
+        pi.openSession(sessionId).use { session ->
+            session.openWrite("app.apk", 0, apk.length()).use { out ->
+                apk.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+            val pending = PendingIntent.getBroadcast(
+                context, 0, Intent(context, InstallReceiver::class.java), flags,
+            )
+            session.commit(pending.intentSender)
+        }
     }
 }

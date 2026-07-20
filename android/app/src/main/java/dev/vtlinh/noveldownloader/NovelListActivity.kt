@@ -2,12 +2,14 @@ package dev.vtlinh.noveldownloader
 
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
@@ -17,11 +19,13 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
-/* List Novels: every novel ever downloaded into the saved folder, resumable
-   with one tap — no URLs to remember. "Check status" asks each site for its
-   chapter count and Completed/Full flag; a novel whose download has
-   everything a finished novel will ever have loses its Download button and
-   sinks to the bottom. */
+/* List Novels: every novel in the saved download folder, resumable with one
+   tap — no URLs to remember. Rows come from three sources, deduped by slug:
+   the novels registry, the chapter index, and a scan of the root folder's
+   subdirectories (novels downloaded before the registry existed, or copied
+   in from elsewhere). "Check status" asks each site for its chapter count,
+   finished flag, and author; a finished novel with everything on disk shows
+   a Complete tag instead of a Download button and sinks to the bottom. */
 class NovelListActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -57,34 +61,73 @@ class NovelListActivity : AppCompatActivity() {
         render()
     }
 
+    /* best-effort slug from a folder name: novel folders are the sanitized
+       title ("English (Vietnamese)" once translated — the Vietnamese part is
+       what matches the site slug) */
+    private fun slugify(folderName: String): String {
+        val vn = Regex("\\(([^)]+)\\)\\s*$").find(folderName)?.groupValues?.get(1) ?: folderName
+        return Extractor.sanitize(vn).lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+    }
+
+    private val chapterFileRe = Regex("Chapter \\d+.*\\.txt")
+
     private fun rows(): List<Row> {
         val folder = folderKey ?: return emptyList()
-        val registered = store.novels(folder).associateBy { it.slug }
         val all = LinkedHashMap<String, NovelRec>()
-        for ((slug, rec) in registered) all[slug] = rec
-        /* legacy novels: in the chapter index but downloaded before the
-           registry existed — no URL yet; Check status locates them */
+        for (rec in store.novels(folder)) all[rec.slug] = rec
+        /* chapter index knows novels the registry may not */
         for (slug in store.chapterSlugs(folder)) {
-            if (slug !in all) all[slug] = NovelRec(slug, "", slug, 0L, -1, false)
+            if (slug !in all) all[slug] = NovelRec(slug, "", slug, "", 0L, -1, false)
         }
+
+        /* one root listing, reused for the scan and the count fallback */
+        val dirs = try {
+            DocumentFile.fromTreeUri(this, Uri.parse(folder))?.listFiles()
+                ?.filter { it.isDirectory }?.associateBy { it.name ?: "" } ?: emptyMap()
+        } catch (e: Exception) { emptyMap() }
+        fun countIn(name: String): Int = try {
+            dirs[name]?.listFiles()?.count { chapterFileRe.matches(it.name ?: "") } ?: 0
+        } catch (e: Exception) { 0 }
+
+        /* the on-disk folder name each known novel saves into */
+        val folderName = HashMap<String, String>()
+        for (rec in all.values) {
+            folderName[rec.slug] = store.getTitle(folder, rec.slug) ?: Extractor.sanitize(rec.title)
+        }
+        /* root-folder scan: subdirectories not accounted for by any known
+           novel — downloaded before the registry existed, or copied in */
+        val known = folderName.values.toHashSet()
+        for ((name, _) in dirs) {
+            if (name.isEmpty() || name in known) continue
+            val slug = slugify(name)
+            if (slug.isEmpty() || slug in all) continue
+            if (countIn(name) == 0) continue   // not a novel folder
+            all[slug] = NovelRec(slug, "", name, "", 0L, -1, false)
+            folderName[slug] = name
+        }
+
         return all.values.map { rec ->
+            val dbCount = store.chapterCount(folder, rec.slug)
             Row(
                 rec,
                 store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
-                store.chapterCount(folder, rec.slug),
+                if (dbCount > 0) dbCount else countIn(folderName[rec.slug] ?: ""),
             )
         }.sortedWith(compareBy<Row> { it.rec.complete }.thenByDescending { it.rec.started })
     }
 
     private fun render() {
         val list = findViewById<LinearLayout>(R.id.novelList)
-        list.removeAllViews()
-        val rs = rows()
-        if (rs.isEmpty()) {
-            findViewById<TextView>(R.id.statusText).text = "No downloaded novels yet."
-            return
+        val status = findViewById<TextView>(R.id.statusText)
+        lifecycleScope.launch {
+            val rs = withContext(Dispatchers.IO) { rows() }
+            list.removeAllViews()
+            if (rs.isEmpty()) {
+                status.text = "No downloaded novels yet."
+                return@launch
+            }
+            for (row in rs) list.addView(buildRow(row))
         }
-        for (row in rs) list.addView(buildRow(row))
     }
 
     private fun buildRow(row: Row): View {
@@ -94,25 +137,42 @@ class NovelListActivity : AppCompatActivity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, dp(10), 0, dp(10))
         }
-        val sub = buildString {
-            append("${row.local} chapter(s)")
-            if (row.rec.total > 0) append(" of ${row.rec.total}")
-            if (row.rec.complete) append(" — complete")
-            else if (row.rec.url.isEmpty()) append(" — tap Check status to locate")
+        val text = buildString {
+            append(row.display)
+            if (row.rec.author.isNotEmpty()) append("\n${row.rec.author}")
+            if (!row.rec.complete) {
+                append("\n${row.local} chapter(s)")
+                if (row.rec.total > 0) append(" of ${row.rec.total}")
+                if (row.rec.url.isEmpty()) append(" — tap Check status to locate")
+            }
         }
         line.addView(
             TextView(ctx).apply {
-                text = "${row.display}\n$sub"
+                this.text = text
                 textSize = 14f
                 setTextColor(getColor(R.color.fg))
                 setLineSpacing(0f, 1.15f)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             },
         )
-        if (!row.rec.complete && row.rec.url.isNotEmpty()) {
+        if (row.rec.complete) {
+            line.addView(
+                TextView(ctx).apply {
+                    this.text = "COMPLETE"
+                    textSize = 11f
+                    setTextColor(Color.parseColor("#3DDC84"))
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setPadding(dp(10), dp(4), dp(10), dp(4))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(6).toFloat()
+                        setColor(Color.parseColor("#1E3527"))
+                    }
+                },
+            )
+        } else if (row.rec.url.isNotEmpty()) {
             line.addView(
                 MaterialButton(ctx).apply {
-                    text = "Download"
+                    this.text = "Download"
                     textSize = 13f
                     setTextColor(Color.WHITE)
                     backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.accent))
@@ -141,9 +201,10 @@ class NovelListActivity : AppCompatActivity() {
         finish()
     }
 
-    /* Ask each site for its chapter count + finished flag. A legacy row with
-       no URL is probed at each site's canonical slug URL first. A novel is
-       complete when the site says finished AND every chapter is on disk. */
+    /* Ask each site for its chapter count, finished flag, and author. A row
+       with no URL (legacy or folder-scanned) is probed at each site's
+       canonical slug URL first. A novel is complete when the site says
+       finished AND every chapter is on disk. */
     private fun checkStatuses() {
         val folder = folderKey ?: return
         val btn = findViewById<Button>(R.id.checkBtn)
@@ -153,7 +214,7 @@ class NovelListActivity : AppCompatActivity() {
         lifecycleScope.launch {
             /* a complete novel (site finished + everything on disk) can never
                regress — no need to ever recheck it */
-            val targets = rows().filter { !it.rec.complete }
+            val targets = withContext(Dispatchers.IO) { rows() }.filter { !it.rec.complete }
             if (targets.isEmpty()) {
                 status.text = "Nothing to check — all novels are complete."
                 btn.isEnabled = true
@@ -177,8 +238,9 @@ class NovelListActivity : AppCompatActivity() {
                                     if (row.rec.url.isEmpty()) {
                                         store.registerNovel(folder, row.rec.slug, u, row.display, 0L)
                                     }
-                                    val complete = res.second && store.chapterCount(folder, row.rec.slug) >= res.first
-                                    store.updateNovelCheck(folder, row.rec.slug, res.first, complete)
+                                    res.author?.let { store.setAuthor(folder, row.rec.slug, it) }
+                                    val complete = res.completed && row.local >= res.total
+                                    store.updateNovelCheck(folder, row.rec.slug, res.total, complete)
                                     break
                                 }
                                 val n = done.incrementAndGet()
