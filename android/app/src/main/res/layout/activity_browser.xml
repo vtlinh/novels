@@ -6,8 +6,9 @@
     android:orientation="vertical"
     android:background="@color/bg">
 
-    <!-- sticky header -->
+    <!-- sticky header (hidden while the recent-domains start screen shows) -->
     <LinearLayout
+        android:id="@+id/browserHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -74,13 +75,37 @@
             android:background="@color/bg"
             android:visibility="gone">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:padding="16dp"
-                android:text="Recent sites"
-                android:textSize="13sp"
-                android:textColor="@color/muted" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@color/card">
+
+                <TextView
+                    android:id="@+id/recentBack"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="←"
+                    android:textSize="22sp"
+                    android:textColor="@color/fg"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:padding="10dp"
+                    android:text="Recent sites"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/fg" />
+            </LinearLayout>
 
             <ListView
                 android:id="@+id/recentList"
