@@ -86,6 +86,43 @@
                 android:lineSpacingMultiplier="1.45"
                 android:textIsSelectable="true" />
         </ScrollView>
+
+        <!-- TTS footer: play/pause centered, voice settings on the right -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/card">
+
+            <TextView
+                android:id="@+id/ttsPlayBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:text="▶"
+                android:textSize="22sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/ttsSettingsBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|center_vertical"
+                android:paddingStart="14dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:text="⚙"
+                android:textSize="18sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+        </FrameLayout>
     </LinearLayout>
 
     <!-- right-side inline chapter list -->

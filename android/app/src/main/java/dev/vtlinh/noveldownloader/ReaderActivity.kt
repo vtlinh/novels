@@ -90,6 +90,16 @@ class ReaderActivity : AppCompatActivity() {
     private var english = true
     private var fontSp = 16f
 
+    /* ---- text-to-speech ---- */
+    private var tts: android.speech.tts.TextToSpeech? = null
+    private var ttsReady = false
+    private var speaking = false
+    private var speakCursor = 0        // char offset of the NEXT paragraph to speak
+    private var resumeCursor = -1      // start of the paragraph being/last spoken
+    private var pendingSpeakContinue = false
+    private var ttsRate = 1f
+    private var ttsPitch = 1f
+
     private lateinit var text: TextView
     private lateinit var titleBar: TextView
     private lateinit var scroll: ScrollView
@@ -169,6 +179,54 @@ class ReaderActivity : AppCompatActivity() {
             updateHeader()
         }
 
+        /* TTS: double-tap anywhere in the text starts reading from there */
+        ttsRate = prefs.getFloat("ttsRate", 1f)
+        ttsPitch = prefs.getFloat("ttsPitch", 1f)
+        tts = android.speech.tts.TextToSpeech(this) { st ->
+            ttsReady = st == android.speech.tts.TextToSpeech.SUCCESS
+            if (ttsReady) applyTtsConfig()
+        }
+        tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                runOnUiThread { if (speaking) speakNext() }
+            }
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                runOnUiThread { if (speaking) speakNext() }
+            }
+        })
+        val doubleTap = android.view.GestureDetector(
+            this,
+            object : android.view.GestureDetector.SimpleOnGestureListener() {
+                override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                    val layout = text.layout ?: return false
+                    val line = layout.getLineForVertical(e.y.toInt() - text.totalPaddingTop)
+                    val off = layout.getOffsetForHorizontal(line, e.x - text.totalPaddingLeft)
+                    startTtsFrom(off)
+                    return true
+                }
+            },
+        )
+        text.setOnTouchListener { _, ev -> doubleTap.onTouchEvent(ev); false }
+
+        findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener {
+            if (speaking) {
+                pauseTts()
+            } else {
+                val off = if (resumeCursor >= 0) resumeCursor else {
+                    val layout = text.layout
+                    if (layout != null) {
+                        layout.getLineStart(
+                            layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
+                        )
+                    } else 0
+                }
+                startTtsFrom(off)
+            }
+        }
+        findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
+
         findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
         findViewById<TextView>(R.id.chaptersBtn).setOnClickListener {
             drawerAdapter?.notifyDataSetChanged()
@@ -247,6 +305,187 @@ class ReaderActivity : AppCompatActivity() {
         popup.showAsDropDown(anchor, 0, dp(4), android.view.Gravity.END)
     }
 
+    /* ---- TTS engine ---- */
+
+    private fun applyTtsConfig() {
+        val t = tts ?: return
+        t.setSpeechRate(ttsRate)
+        t.setPitch(ttsPitch)
+        val saved = prefs.getString("ttsVoice", null)
+        val v = saved?.let { name ->
+            try { t.voices?.firstOrNull { it.name == name } } catch (e: Exception) { null }
+        }
+        if (v != null) {
+            t.voice = v
+        } else {
+            t.language = if (english) java.util.Locale.US else java.util.Locale("vi", "VN")
+        }
+    }
+
+    private fun paraStartOf(off: Int): Int {
+        val body = text.text.toString()
+        val o = off.coerceIn(0, body.length)
+        return body.lastIndexOf('\n', (o - 1).coerceAtLeast(0)) + 1
+    }
+
+    private fun startTtsFrom(off: Int) {
+        if (!ttsReady) return
+        applyTtsConfig()
+        speakCursor = paraStartOf(off)
+        speaking = true
+        updatePlayBtn()
+        speakNext()
+    }
+
+    /* speak the next non-empty paragraph; load the next chapter when the
+       loaded text runs out */
+    private fun speakNext() {
+        val t = tts ?: return
+        val body = text.text.toString()
+        while (speakCursor < body.length) {
+            var end = body.indexOf('\n', speakCursor)
+            if (end == -1) end = body.length
+            val para = body.substring(speakCursor, end).trim()
+            resumeCursor = speakCursor
+            speakCursor = end + 1
+            if (para.isNotEmpty() && para != "⁂") {
+                t.speak(para, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
+                return
+            }
+        }
+        if (nextIdx < (chapters?.ordered?.size ?: 0)) {
+            pendingSpeakContinue = true
+            appendNext()
+        } else {
+            stopTts()
+        }
+    }
+
+    /* pause replays the interrupted paragraph on resume */
+    private fun pauseTts() {
+        speaking = false
+        tts?.stop()
+        if (resumeCursor >= 0) speakCursor = resumeCursor
+        updatePlayBtn()
+    }
+
+    private fun stopTts() {
+        speaking = false
+        tts?.stop()
+        updatePlayBtn()
+    }
+
+    private fun updatePlayBtn() {
+        findViewById<TextView>(R.id.ttsPlayBtn)?.text = if (speaking) "⏸" else "▶"
+    }
+
+    override fun onDestroy() {
+        try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
+        super.onDestroy()
+    }
+
+    /* bottom sheet: voice picker + rate/pitch sliders (0.5–3, step 0.1,
+       with </> nudge buttons) */
+    private fun showTtsSettings() {
+        val ctx = this
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(ctx)
+        val root = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(28))
+            setBackgroundColor(getColor(R.color.card))
+        }
+        fun label(txt: String) = TextView(ctx).apply {
+            text = txt
+            textSize = 13f
+            setTextColor(getColor(R.color.muted))
+            setPadding(0, dp(12), 0, dp(4))
+        }
+
+        root.addView(label("TTS voice"))
+        val voices = try {
+            tts?.voices?.filter { it.locale.language in listOf("en", "vi") }?.sortedBy { it.name }
+                ?: emptyList()
+        } catch (e: Exception) { emptyList() }
+        val spinner = android.widget.Spinner(ctx)
+        spinner.adapter = android.widget.ArrayAdapter(
+            ctx, android.R.layout.simple_spinner_dropdown_item,
+            listOf("Default") + voices.map { "${it.locale} — ${it.name}" },
+        )
+        val savedVoice = prefs.getString("ttsVoice", null)
+        val savedIdx = voices.indexOfFirst { it.name == savedVoice }
+        spinner.setSelection(if (savedIdx >= 0) savedIdx + 1 else 0)
+        spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: android.widget.AdapterView<*>?,
+                view: android.view.View?,
+                pos: Int,
+                id: Long,
+            ) {
+                if (pos == 0) prefs.edit().remove("ttsVoice").apply()
+                else prefs.edit().putString("ttsVoice", voices[pos - 1].name).apply()
+                applyTtsConfig()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+        root.addView(spinner)
+
+        fun sliderRow(title: String, get: () -> Float, set: (Float) -> Unit) {
+            root.addView(label(title))
+            val row = android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            val valueTv = TextView(ctx).apply {
+                textSize = 14f
+                setTextColor(getColor(R.color.fg))
+                text = "%.1f".format(get())
+                minWidth = dp(40)
+                setPadding(dp(8), 0, 0, 0)
+            }
+            val seek = android.widget.SeekBar(ctx).apply {
+                max = 25
+                progress = ((get() - 0.5f) * 10f + 0.5f).toInt()
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            }
+            fun applyValue(v: Float, fromSeek: Boolean) {
+                val clamped = (Math.round(v * 10f) / 10f).coerceIn(0.5f, 3f)
+                set(clamped)
+                valueTv.text = "%.1f".format(clamped)
+                if (!fromSeek) seek.progress = ((clamped - 0.5f) * 10f + 0.5f).toInt()
+                applyTtsConfig()
+            }
+            seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: android.widget.SeekBar?, pr: Int, fromUser: Boolean) {
+                    if (fromUser) applyValue(0.5f + pr / 10f, true)
+                }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+            })
+            fun stepBtn(txt: String, delta: Float) = TextView(ctx).apply {
+                text = txt
+                textSize = 20f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(getColor(R.color.accent))
+                setPadding(dp(12), dp(4), dp(12), dp(4))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { applyValue(get() + delta, false) }
+            }
+            row.addView(stepBtn("<", -0.1f))
+            row.addView(seek)
+            row.addView(stepBtn(">", +0.1f))
+            row.addView(valueTv)
+            root.addView(row)
+        }
+        sliderRow("Rate", { ttsRate }) { ttsRate = it; prefs.edit().putFloat("ttsRate", it).apply() }
+        sliderRow("Pitch", { ttsPitch }) { ttsPitch = it; prefs.edit().putFloat("ttsPitch", it).apply() }
+
+        sheet.setContentView(root)
+        sheet.show()
+    }
+
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     /* switch language and reload at the SAME chapter and paragraph — the
@@ -279,6 +518,8 @@ class ReaderActivity : AppCompatActivity() {
     private fun openAt(pos: Int, targetPara: Int = 0) {
         val ch = chapters ?: return
         if (loading || ch.ordered.isEmpty()) return
+        stopTts()
+        resumeCursor = -1
         loading = true
         val p = pos.coerceIn(0, ch.ordered.size - 1)
         lifecycleScope.launch {
@@ -338,6 +579,10 @@ class ReaderActivity : AppCompatActivity() {
             }
             nextIdx = idx + 1
             loading = false
+            if (pendingSpeakContinue) {
+                pendingSpeakContinue = false
+                if (speaking) speakNext()
+            }
             /* short chapters may not fill the screen — keep filling */
             scroll.post {
                 if (text.height > 0 && (scroll.scrollY + scroll.height) * 2 > text.height) appendNext()
@@ -375,6 +620,8 @@ class ReaderActivity : AppCompatActivity() {
             }
             val shift = body.length + SEP.length
             for (l in loadedChapters) l.start += shift
+            speakCursor += shift
+            if (resumeCursor >= 0) resumeCursor += shift
             loadedChapters.add(0, LoadedChapter(idx, 0, headingOf(body)))
             text.text = body + SEP + text.text.toString()
             firstIdx = idx
