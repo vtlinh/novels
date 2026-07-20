@@ -51,10 +51,6 @@
             android:exported="false" />
 
         <activity
-            android:name=".ReadingListActivity"
-            android:exported="false" />
-
-        <activity
             android:name=".ChapterListActivity"
             android:exported="false" />
 

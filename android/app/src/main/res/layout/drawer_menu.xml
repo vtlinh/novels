@@ -40,17 +40,6 @@
         android:clickable="true"
         android:focusable="true" />
 
-    <TextView
-        android:id="@+id/navReading"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Reader"
-        android:textSize="16sp"
-        android:textColor="@color/fg"
-        android:padding="16dp"
-        android:clickable="true"
-        android:focusable="true" />
-
     <View
         android:layout_width="match_parent"
         android:layout_height="0dp"
