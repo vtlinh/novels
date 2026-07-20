@@ -111,6 +111,7 @@ class BrowserActivity : AppCompatActivity() {
                     if (!urlEdit.hasFocus()) urlEdit.setText(url)
                     downloadBtn.isEnabled = Sites.forUrl(url) != null
                     findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.GONE
+                    findViewById<android.view.View>(R.id.browserHeader).visibility = android.view.View.VISIBLE
                     try {
                         java.net.URI(url).host?.let { if (it.isNotEmpty()) recordDomainVisit(it) }
                     } catch (e: Exception) {}
@@ -206,6 +207,10 @@ class BrowserActivity : AppCompatActivity() {
             list.setOnItemClickListener { _, _, pos, _ ->
                 web.loadUrl("https://${history[pos]}/")
             }
+            findViewById<android.view.View>(R.id.recentBack).setOnClickListener { finish() }
+            /* the start screen has its own header; the browser one comes back
+               once a page loads */
+            findViewById<android.view.View>(R.id.browserHeader).visibility = android.view.View.GONE
             panel.visibility = android.view.View.VISIBLE
         }
 
