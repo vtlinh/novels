@@ -128,8 +128,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /* Check for a newer published version whenever the app returns to the
-       foreground, at most once a minute. Once one is found, checks stop and
-       the sticky banner shows; the user upgrades by tapping it. */
+       foreground, at most once a minute. When one is found it installs
+       automatically — silently where Android allows — unless a download is
+       running (the install kills the process), in which case the sticky
+       banner offers it for later. */
     private fun checkForUpdate() {
         if (updateFound) return
         val now = System.currentTimeMillis()
@@ -139,7 +141,11 @@ class MainActivity : AppCompatActivity() {
             val latest = Updater.latestVersion()
             if (latest != null && latest.first > Updater.currentVersionCode(this@MainActivity)) {
                 updateFound = true
-                findViewById<TextView>(R.id.updateBanner).visibility = View.VISIBLE
+                if (DownloadService.runningFlow.value) {
+                    findViewById<TextView>(R.id.updateBanner).visibility = View.VISIBLE
+                } else {
+                    installUpdate()
+                }
             }
         }
     }
@@ -150,10 +156,16 @@ class MainActivity : AppCompatActivity() {
             statusText.text = "Downloading update…"
             val apk = Updater.downloadApk(this@MainActivity)
             if (apk != null) {
-                statusText.text = "Opening installer…"
-                Updater.install(this@MainActivity, apk)
+                statusText.text = "Installing update…"
+                try {
+                    Updater.install(this@MainActivity, apk)
+                } catch (e: Exception) {
+                    statusText.text = "Update failed — ${e.message}"
+                    findViewById<TextView>(R.id.updateBanner).visibility = View.VISIBLE
+                }
             } else {
-                statusText.text = "Update download failed — try again later."
+                statusText.text = "Update download failed — will retry later."
+                findViewById<TextView>(R.id.updateBanner).visibility = View.VISIBLE
             }
         }
     }
