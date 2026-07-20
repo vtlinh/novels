@@ -1,0 +1,43 @@
+package dev.vtlinh.noveldownloader
+
+import android.content.ContentResolver
+import android.net.Uri
+import android.provider.DocumentsContract
+
+/* Fast Storage Access Framework helpers: one ContentResolver query per
+   directory (DocumentFile's per-file metadata lookups are a query per file). */
+object Saf {
+
+    class Entry(val docId: String, val name: String, val isDir: Boolean)
+
+    fun children(cr: ContentResolver, treeUri: Uri, docId: String): List<Entry> {
+        val out = ArrayList<Entry>()
+        val uri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+        cr.query(
+            uri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            ),
+            null, null, null,
+        )?.use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    Entry(
+                        c.getString(0), c.getString(1) ?: "",
+                        c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    fun rootId(treeUri: Uri): String = DocumentsContract.getTreeDocumentId(treeUri)
+
+    fun readText(cr: ContentResolver, treeUri: Uri, docId: String): String? = try {
+        val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+        cr.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+    } catch (e: Exception) { null }
+}
