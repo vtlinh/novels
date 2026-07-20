@@ -1,70 +1,98 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/readerDrawer"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/bg">
+    android:layout_height="match_parent">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:background="@color/card"
-        android:gravity="center_vertical">
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@color/bg">
 
-        <TextView
-            android:id="@+id/readerTitle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:padding="10dp"
-            android:textSize="13sp"
-            android:textColor="@color/muted"
-            android:maxLines="1"
-            android:ellipsize="end" />
-
-        <TextView
-            android:id="@+id/langBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:padding="10dp"
-            android:text="EN"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/accent"
-            android:clickable="true"
-            android:focusable="true" />
-
-        <TextView
-            android:id="@+id/settingsBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingStart="10dp"
-            android:paddingEnd="14dp"
-            android:paddingTop="10dp"
-            android:paddingBottom="10dp"
-            android:text="⚙"
-            android:textSize="18sp"
-            android:textColor="@color/fg"
-            android:clickable="true"
-            android:focusable="true" />
-    </LinearLayout>
-
-    <ScrollView
-        android:id="@+id/readerScroll"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true">
-
-        <TextView
-            android:id="@+id/readerText"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="18dp"
-            android:textSize="16sp"
-            android:textColor="@color/fg"
-            android:lineSpacingMultiplier="1.45"
-            android:textIsSelectable="true" />
-    </ScrollView>
-</LinearLayout>
+            android:orientation="horizontal"
+            android:background="@color/card"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/readerTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:padding="10dp"
+                android:textSize="13sp"
+                android:textColor="@color/muted"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/chaptersBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:text="≡"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/langBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:text="EN"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/settingsBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="10dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="⚙"
+                android:textSize="18sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+
+        <ScrollView
+            android:id="@+id/readerScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true">
+
+            <TextView
+                android:id="@+id/readerText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="18dp"
+                android:textSize="16sp"
+                android:textColor="@color/fg"
+                android:lineSpacingMultiplier="1.45"
+                android:textIsSelectable="true" />
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- right-side inline chapter list -->
+    <ListView
+        android:id="@+id/chapterDrawerList"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="@color/card"
+        android:divider="@color/bg"
+        android:dividerHeight="1dp" />
+</androidx.drawerlayout.widget.DrawerLayout>
