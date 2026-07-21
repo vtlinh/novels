@@ -210,6 +210,10 @@ class ReaderActivity : AppCompatActivity() {
         /* TTS: double-tap anywhere in the text starts reading from there.
            Google TTS only — no other engine is ever used. */
         initTts()
+        /* Double tap = start TTS, and ONLY that: the second tap is swallowed
+           so the selectable TextView never runs its own double-tap
+           word-selection. Long-press text selection is untouched. */
+        var swallowTap = false
         val doubleTap = android.view.GestureDetector(
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
@@ -218,11 +222,19 @@ class ReaderActivity : AppCompatActivity() {
                     val line = layout.getLineForVertical(e.y.toInt() - text.totalPaddingTop)
                     val off = layout.getOffsetForHorizontal(line, e.x - text.totalPaddingLeft)
                     startTtsFrom(off)
+                    swallowTap = true
                     return true
                 }
             },
         )
-        text.setOnTouchListener { _, ev -> doubleTap.onTouchEvent(ev); false }
+        text.setOnTouchListener { _, ev ->
+            doubleTap.onTouchEvent(ev)
+            val consume = swallowTap
+            if (ev.actionMasked == android.view.MotionEvent.ACTION_UP ||
+                ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL
+            ) swallowTap = false
+            consume
+        }
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener {
             if (speaking) {
