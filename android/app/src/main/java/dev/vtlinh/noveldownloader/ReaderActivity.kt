@@ -147,7 +147,6 @@ class ReaderActivity : AppCompatActivity() {
     private val sleepRunnable = Runnable { if (speaking) pauseTts() }
     private var sensorManager: android.hardware.SensorManager? = null
     private var shakeListener: android.hardware.SensorEventListener? = null
-    private var lastShakeStatusAt = 0L
 
     /* (re)arm the sleep timer for the configured minutes; 0 = off. Called on
        every play and whenever a shake resets it. */
@@ -190,17 +189,10 @@ class ReaderActivity : AppCompatActivity() {
         shakeListener = null
     }
 
+    /* during reading a shake silently re-arms the sleep timer; the visible
+       "shaking" feedback lives in the settings page (for calibration) */
     private fun onShake() {
-        if (!speaking) return
-        scheduleSleepTimer()   // shake keeps you reading
-        val now = System.currentTimeMillis()
-        /* show for 2s; don't re-show until it's cleared and shaken again */
-        if (now - lastShakeStatusAt < 2500) return
-        lastShakeStatusAt = now
-        val status = findViewById<TextView>(R.id.readerStatus)
-        status.text = "shaking — sleep timer reset"
-        status.visibility = android.view.View.VISIBLE
-        status.postDelayed({ status.visibility = android.view.View.GONE }, 2000)
+        if (speaking) scheduleSleepTimer()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1127,6 +1119,7 @@ class ReaderActivity : AppCompatActivity() {
         /* saves for the timer/shake cards (no-ops on the voice menu) */
         var saveSleep: () -> Unit = {}
         var saveShake: () -> Unit = {}
+        var stopShakeTest: () -> Unit = {}
 
         if (!voiceOnly) {
         /* ── Sleep timer ── */
@@ -1180,7 +1173,42 @@ class ReaderActivity : AppCompatActivity() {
             setText("%.0f".format(prefs.getFloat("shakeThreshold", 12f)))
         }
         shake.addView(shakeInput)
-        hint(shake, "Lower = more sensitive (12 is a firm shake). While reading, the status flashes “shaking” in red when a shake passes this threshold.")
+        hint(shake, "Lower = more sensitive (12 is a firm shake). Shake the phone now to test — the status below flashes red when a shake passes this threshold.")
+        /* live tester: flashes here so the threshold can be calibrated while
+           this page is open (uses the value typed above, not the saved one) */
+        val shakeStatus = TextView(ctx).apply {
+            text = "shaking — sleep timer reset"; textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.err)); setPadding(0, dp(12), 0, 0)
+            visibility = android.view.View.INVISIBLE   // reserve space, no jump
+        }
+        shake.addView(shakeStatus)
+        val sm = getSystemService(SENSOR_SERVICE) as? android.hardware.SensorManager
+        val accel = sm?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
+        if (sm != null && accel != null) {
+            var shownAt = 0L
+            val listener = object : android.hardware.SensorEventListener {
+                override fun onSensorChanged(e: android.hardware.SensorEvent) {
+                    val g = Math.sqrt(
+                        (e.values[0] * e.values[0] + e.values[1] * e.values[1] +
+                            e.values[2] * e.values[2]).toDouble(),
+                    ) - android.hardware.SensorManager.GRAVITY_EARTH
+                    val thr = shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(1f) ?: 12f
+                    if (Math.abs(g) > thr) {
+                        val now = System.currentTimeMillis()
+                        if (now - shownAt < 2500) return
+                        shownAt = now
+                        shakeStatus.visibility = android.view.View.VISIBLE
+                        shakeStatus.postDelayed(
+                            { shakeStatus.visibility = android.view.View.INVISIBLE }, 2000,
+                        )
+                    }
+                }
+                override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+            }
+            sm.registerListener(listener, accel, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+            stopShakeTest = { sm.unregisterListener(listener) }
+        }
         saveShake = {
             prefs.edit()
                 .putBoolean("shakeEnabled", shakeCheck.isChecked)
@@ -1191,8 +1219,8 @@ class ReaderActivity : AppCompatActivity() {
         }
         }
 
-        /* persist timer + shake settings when the page closes */
-        dialog.setOnDismissListener { saveSleep(); saveShake() }
+        /* persist timer + shake settings and stop the tester when the page closes */
+        dialog.setOnDismissListener { saveSleep(); saveShake(); stopShakeTest() }
 
         dialog.setContentView(outer)
         dialog.window?.setLayout(
