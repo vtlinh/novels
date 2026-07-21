@@ -51,6 +51,21 @@ class DownloadEngine(
 
         private const val UA =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
+
+        /* Does the novel page read as English? (>50% of its characters are
+           a-z/A-Z — Vietnamese's diacritics fall below that.) Used to warn
+           before translating an already-English novel. Null if the check
+           couldn't run (network error) so callers don't over-warn. */
+        suspend fun sourceLooksEnglish(url: String): Boolean? = withContext(Dispatchers.IO) {
+            try {
+                val doc = org.jsoup.Jsoup.connect(url).userAgent(UA).timeout(15000).get()
+                val t = doc.text()
+                if (t.isEmpty()) return@withContext null
+                var eng = 0
+                for (c in t) if (c in 'a'..'z' || c in 'A'..'Z') eng++
+                eng.toDouble() / t.length > 0.5
+            } catch (e: Exception) { null }
+        }
     }
 
     private val client = OkHttpClient.Builder()
@@ -246,6 +261,7 @@ class DownloadEngine(
         treeUri: Uri,
         translate: Boolean,
         apiKey: String,
+        forceTranslate: Boolean = false,
     ) = withContext(Dispatchers.IO) {
         val site = Sites.forUrl(novelUrl)
         if (site == null) {
@@ -550,7 +566,7 @@ class DownloadEngine(
         val summary = "${saved.get()} saved, $skipped skipped, ${failed.size} failed.$avg"
         log((if (stopRequested) "Stopped — re-run to resume. " else "✓ Finished. ") + summary)
 
-        if (translate && sourceEnglish) {
+        if (translate && sourceEnglish && !forceTranslate) {
             log("Source is already in English — skipping translation.")
         } else if (translate && apiKey.isNotBlank() && !stopRequested) {
             try {

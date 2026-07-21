@@ -255,10 +255,42 @@ class MainActivity : AppCompatActivity() {
             return
         }
         prefs.edit().putBoolean("translate", translate).apply()
+
+        /* translating an already-English novel is almost always a mistake —
+           confirm before spending API calls */
+        if (translate) {
+            findViewById<TextView>(R.id.statusText).text = "Checking language…"
+            lifecycleScope.launch {
+                val english = DownloadEngine.sourceLooksEnglish(url)
+                if (english == true) {
+                    findViewById<TextView>(R.id.statusText).text = ""
+                    androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Already in English?")
+                        .setMessage("This novel appears to be in English already. Translate it to English anyway?")
+                        .setPositiveButton("Translate anyway") { _, _ ->
+                            beginDownload(url, tree, translate = true, force = true, apiKey = apiKey)
+                        }
+                        .setNegativeButton("Download without translating") { _, _ ->
+                            beginDownload(url, tree, translate = false, force = false, apiKey = apiKey)
+                        }
+                        .show()
+                } else {
+                    findViewById<TextView>(R.id.statusText).text = ""
+                    beginDownload(url, tree, translate = true, force = false, apiKey = apiKey)
+                }
+            }
+            return
+        }
+        beginDownload(url, tree, translate = false, force = false, apiKey = apiKey)
+    }
+
+    private fun beginDownload(url: String, tree: String, translate: Boolean, force: Boolean, apiKey: String) {
         startForegroundService(
             Intent(this, DownloadService::class.java)
                 .putExtra("url", url).putExtra("tree", tree)
-                .putExtra("translate", translate).putExtra("apiKey", apiKey),
+                .putExtra("translate", translate)
+                .putExtra("forceTranslate", force)
+                .putExtra("apiKey", apiKey),
         )
     }
 
