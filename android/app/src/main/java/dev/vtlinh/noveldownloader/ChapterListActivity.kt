@@ -21,34 +21,52 @@ class ChapterListActivity : AppCompatActivity() {
 
         class Chapters(
             val ordered: List<String>,               // chapter filenames in order
-            val source: Map<String, String>,         // name -> Vietnamese source docId
-            val translated: Map<String, String>,     // name -> English translated docId
+            val source: Map<String, String>,         // name -> docId or zip ref
+            val translated: Map<String, String>,     // name -> docId or zip ref
+            val zip: java.io.File? = null,           // cached chapters.zip, if any
         )
 
-        /* The chapters of one novel dir, with docIds for both languages.
-           Ordered by the site's own listing sequence (the chapter_order
-           index) when known; numeric filename order as fallback. */
+        /* The chapters of one novel dir, with refs for both languages —
+           loose .txt files and/or entries of a chapters.zip (loose wins,
+           so chapters downloaded after compressing still show up).
+           Ordered by the site's own listing sequence when known. */
         fun chapterNames(
-            cr: android.content.ContentResolver,
+            context: android.content.Context,
             treeUri: Uri,
             dirName: String,
             siteOrder: Map<String, Int> = emptyMap(),
         ): Chapters {
+            val cr = context.contentResolver
             val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri))
             val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
                 ?: return Chapters(emptyList(), emptyMap(), emptyMap())
             val source = HashMap<String, String>()
             var translatedId: String? = null
+            var zipDocId: String? = null
             for (e in Saf.children(cr, treeUri, dir.docId)) {
                 if (e.isDir && e.name == "translated") translatedId = e.docId
+                else if (!e.isDir && Zips.isZipName(e.name)) zipDocId = e.docId
                 else if (!e.isDir && CHAPTER_RE.matches(e.name)) source[e.name] = e.docId
             }
             val translated = HashMap<String, String>()
             translatedId?.let {
                 for (e in Saf.children(cr, treeUri, it)) {
-                    if (!e.isDir && e.name in source) translated[e.name] = e.docId
+                    if (!e.isDir && CHAPTER_RE.matches(e.name)) translated[e.name] = e.docId
                 }
             }
+            /* zipped chapters fill in anything not present as a loose file */
+            val zipFile = zipDocId?.let { Zips.cached(context, cr, treeUri, it, dirName) }
+            zipFile?.let { zf ->
+                for (entry in Zips.entries(zf)) {
+                    if (entry.startsWith("translated/")) {
+                        val n = entry.removePrefix("translated/")
+                        if (CHAPTER_RE.matches(n) && n !in translated) translated[n] = Zips.ref(entry)
+                    } else if (CHAPTER_RE.matches(entry) && entry !in source) {
+                        source[entry] = Zips.ref(entry)
+                    }
+                }
+            }
+            translated.keys.retainAll(source.keys)
             val ordered = source.keys.sortedWith(
                 compareBy(
                     { siteOrder[it] ?: Int.MAX_VALUE },
@@ -56,7 +74,7 @@ class ChapterListActivity : AppCompatActivity() {
                     { it },
                 ),
             )
-            return Chapters(ordered, source, translated)
+            return Chapters(ordered, source, translated, zipFile)
         }
     }
 
@@ -119,7 +137,7 @@ class ChapterListActivity : AppCompatActivity() {
                 val order = slug?.let {
                     try { DownloadStore(this@ChapterListActivity).getChapterOrder(folder, it) } catch (e: Exception) { null }
                 } ?: emptyMap()
-                chapterNames(contentResolver, Uri.parse(folder), dirName, order)
+                chapterNames(this@ChapterListActivity, Uri.parse(folder), dirName, order)
             }
             val ordered = chapters.ordered
             if (ordered.isEmpty()) {

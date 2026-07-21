@@ -102,4 +102,52 @@
         android:text="Used for chapter translation. Stored only on this device."
         android:textSize="12sp"
         android:textColor="@color/muted" />
+
+    <!-- storage: zip / unzip the downloaded chapters -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="Storage"
+        android:textSize="12sp"
+        android:textColor="@color/muted" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/compressBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Compress"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg"
+            app:backgroundTint="@color/btn_secondary"
+            app:cornerRadius="8dp" />
+
+        <Button
+            android:id="@+id/uncompressBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="Uncompress"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg"
+            app:backgroundTint="@color/btn_secondary"
+            app:cornerRadius="8dp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/zipStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="Zips each novel's chapters into one archive (~70% smaller). Reading works either way."
+        android:textSize="12sp"
+        android:textColor="@color/muted" />
 </LinearLayout>
