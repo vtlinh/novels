@@ -279,12 +279,25 @@ class ReaderActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
         findViewById<TextView>(R.id.chaptersBtn).setOnClickListener {
-            drawerAdapter?.notifyDataSetChanged()
             drawer.openDrawer(GravityCompat.END)
-            drawerList.post {
-                drawerList.setSelectionFromTop(currentChapterIdx, (drawerList.height * 0.2f).toInt())
-            }
         }
+        /* highlight + scroll-to-current runs however the drawer opens —
+           the ≡ button or an edge swipe — as soon as it starts sliding in */
+        drawer.addDrawerListener(object : androidx.drawerlayout.widget.DrawerLayout.SimpleDrawerListener() {
+            private var prepared = false
+            override fun onDrawerSlide(view: android.view.View, slideOffset: Float) {
+                if (slideOffset > 0f && !prepared) {
+                    prepared = true
+                    drawerAdapter?.notifyDataSetChanged()
+                    drawerList.post {
+                        drawerList.setSelectionFromTop(
+                            currentChapterIdx, (drawerList.height * 0.2f).toInt(),
+                        )
+                    }
+                }
+                if (slideOffset == 0f) prepared = false
+            }
+        })
         findViewById<TextView>(R.id.settingsBtn).setOnClickListener { v -> showSettings(v) }
     }
 
