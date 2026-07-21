@@ -269,14 +269,12 @@ class ReaderActivity : AppCompatActivity() {
             drawerList.adapter = drawerAdapter
             drawerList.setOnItemClickListener { _, _, pos, _ ->
                 drawer.closeDrawer(GravityCompat.END)
-                /* chapter already in the loaded buffer → just scroll there
-                   instead of rebuilding the whole view */
-                if (!jumpToLoaded(pos, savedParaFor(pos))) {
-                    openAt(pos, savedParaFor(pos))
-                }
+                /* staggered: waits out any in-flight load, then scrolls within
+                   the buffer if the chapter is loaded, else rebuilds */
+                goTo(pos, savedParaFor(pos))
             }
             val startIdx = ch.ordered.indexOf(start).coerceAtLeast(0)
-            openAt(startIdx, savedParaFor(startIdx))
+            goTo(startIdx, savedParaFor(startIdx))
         }
 
         /* Chapter loading is border-driven: openAt builds the initial window,
@@ -1607,6 +1605,23 @@ class ReaderActivity : AppCompatActivity() {
        the language toggle to keep the reading position). */
     /* how many chapters to (pre)load in each direction / batch */
     private val LOAD_BATCH = 20
+
+    private var gotoJob: kotlinx.coroutines.Job? = null
+
+    /* Navigate to a chapter + paragraph and recover the scroll there, STAGGERED
+       so it never fires while chapters are still being loaded: wait for any
+       in-flight load to settle first, then jump within the buffer (if the
+       chapter is already loaded) or rebuild the window. Used for both the
+       app-restart restore and chapter-list picks (including re-picking the
+       current chapter to return to where we left off). */
+    private fun goTo(pos: Int, targetPara: Int) {
+        gotoJob?.cancel()
+        gotoJob = lifecycleScope.launch {
+            var waited = 0
+            while (loading && waited < 120) { kotlinx.coroutines.delay(50); waited++ }
+            if (!jumpToLoaded(pos, targetPara)) openAt(pos, targetPara)
+        }
+    }
 
     /* Open a chapter by building the WHOLE surrounding window up front —
        LOAD_BATCH chapters behind and ahead — then scrolling to the target
