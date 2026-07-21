@@ -597,6 +597,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         speakCursor = paraStartOf(off)
         speaking = true
+        requestAudioFocus()   // makes us the media-button session in the background
         /* foreground service keeps reading alive with the screen off */
         lastNotifHeading = currentHeading()
         TtsService.start(this, lastNotifHeading, true, mediaSession?.sessionToken, intent.getStringExtra("slug"))
@@ -713,9 +714,43 @@ class ReaderActivity : AppCompatActivity() {
         cancelAutoScroll()
         tts?.stop()
         TtsService.stop(this)
+        abandonAudioFocus()
         clearHighlight()
         updateKeepAwake()
         updatePlayBtn()
+    }
+
+    /* Hold audio focus while a TTS session is active (kept through pauses so
+       the headset PLAY button still routes back to us). Without it, headset
+       media keys go to whatever app last had focus once we're backgrounded. */
+    private var audioFocusReq: android.media.AudioFocusRequest? = null
+
+    private fun requestAudioFocus() {
+        if (audioFocusReq != null) return
+        val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+        val req = android.media.AudioFocusRequest.Builder(
+            android.media.AudioManager.AUDIOFOCUS_GAIN,
+        ).setAudioAttributes(
+            android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build(),
+        ).setOnAudioFocusChangeListener {
+            /* another app took over (call, another player) → pause */
+            if (it == android.media.AudioManager.AUDIOFOCUS_LOSS && speaking) {
+                runOnUiThread { pauseTts() }
+            }
+        }.build()
+        audioFocusReq = req
+        try { am.requestAudioFocus(req) } catch (e: Exception) {}
+    }
+
+    private fun abandonAudioFocus() {
+        val req = audioFocusReq ?: return
+        audioFocusReq = null
+        try {
+            (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).abandonAudioFocusRequest(req)
+        } catch (e: Exception) {}
     }
 
     /* Hold the screen on while TTS is reading, IF the user opted in
@@ -761,6 +796,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
+        abandonAudioFocus()
         try { mediaSession?.release() } catch (e: Exception) {}
         mediaSession = null
         try { ttsToggleReceiver?.let { unregisterReceiver(it) } } catch (e: Exception) {}
