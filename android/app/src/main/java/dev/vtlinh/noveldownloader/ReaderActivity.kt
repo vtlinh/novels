@@ -78,7 +78,7 @@ class ReaderActivity : AppCompatActivity() {
         /* keep the reading notification on the current chapter */
         if (speaking && cur.heading.isNotEmpty() && cur.heading != lastNotifHeading) {
             lastNotifHeading = cur.heading
-            TtsService.start(this, cur.heading, true)
+            TtsService.start(this, cur.heading, true, mediaSession?.sessionToken)
         }
         /* remember the exact paragraph too, so reopening this chapter
            returns to where we left off (paragraphs map 1:1 across EN/VI) */
@@ -555,7 +555,7 @@ class ReaderActivity : AppCompatActivity() {
         speaking = true
         /* foreground service keeps reading alive with the screen off */
         lastNotifHeading = currentHeading()
-        TtsService.start(this, lastNotifHeading, true)
+        TtsService.start(this, lastNotifHeading, true, mediaSession?.sessionToken)
         updateKeepAwake()
         updatePlayBtn()
         speakNext()
@@ -656,7 +656,7 @@ class ReaderActivity : AppCompatActivity() {
         cancelAutoScroll()
         tts?.stop()
         /* paused: keep the notification with a Play action (wake lock off) */
-        TtsService.start(this, currentHeading(), false)
+        TtsService.start(this, currentHeading(), false, mediaSession?.sessionToken)
         if (resumeCursor >= 0) speakCursor = resumeCursor
         clearHighlight()
         updateKeepAwake()
