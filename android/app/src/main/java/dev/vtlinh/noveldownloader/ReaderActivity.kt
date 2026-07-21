@@ -75,6 +75,11 @@ class ReaderActivity : AppCompatActivity() {
             currentChapterIdx = cur.idx
             saveLastChapter(cur.idx)
         }
+        /* keep the reading notification on the current chapter */
+        if (speaking && cur.heading.isNotEmpty() && cur.heading != lastNotifHeading) {
+            lastNotifHeading = cur.heading
+            TtsService.start(this, cur.heading, true)
+        }
         /* remember the exact paragraph too, so reopening this chapter
            returns to where we left off (paragraphs map 1:1 across EN/VI) */
         if (off != lastProbeOff) {
@@ -242,6 +247,18 @@ class ReaderActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
         findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
+
+        /* the notification's Pause/Play action broadcasts back to us */
+        ttsToggleReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context?, i: Intent?) {
+                runOnUiThread { playButtonAction() }
+            }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, ttsToggleReceiver,
+            android.content.IntentFilter(TtsService.ACTION_TOGGLE),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
 
         /* Bluetooth headset / media-button play & pause control the TTS */
         mediaSession = android.media.session.MediaSession(this, "reader-tts").apply {
@@ -461,6 +478,13 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private var mediaSession: android.media.session.MediaSession? = null
+    private var ttsToggleReceiver: android.content.BroadcastReceiver? = null
+    private var lastNotifHeading = ""
+
+    /* the "Chapter N: Title" line the notification shows */
+    private fun currentHeading(): String =
+        loadedChapters.firstOrNull { it.idx == currentChapterIdx }?.heading
+            ?: titleBar.text.toString()
 
     /* headset buttons route to the session that declares a playback state */
     private fun updateMediaSessionState() {
@@ -530,7 +554,8 @@ class ReaderActivity : AppCompatActivity() {
         speakCursor = paraStartOf(off)
         speaking = true
         /* foreground service keeps reading alive with the screen off */
-        TtsService.start(this, intent.getStringExtra("title") ?: "")
+        lastNotifHeading = currentHeading()
+        TtsService.start(this, lastNotifHeading, true)
         updatePlayBtn()
         speakNext()
     }
@@ -629,7 +654,8 @@ class ReaderActivity : AppCompatActivity() {
         speaking = false
         cancelAutoScroll()
         tts?.stop()
-        TtsService.stop(this)
+        /* paused: keep the notification with a Play action (wake lock off) */
+        TtsService.start(this, currentHeading(), false)
         if (resumeCursor >= 0) speakCursor = resumeCursor
         clearHighlight()
         updatePlayBtn()
@@ -677,6 +703,8 @@ class ReaderActivity : AppCompatActivity() {
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
         try { mediaSession?.release() } catch (e: Exception) {}
         mediaSession = null
+        try { ttsToggleReceiver?.let { unregisterReceiver(it) } } catch (e: Exception) {}
+        ttsToggleReceiver = null
         TtsService.stop(this)
         super.onDestroy()
     }
