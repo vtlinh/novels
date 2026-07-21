@@ -1109,6 +1109,11 @@ class ReaderActivity : AppCompatActivity() {
                 l?.let {
                     val line = it.getLineForOffset(anchorOff + shift)
                     scroll.scrollTo(0, it.getLineTop(line) + withinLine + pad)
+                    /* a fling still in flight targets PRE-shift coordinates;
+                       left alone it yanks the viewport into the inserted
+                       chapters and cascades further prepends — replace its
+                       trajectory with a zero-delta scroll to kill it */
+                    scroll.smoothScrollBy(0, 0)
                 }
                 loading = false
                 updateHeader()
