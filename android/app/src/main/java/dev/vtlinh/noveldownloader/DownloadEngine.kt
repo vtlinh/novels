@@ -429,6 +429,11 @@ class DownloadEngine(
             val rows = ArrayList<Pair<String, String>>()
             for (f in dir.listFiles()) {
                 val n = f.name ?: continue
+                if (Zips.isGzName(n)) {
+                    /* per-chapter compressed file counts as its .txt */
+                    existing.add(n.removeSuffix(".gz"))
+                    continue
+                }
                 if (Zips.isZipName(n)) {
                     /* compressed chapters count as present (top-level entries
                        are the Vietnamese sources) but stay out of the index */

@@ -857,8 +857,11 @@ class ReaderActivity : AppCompatActivity() {
         val ref = (if (english) ch.translated[name] ?: ch.source[name] else ch.source[name])
             ?: return null
         return withContext(Dispatchers.IO) {
-            if (Zips.isRef(ref)) ch.zip?.let { Zips.read(it, Zips.entryOf(ref)) }
-            else Saf.readText(contentResolver, treeUri!!, ref)
+            when {
+                Zips.isRef(ref) -> ch.zip?.let { Zips.read(it, Zips.entryOf(ref)) }
+                Zips.isGzRef(ref) -> Zips.readGz(contentResolver, treeUri!!, Zips.gzDocId(ref))
+                else -> Saf.readText(contentResolver, treeUri!!, ref)
+            }
         }
     }
 
