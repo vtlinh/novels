@@ -1012,16 +1012,30 @@ class ReaderActivity : AppCompatActivity() {
             text = fontSp.toInt().toString(); textSize = 15f; setTextColor(getColor(R.color.fg))
             minWidth = dp(36); gravity = android.view.Gravity.CENTER
         }
+        /* one-line preview of the current size (ellipsized, never wrapped) */
+        val fontSample = TextView(ctx).apply {
+            text = "The quick brown fox jumps over the lazy dog"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
+            setTextColor(getColor(R.color.muted))
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(10), 0, 0)
+        }
         fun fontBtn(t: String, d: Float) = TextView(ctx).apply {
             text = t; textSize = 22f; setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(getColor(R.color.accent)); setPadding(dp(16), dp(2), dp(16), dp(2))
             isClickable = true; isFocusable = true
-            setOnClickListener { adjustFont(d); fontVal.text = fontSp.toInt().toString() }
+            setOnClickListener {
+                adjustFont(d)
+                fontVal.text = fontSp.toInt().toString()
+                fontSample.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
+            }
         }
         fontRow.addView(fontBtn("−", -1f))
         fontRow.addView(fontVal)
         fontRow.addView(fontBtn("+", +1f))
         disp.addView(fontRow)
+        disp.addView(fontSample)
 
         /* ── Reading aloud: voice + rate + pitch ── */
         val aloud = card()
