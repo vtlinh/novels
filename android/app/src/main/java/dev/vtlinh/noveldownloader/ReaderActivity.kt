@@ -446,6 +446,7 @@ class ReaderActivity : AppCompatActivity() {
 
     /* live connection state, shown by the settings sheet's diagnostic line */
     private var ttsInitState = "starting"
+    private var ttsConnecting = false   // an initTts bind is in flight (avoid double-binds)
 
     private val GOOGLE_TTS = "com.google.android.tts"
 
@@ -453,13 +454,19 @@ class ReaderActivity : AppCompatActivity() {
        default engine is how the voice list went empty before). A failed
        bind is retried with a growing delay instead. */
     private fun initTts(attempt: Int = 0) {
+        ttsConnecting = true
         ttsInitState = "connecting to Google TTS" +
             (if (attempt > 0) " (retry $attempt)" else "")
         val listener = android.speech.tts.TextToSpeech.OnInitListener { st ->
             if (st == android.speech.tts.TextToSpeech.SUCCESS) {
                 ttsReady = true
+                ttsConnecting = false
                 ttsInitState = "connected to Google TTS"
                 curTtsLang = ""   // re-apply the language profile on next speak
+                /* the retry just succeeded — restore the saved voice as soon
+                   as its data finishes loading */
+                voiceRestoreTicks = 0
+                ensureSavedVoice()
             } else {
                 ttsReady = false
                 ttsInitState = "FAILED to bind Google TTS — is it installed and enabled?"
@@ -472,6 +479,8 @@ class ReaderActivity : AppCompatActivity() {
                             { initTts(attempt + 1) },
                             1000L * (attempt + 1),
                         )
+                    } else {
+                        ttsConnecting = false   // gave up retrying
                     }
                 }
             }
@@ -513,6 +522,30 @@ class ReaderActivity : AppCompatActivity() {
         } else {
             t.language = if (lang == "vi") java.util.Locale("vi", "VN") else java.util.Locale.US
         }
+    }
+
+    private var voiceRestoreTicks = 0
+
+    /* After the engine (re)connects, the user's saved voice may not be present
+       in t.voices yet — voice data loads lazily, so a just-connected engine
+       briefly reports only the default. applyTtsConfig would silently fall back
+       to the locale default and never recover. This polls briefly and applies
+       the saved voice the moment it appears, so returning to the reader (or a
+       successful engine retry) restores the exact voice the user picked. */
+    private fun ensureSavedVoice() {
+        val t = tts ?: return
+        if (!ttsReady) return
+        val lang = curTtsLang.ifEmpty { detectLang(text.text.toString().take(600)) }
+        val saved = prefs.getString("ttsVoice:$lang", null) ?: return  // default → nothing to restore
+        val present = try { t.voices?.any { it.name == saved } == true } catch (e: Exception) { false }
+        if (present) {
+            applyTtsConfig(lang)   // sets curTtsLang + the saved voice
+            voiceRestoreTicks = 0
+            return
+        }
+        if (voiceRestoreTicks >= 15) return   // ~12s, then give up quietly
+        voiceRestoreTicks++
+        android.os.Handler(mainLooper).postDelayed({ ensureSavedVoice() }, 800)
     }
 
     private fun paraStartOf(off: Int): Int {
@@ -864,6 +897,13 @@ class ReaderActivity : AppCompatActivity() {
         o.put("title", intent.getStringExtra("title") ?: dir)
         o.put("slug", slug)
         prefs.edit().putString("lastReading", o.toString()).apply()
+
+        /* coming back into the reader: recover the saved TTS voice. If the
+           engine dropped while we were away, rebind it (its success path then
+           restores the voice); otherwise re-apply straight away. Never rebind
+           mid-playback — that would cut the current utterance. */
+        voiceRestoreTicks = 0
+        if (!speaking && !ttsConnecting && (tts == null || !ttsReady)) initTts() else ensureSavedVoice()
     }
 
     override fun onPause() {
