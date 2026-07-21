@@ -30,6 +30,12 @@ class ReaderActivity : AppCompatActivity() {
 
     companion object {
         private const val SEP = "\n\n⁂\n\n"
+
+        /* the reader instance currently owning TTS. Opening a new reader
+           finishes the old one so two chapters never read at once — but
+           merely leaving to the chapter list (see leaveReader) keeps the
+           instance alive so playback continues. */
+        @Volatile private var active: ReaderActivity? = null
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -138,6 +144,9 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        /* a new reader supersedes any previous one (which stops its TTS) */
+        active?.let { if (it !== this) it.finish() }
+        active = this
         setContentView(R.layout.activity_reader)
         val dirName = intent.getStringExtra("dir") ?: return finish()
         val novelTitle = intent.getStringExtra("title") ?: dirName
@@ -282,7 +291,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         updateMediaSessionState()
 
-        findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.backBtn).setOnClickListener { leaveReader() }
         findViewById<TextView>(R.id.chaptersBtn).setOnClickListener {
             drawer.openDrawer(GravityCompat.END)
         }
@@ -794,7 +803,34 @@ class ReaderActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    /* Back / ← : while TTS is playing, keep this instance ALIVE (playback
+       continues) and just bring the chapter list forward; otherwise finish
+       normally. */
+    private fun leaveReader() {
+        if (speaking) {
+            startActivity(
+                android.content.Intent(this, ChapterListActivity::class.java)
+                    .putExtra("dir", intent.getStringExtra("dir"))
+                    .putExtra("title", intent.getStringExtra("title"))
+                    .putExtra("slug", intent.getStringExtra("slug"))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+        } else {
+            finish()
+        }
+    }
+
+    override fun onBackPressed() {
+        val drawer = findViewById<DrawerLayout>(R.id.readerDrawer)
+        if (drawer.isDrawerOpen(GravityCompat.END)) {
+            drawer.closeDrawer(GravityCompat.END)
+            return
+        }
+        leaveReader()
+    }
+
     override fun onDestroy() {
+        if (active === this) active = null
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
         abandonAudioFocus()
         try { mediaSession?.release() } catch (e: Exception) {}
