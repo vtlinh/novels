@@ -277,13 +277,18 @@ class ReaderActivity : AppCompatActivity() {
             androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
         )
 
-        /* Bluetooth headset / media-button play & pause control the TTS */
-        mediaSession = android.media.session.MediaSession(this, "reader-tts").apply {
-            setCallback(object : android.media.session.MediaSession.Callback() {
+        /* Bluetooth headset / media-button play & pause control the TTS.
+           MediaSessionCompat wires up the manifest MediaButtonReceiver so
+           the buttons reach us even backgrounded / on OEM ROMs. */
+        mediaSession = android.support.v4.media.session.MediaSessionCompat(this, "reader-tts").apply {
+            setCallback(object : android.support.v4.media.session.MediaSessionCompat.Callback() {
                 override fun onPlay() {
                     runOnUiThread { if (!speaking) playButtonAction() }
                 }
                 override fun onPause() {
+                    runOnUiThread { if (speaking) pauseTts() }
+                }
+                override fun onStop() {
                     runOnUiThread { if (speaking) pauseTts() }
                 }
             })
@@ -494,7 +499,7 @@ class ReaderActivity : AppCompatActivity() {
         return Pair(i, j.coerceAtMost(body.length))
     }
 
-    private var mediaSession: android.media.session.MediaSession? = null
+    private var mediaSession: android.support.v4.media.session.MediaSessionCompat? = null
     private var ttsToggleReceiver: android.content.BroadcastReceiver? = null
     private var lastNotifHeading = ""
 
@@ -521,9 +526,9 @@ class ReaderActivity : AppCompatActivity() {
     private fun updateMediaSessionState() {
         val session = mediaSession ?: return
         val state = if (speaking) {
-            android.media.session.PlaybackState.STATE_PLAYING
+            android.support.v4.media.session.PlaybackStateCompat.STATE_PLAYING
         } else {
-            android.media.session.PlaybackState.STATE_PAUSED
+            android.support.v4.media.session.PlaybackStateCompat.STATE_PAUSED
         }
         val cursor = if (resumeCursor >= 0) resumeCursor else speakCursor
         val spanIdx = loadedChapters.indexOfLast { it.start <= cursor }
@@ -536,22 +541,24 @@ class ReaderActivity : AppCompatActivity() {
         if (spanIdx != metaChapterIdx) {
             metaChapterIdx = spanIdx
             val heading = loadedChapters.getOrNull(spanIdx)?.heading ?: currentHeading()
-            val meta = android.media.MediaMetadata.Builder()
-                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, heading)
+            val meta = android.support.v4.media.MediaMetadataCompat.Builder()
+                .putString(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_TITLE, heading)
                 .putString(
-                    android.media.MediaMetadata.METADATA_KEY_ARTIST,
+                    android.support.v4.media.MediaMetadataCompat.METADATA_KEY_ARTIST,
                     intent.getStringExtra("title") ?: "",
                 )
-                .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, dur)
-            coverBitmap?.let { meta.putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, it) }
+                .putLong(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_DURATION, dur)
+            coverBitmap?.let {
+                meta.putBitmap(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it)
+            }
             session.setMetadata(meta.build())
         }
         session.setPlaybackState(
-            android.media.session.PlaybackState.Builder()
+            android.support.v4.media.session.PlaybackStateCompat.Builder()
                 .setActions(
-                    android.media.session.PlaybackState.ACTION_PLAY or
-                        android.media.session.PlaybackState.ACTION_PAUSE or
-                        android.media.session.PlaybackState.ACTION_PLAY_PAUSE,
+                    android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY or
+                        android.support.v4.media.session.PlaybackStateCompat.ACTION_PAUSE or
+                        android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY_PAUSE,
                 )
                 .setState(state, pos, 0f)
                 .build(),
