@@ -240,46 +240,22 @@ class ReaderActivity : AppCompatActivity() {
             consume
         }
 
-        findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener {
-            if (speaking) {
-                pauseTts()
-                return@setOnClickListener
-            }
-            if (resumeCursor >= 0) {
-                startTtsFrom(resumeCursor)
-                return@setOnClickListener
-            }
-            /* saved position from a previous session: continue from it */
-            val slugX = intent.getStringExtra("slug")
-            val saved = slugX?.let { prefs.getString("ttsPos:$it", null) }
-            val ord = chapters?.ordered
-            if (saved != null && ord != null) {
-                val name = saved.substringBefore('|')
-                val para = saved.substringAfter('|').toIntOrNull() ?: 0
-                val idx = ord.indexOf(name)
-                /* the saved TTS spot only applies when the user is ON that
-                   chapter — picking a different chapter and pressing play
-                   reads from where they are, not where TTS once stopped */
-                if (idx >= 0 && idx == currentChapterIdx) {
-                    val lc = loadedChapters.firstOrNull { it.idx == idx }
-                    if (lc != null) {
-                        startTtsFrom(offsetOfPara(lc.start, para))
-                    } else {
-                        pendingSpeakAfterOpen = true
-                        openAt(idx, para)
-                    }
-                    return@setOnClickListener
-                }
-            }
-            val layout = text.layout
-            val off = if (layout != null) {
-                layout.getLineStart(
-                    layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
-                )
-            } else 0
-            startTtsFrom(off)
-        }
+        findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
         findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
+
+        /* Bluetooth headset / media-button play & pause control the TTS */
+        mediaSession = android.media.session.MediaSession(this, "reader-tts").apply {
+            setCallback(object : android.media.session.MediaSession.Callback() {
+                override fun onPlay() {
+                    runOnUiThread { if (!speaking) playButtonAction() }
+                }
+                override fun onPause() {
+                    runOnUiThread { if (speaking) pauseTts() }
+                }
+            })
+            isActive = true
+        }
+        updateMediaSessionState()
 
         findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
         findViewById<TextView>(R.id.chaptersBtn).setOnClickListener {
@@ -484,6 +460,68 @@ class ReaderActivity : AppCompatActivity() {
         return Pair(i, j.coerceAtMost(body.length))
     }
 
+    private var mediaSession: android.media.session.MediaSession? = null
+
+    /* headset buttons route to the session that declares a playback state */
+    private fun updateMediaSessionState() {
+        val state = if (speaking) {
+            android.media.session.PlaybackState.STATE_PLAYING
+        } else {
+            android.media.session.PlaybackState.STATE_PAUSED
+        }
+        mediaSession?.setPlaybackState(
+            android.media.session.PlaybackState.Builder()
+                .setActions(
+                    android.media.session.PlaybackState.ACTION_PLAY or
+                        android.media.session.PlaybackState.ACTION_PAUSE or
+                        android.media.session.PlaybackState.ACTION_PLAY_PAUSE,
+                )
+                .setState(state, android.media.session.PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f)
+                .build(),
+        )
+    }
+
+    /* the play/pause behavior, shared by the footer button and headset keys */
+    private fun playButtonAction() {
+        if (speaking) {
+            pauseTts()
+            return
+        }
+        if (resumeCursor >= 0) {
+            startTtsFrom(resumeCursor)
+            return
+        }
+        /* saved position from a previous session: continue from it */
+        val slugX = intent.getStringExtra("slug")
+        val saved = slugX?.let { prefs.getString("ttsPos:$it", null) }
+        val ord = chapters?.ordered
+        if (saved != null && ord != null) {
+            val name = saved.substringBefore('|')
+            val para = saved.substringAfter('|').toIntOrNull() ?: 0
+            val idx = ord.indexOf(name)
+            /* the saved TTS spot only applies when the user is ON that
+               chapter — picking a different chapter and pressing play
+               reads from where they are, not where TTS once stopped */
+            if (idx >= 0 && idx == currentChapterIdx) {
+                val lc = loadedChapters.firstOrNull { it.idx == idx }
+                if (lc != null) {
+                    startTtsFrom(offsetOfPara(lc.start, para))
+                } else {
+                    pendingSpeakAfterOpen = true
+                    openAt(idx, para)
+                }
+                return
+            }
+        }
+        val layout = text.layout
+        val off = if (layout != null) {
+            layout.getLineStart(
+                layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
+            )
+        } else 0
+        startTtsFrom(off)
+    }
+
     private fun startTtsFrom(off: Int) {
         if (!ttsReady) {
             initTts()   // engine dropped — rebind Google TTS for the next tap
@@ -612,6 +650,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun updatePlayBtn() {
         findViewById<TextView>(R.id.ttsPlayBtn)?.text =
             if (speaking) "\u275a\u275a" else "\u25b6\ufe0e"
+        updateMediaSessionState()
     }
 
     /* While this screen is live, remember we're in the middle of reading —
@@ -636,6 +675,8 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
+        try { mediaSession?.release() } catch (e: Exception) {}
+        mediaSession = null
         TtsService.stop(this)
         super.onDestroy()
     }
