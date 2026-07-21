@@ -250,7 +250,7 @@ class ReaderActivity : AppCompatActivity() {
 
         /* the notification's Pause/Play action broadcasts back to us */
         ttsToggleReceiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: android.content.Context?, i: Intent?) {
+            override fun onReceive(c: android.content.Context?, i: android.content.Intent?) {
                 runOnUiThread { playButtonAction() }
             }
         }
