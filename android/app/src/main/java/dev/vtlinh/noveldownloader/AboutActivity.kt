@@ -53,6 +53,15 @@ class AboutActivity : AppCompatActivity() {
                 btn.isEnabled = true
                 return@launch
             }
+            /* the OS blocks installs unless "Install unknown apps" is granted
+               to this app — send the user to the toggle */
+            if (!Updater.canInstall(this@AboutActivity)) {
+                status.text = "Allow Novels to install updates in the screen that opens, " +
+                    "then tap Check for updates again."
+                Updater.openInstallPermission(this@AboutActivity)
+                btn.isEnabled = true
+                return@launch
+            }
             /* newer build available → download and install right away */
             status.text = "Downloading v${latest.second}…"
             val apk = Updater.downloadApk(this@AboutActivity)
