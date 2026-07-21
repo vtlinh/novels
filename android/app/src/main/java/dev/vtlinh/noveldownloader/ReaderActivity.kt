@@ -1167,6 +1167,8 @@ class ReaderActivity : AppCompatActivity() {
         shake.addView(shakeLabel)
         val shakeBar = android.widget.SeekBar(ctx).apply {
             min = 1; max = 10; progress = startLevel
+            // visible notch at each whole step so the slider reads as integer 1–10
+            tickMark = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.seekbar_tick)
         }
         shake.addView(
             shakeBar,
