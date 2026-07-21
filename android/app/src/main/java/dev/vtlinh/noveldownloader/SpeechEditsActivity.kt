@@ -2,6 +2,7 @@ package dev.vtlinh.noveldownloader
 
 import android.app.Dialog
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
@@ -16,8 +17,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 
 /* Manage the TTS "speech edits" — regex find/replace rules applied before a
    sentence is spoken. A User tab (fully editable, reorderable) and a Default
@@ -34,7 +37,52 @@ class SpeechEditsActivity : AppCompatActivity() {
     private lateinit var defaultTab: TextView
     private lateinit var toolbar: LinearLayout
 
+    /* @Voice-format import/export via the Storage Access Framework */
+    private val exportLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri -> uri?.let { doExport(it) } }
+    private val importLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let { confirmImport(it) } }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun doExport(uri: Uri) {
+        try {
+            contentResolver.openOutputStream(uri)?.use {
+                it.write(SpeechEdits.export(userList).toByteArray())
+            }
+            Toast.makeText(this, "Exported ${userList.size} edits", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun confirmImport(uri: Uri) {
+        val text = try {
+            contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+        } catch (e: Exception) {
+            Toast.makeText(this, "Couldn't read file: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        val parsed = SpeechEdits.parse(text)
+        if (parsed.isEmpty()) {
+            Toast.makeText(this, "No rules found in that file", Toast.LENGTH_LONG).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Import speech edits")
+            .setMessage("Replace your ${userList.size} user edit(s) with ${parsed.size} imported edit(s)?")
+            .setPositiveButton("Replace") { _, _ ->
+                userList = parsed.toMutableList()
+                SpeechEdits.saveUser(this, userList)
+                selected = -1
+                switchTab(0)
+                Toast.makeText(this, "Imported ${parsed.size} edits", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,8 +111,17 @@ class SpeechEditsActivity : AppCompatActivity() {
             TextView(this).apply {
                 text = "Speech edits"; textSize = 18f
                 setTextColor(getColor(R.color.fg)); setTypeface(null, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             },
         )
+        fun headerBtn(t: String, onTap: () -> Unit) = TextView(this).apply {
+            text = t; textSize = 14f; setTextColor(getColor(R.color.accent))
+            setPadding(dp(10), dp(12), dp(10), dp(12))
+            isClickable = true; isFocusable = true
+            setOnClickListener { onTap() }
+        }
+        header.addView(headerBtn("Import") { importLauncher.launch(arrayOf("*/*")) })
+        header.addView(headerBtn("Export") { exportLauncher.launch("replaceeng.txt") })
         root.addView(header)
 
         /* User / Default tabs */
@@ -281,9 +338,9 @@ class SpeechEditsActivity : AppCompatActivity() {
         val typeSpinner = Spinner(this)
         typeSpinner.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item,
-            listOf("Case Insensitive", "Case Sensitive"),
+            listOf("Case Insensitive", "Case Sensitive", "Regular Expression"),
         )
-        typeSpinner.setSelection(if (existing?.caseInsensitive != false) 0 else 1)
+        typeSpinner.setSelection(existing?.type ?: 2)
         form.addView(typeSpinner)
 
         val wholeWord = CheckBox(this).apply {
@@ -294,7 +351,7 @@ class SpeechEditsActivity : AppCompatActivity() {
         form.addView(wholeWord)
 
         form.addView(label("Pattern"))
-        val patternField = field(existing?.pattern ?: "", "regex to match")
+        val patternField = field(existing?.pattern ?: "", "text or regex to match")
         form.addView(patternField)
 
         form.addView(label("Replace"))
@@ -316,7 +373,7 @@ class SpeechEditsActivity : AppCompatActivity() {
         fun previewEdit(): SpeechEdit = SpeechEdit(
             id = existing?.id ?: "preview",
             title = titleField.text.toString(),
-            caseInsensitive = typeSpinner.selectedItemPosition == 0,
+            type = typeSpinner.selectedItemPosition,
             wholeWord = wholeWord.isChecked,
             pattern = patternField.text.toString(),
             replace = replaceField.text.toString(),
