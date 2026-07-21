@@ -107,22 +107,6 @@
                 android:textColor="@color/accent"
                 android:clickable="true"
                 android:focusable="true" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
-                android:text="Supported sites"
-                android:textSize="12sp"
-                android:textColor="@color/muted" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:text="truyenfull.today · truyenfull.live · novelfull.com"
-                android:textSize="14sp"
-                android:textColor="@color/fg" />
         </LinearLayout>
     </ScrollView>
 
