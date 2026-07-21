@@ -772,9 +772,17 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun cleanForSpeech(sentence: String, lang: String): String {
         if (lang != "en" || speechRules.isEmpty()) return sentence
-        var s = "$sentence "   // trailing space so end-anchored abbreviation rules fire
-        for ((re, rep) in speechRules) s = re.replace(s, rep)
-        return s.replace(collapseWs, " ").trim()
+        return try {
+            var s = "$sentence "   // trailing space so end-anchored rules fire
+            for ((re, rep) in speechRules) {
+                /* one bad rule (e.g. a replacement with an out-of-range $group)
+                   must never crash the read — skip it and keep going */
+                s = try { re.replace(s, rep) } catch (e: Exception) { s }
+            }
+            s.replace(collapseWs, " ").trim()
+        } catch (e: Exception) {
+            sentence
+        }
     }
 
     /* Keep the line being read vertically centered while TTS plays. Posted a
