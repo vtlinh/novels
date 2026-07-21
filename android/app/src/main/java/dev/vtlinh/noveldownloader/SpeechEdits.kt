@@ -5,13 +5,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /* A single text-normalization rule applied to a sentence before TTS speaks it
-   (a "speech edit"): a regex pattern → replacement, optionally case-insensitive
-   and/or whole-word. Default rules are built in and toggle-only; user rules are
-   fully editable and persisted as JSON. */
+   (a "speech edit"). Modeled on the @Voice Aloud Reader replacement format:
+     type 0 = case-insensitive literal   (no prefix)
+     type 1 = case-sensitive literal     ("^" prefix)
+     type 2 = regular expression         ("*" prefix)
+   Default rules are built in and always applied; user rules are editable,
+   persisted as JSON, and import/export in the @Voice text format. */
 data class SpeechEdit(
     val id: String,
     var title: String,
-    var caseInsensitive: Boolean,
+    var type: Int,
     var wholeWord: Boolean,
     var pattern: String,
     var replace: String,
@@ -20,9 +23,9 @@ data class SpeechEdit(
 ) {
     /* compiled (regex, replacement) or null if the pattern doesn't compile */
     fun compiled(): Pair<Regex, String>? = try {
-        var p = pattern
+        var p = if (type == 2) pattern else Regex.escape(pattern)
         if (wholeWord) p = "\\b(?:$p)\\b"
-        val opts = if (caseInsensitive) setOf(RegexOption.IGNORE_CASE) else emptySet()
+        val opts = if (type == 0) setOf(RegexOption.IGNORE_CASE) else emptySet()
         Regex(p, opts) to replace
     } catch (e: Exception) {
         null
@@ -31,7 +34,7 @@ data class SpeechEdit(
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("title", title)
-        put("ci", caseInsensitive)
+        put("type", type)
         put("ww", wholeWord)
         put("pattern", pattern)
         put("replace", replace)
@@ -42,7 +45,7 @@ data class SpeechEdit(
         fun fromJson(o: JSONObject) = SpeechEdit(
             id = o.optString("id"),
             title = o.optString("title"),
-            caseInsensitive = o.optBoolean("ci", true),
+            type = o.optInt("type", 2),
             wholeWord = o.optBoolean("ww", false),
             pattern = o.optString("pattern"),
             replace = o.optString("replace"),
@@ -55,6 +58,7 @@ data class SpeechEdit(
 object SpeechEdits {
     private const val PREFS = "speechEdits"
     private const val USER_KEY = "user"
+    private const val DISABLED = 256   // @Voice flag bit: rule is turned off
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -65,28 +69,27 @@ object SpeechEdits {
             "\\uD83C[\\uDC00-\\uDFFF]|\\uD83D[\\uDC00-\\uDFFF]|\\uD83E[\\uDC00-\\uDEFF]|" +
             "\\uDB40[\\uDC20-\\uDC7F])+"
 
-    /* built-in English speech edits (order matters — applied top to bottom) */
+    /* built-in English speech edits (regex; order matters, applied top-down) */
     val defaults: List<SpeechEdit> by lazy {
         var n = 0
-        fun d(title: String, ci: Boolean, pattern: String, replace: String) =
-            SpeechEdit("def${n++}", title, ci, false, pattern, replace, true, true)
+        fun d(title: String, pattern: String, replace: String) =
+            SpeechEdit("def${n++}", title, 2, false, pattern, replace, true, true)
         listOf(
-            d("Silence links", false, "(([\\w-]+://?|www[.])[^\\s()<>]+(?:\\([\\w\\d]+\\)|([^\\p{Punct}\\s]|/)))", ""),
-            d("Silence emojis", false, EMOJI, ""),
-            d("Remove ellipsis at start", false, "^\\s*\\u2026", ""),
-            d("", true, "\\b(no\\.)(\\s+[0-9])", "number$2"),
-            d("", true, "\\b((no)\\.)(\\s+[^0-9]|\\s*$)", "$2; $3"),
-            d("", false, "^\\s*\\u2026", ""),
-            d("", false, "\\bMr\\.\\s", "Mister "),
-            d("", false, "\\bMrs\\.", "Mrs"),
-            d("", false, "\\b[Ee]q\\.\\s+(\\d+)\\b", "equation $1"),
-            d("", false, "\\bMs\\.\\s", "Mizz "),
-            d("", false, "\\bDr\\.\\s", "Doctor "),
-            d("", false, "\\bFig\\.\\s", "Figure "),
-            d("", false, "\\bProf\\.\\s", "Professor "),
-            d("", false, "\\bGen\\.\\s", "General "),
-            d("", false, "\\b([A-Z])\\.(?=\\s)", "$1"),
-            d("", false, "\\bSt\\.\\s+([A-Z][a-z]+)\\b", "Saint $1"),
+            d("Silence links", "(([\\w-]+://?|www[.])[^\\s()<>]+(?:\\([\\w\\d]+\\)|([^\\p{Punct}\\s]|/)))", ""),
+            d("Silence emojis", EMOJI, ""),
+            d("Remove ellipsis at start", "^\\s*\\u2026", ""),
+            d("", "(?i)\\b(no\\.)(\\s+[0-9])", "number$2"),
+            d("", "(?i)\\b((no)\\.)(\\s+[^0-9]|\\s*$)", "$2; $3"),
+            d("", "\\bMr\\.\\s", "Mister "),
+            d("", "\\bMrs\\.", "Mrs"),
+            d("", "\\b[Ee]q\\.\\s+(\\d+)\\b", "equation $1"),
+            d("", "\\bMs\\.\\s", "Mizz "),
+            d("", "\\bDr\\.\\s", "Doctor "),
+            d("", "\\bFig\\.\\s", "Figure "),
+            d("", "\\bProf\\.\\s", "Professor "),
+            d("", "\\bGen\\.\\s", "General "),
+            d("", "\\b([A-Z])\\.(?=\\s)", "$1"),
+            d("", "\\bSt\\.\\s+([A-Z][a-z]+)\\b", "Saint $1"),
         )
     }
 
@@ -115,6 +118,81 @@ object SpeechEdits {
         val out = ArrayList<Pair<Regex, String>>()
         user(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
         defaults.forEach { e -> e.compiled()?.let { out.add(it) } }
+        return out
+    }
+
+    /* ── @Voice Aloud Reader replacement-file format ── */
+
+    private fun quote(s: String) = "\"" + s.replace("\"", "\"\"") + "\""
+
+    /* serialize user rules to the @Voice text format */
+    fun export(list: List<SpeechEdit>): String {
+        val sb = StringBuilder(";_replModTime=0\n")
+        for (e in list) {
+            var regex = e.type == 2
+            var pat = e.pattern
+            if (e.wholeWord) {
+                pat = if (regex) "\\b(?:$pat)\\b" else "\\b\\Q$pat\\E\\b"
+                regex = true
+            }
+            val prefix = when {
+                regex -> "*"
+                e.type == 1 -> "^"
+                else -> ""
+            }
+            sb.append(prefix).append(quote(pat)).append(' ').append(quote(e.replace))
+            if (!e.enabled) sb.append(" ").append(DISABLED)
+            sb.append('\n')
+        }
+        return sb.toString()
+    }
+
+    /* parse the @Voice text format into user rules. Skips blank and ;-comment
+       lines; a leading '*' means regex, '^' means case-sensitive literal, a
+       trailing 256 flag means disabled. Quotes inside a field are doubled. */
+    fun parse(text: String): List<SpeechEdit> {
+        val out = ArrayList<SpeechEdit>()
+        for (raw in text.lineSequence()) {
+            val line = raw.trim()
+            if (line.isEmpty() || line.startsWith(";")) continue
+            var i = 0
+            var regex = false
+            var caseSensitive = false
+            while (i < line.length && (line[i] == '*' || line[i] == '^')) {
+                if (line[i] == '*') regex = true else caseSensitive = true
+                i++
+            }
+            if (i >= line.length || line[i] != '"') continue
+            val pat = StringBuilder(); i++
+            while (i < line.length) {
+                val c = line[i]
+                if (c == '"') {
+                    if (i + 1 < line.length && line[i + 1] == '"') { pat.append('"'); i += 2; continue }
+                    i++; break
+                }
+                pat.append(c); i++
+            }
+            while (i < line.length && line[i] == ' ') i++
+            if (i >= line.length || line[i] != '"') continue
+            val rep = StringBuilder(); i++
+            while (i < line.length) {
+                val c = line[i]
+                if (c == '"') {
+                    if (i + 1 < line.length && line[i + 1] == '"') { rep.append('"'); i += 2; continue }
+                    i++; break
+                }
+                rep.append(c); i++
+            }
+            val rest = line.substring(i.coerceAtMost(line.length)).trim()
+            val flags = rest.toIntOrNull() ?: 0
+            val type = if (regex) 2 else if (caseSensitive) 1 else 0
+            out.add(
+                SpeechEdit(
+                    newId(), "", type, false,
+                    pat.toString(), rep.toString(), (flags and DISABLED) == 0, false,
+                ),
+            )
+        }
         return out
     }
 }
