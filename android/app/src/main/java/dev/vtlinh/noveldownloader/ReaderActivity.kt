@@ -920,6 +920,7 @@ class ReaderActivity : AppCompatActivity() {
                     y = layout.getLineTop(layout.getLineForOffset(off)) + text.totalPaddingTop
                 }
                 scroll.scrollTo(0, y)
+                scroll.visibility = android.view.View.VISIBLE
                 loading = false
                 if (pendingSpeakAfterOpen) {
                     pendingSpeakAfterOpen = false
@@ -929,6 +930,10 @@ class ReaderActivity : AppCompatActivity() {
                    keeps the just-placed position undisturbed */
                 armLoadTimer()
             }
+            /* hide the page until the restore lands — the frames spent
+               waiting for the layout otherwise flash the chapter top before
+               snapping to the saved paragraph */
+            if (targetPara > 0) scroll.visibility = android.view.View.INVISIBLE
             scroll.post { place(0) }
         }
     }
