@@ -428,6 +428,22 @@ class DownloadEngine(
             val rows = ArrayList<Pair<String, String>>()
             for (f in dir.listFiles()) {
                 val n = f.name ?: continue
+                if (Zips.isZipName(n)) {
+                    /* compressed chapters count as present (top-level entries
+                       are the Vietnamese sources) but stay out of the index */
+                    try {
+                        context.contentResolver.openInputStream(f.uri)?.use { ins ->
+                            java.util.zip.ZipInputStream(ins).use { z ->
+                                var e = z.nextEntry
+                                while (e != null) {
+                                    if (!e.isDirectory && !e.name.contains('/')) existing.add(e.name)
+                                    e = z.nextEntry
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {}
+                    continue
+                }
                 if (f.length() > 0) { existing.add(n); rows.add(n to f.uri.toString()) }
             }
             store.addAll(folderKey, slug, rows)

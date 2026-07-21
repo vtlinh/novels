@@ -165,7 +165,7 @@ class ReaderActivity : AppCompatActivity() {
                 val order = intent.getStringExtra("slug")?.let {
                     try { store.getChapterOrder(folder, it) } catch (e: Exception) { null }
                 } ?: emptyMap()
-                ChapterListActivity.chapterNames(contentResolver, treeUri!!, dirName, order)
+                ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order)
             }
             val ch = chapters ?: return@launch
             /* inline chapter list in the right drawer, current one highlighted */
@@ -241,7 +241,10 @@ class ReaderActivity : AppCompatActivity() {
                 val name = saved.substringBefore('|')
                 val para = saved.substringAfter('|').toIntOrNull() ?: 0
                 val idx = ord.indexOf(name)
-                if (idx >= 0) {
+                /* the saved TTS spot only applies when the user is ON that
+                   chapter — picking a different chapter and pressing play
+                   reads from where they are, not where TTS once stopped */
+                if (idx >= 0 && idx == currentChapterIdx) {
                     val lc = loadedChapters.firstOrNull { it.idx == idx }
                     if (lc != null) {
                         startTtsFrom(offsetOfPara(lc.start, para))
@@ -851,9 +854,12 @@ class ReaderActivity : AppCompatActivity() {
         val ch = chapters ?: return null
         if (i < 0 || i >= ch.ordered.size) return null
         val name = ch.ordered[i]
-        val docId = (if (english) ch.translated[name] ?: ch.source[name] else ch.source[name])
+        val ref = (if (english) ch.translated[name] ?: ch.source[name] else ch.source[name])
             ?: return null
-        return withContext(Dispatchers.IO) { Saf.readText(contentResolver, treeUri!!, docId) }
+        return withContext(Dispatchers.IO) {
+            if (Zips.isRef(ref)) ch.zip?.let { Zips.read(it, Zips.entryOf(ref)) }
+            else Saf.readText(contentResolver, treeUri!!, ref)
+        }
     }
 
     /* jump to a chapter: load it, append the next, prepend the previous.
