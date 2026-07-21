@@ -27,12 +27,13 @@ class TtsService : Service() {
         /* notification action → ReaderActivity's in-app receiver */
         const val ACTION_TOGGLE = "dev.vtlinh.noveldownloader.TTS_TOGGLE"
 
-        fun start(ctx: Context, title: String, speaking: Boolean, token: MediaSession.Token?) {
+        fun start(ctx: Context, title: String, speaking: Boolean, token: MediaSession.Token?, slug: String?) {
             ctx.startForegroundService(
                 Intent(ctx, TtsService::class.java)
                     .putExtra("title", title)
                     .putExtra("speaking", speaking)
-                    .putExtra("token", token),
+                    .putExtra("token", token)
+                    .putExtra("slug", slug),
             )
         }
 
@@ -76,14 +77,17 @@ class TtsService : Service() {
         val mediaStyle = Notification.MediaStyle().setShowActionsInCompactView(0)
         if (token != null) mediaStyle.setMediaSession(token)
 
-        val notif = Notification.Builder(this, CHANNEL)
+        val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(intent?.getStringExtra("title")?.ifEmpty { null } ?: "Reading aloud")
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setStyle(mediaStyle)
             .addAction(action)
-            .build()
+        /* the novel cover becomes the media artwork — the system renders it
+           as the notification's tinted background; softly blurred here */
+        coverBitmap(intent?.getStringExtra("slug"))?.let { builder.setLargeIcon(it) }
+        val notif = builder.build()
 
         androidx.core.app.ServiceCompat.startForeground(
             this, NOTIF_ID, notif,
@@ -101,6 +105,20 @@ class TtsService : Service() {
             wakeLock = null
         }
         return START_NOT_STICKY
+    }
+
+    /* decode the novel cover and blur it a little (cheap downscale/upscale) */
+    private fun coverBitmap(slug: String?): android.graphics.Bitmap? {
+        if (slug.isNullOrEmpty()) return null
+        val f = DownloadEngine.coverFile(this, slug)
+        if (!f.exists()) return null
+        return try {
+            val src = android.graphics.BitmapFactory.decodeFile(f.path) ?: return null
+            val w = (src.width / 4).coerceAtLeast(1)
+            val h = (src.height / 4).coerceAtLeast(1)
+            val small = android.graphics.Bitmap.createScaledBitmap(src, w, h, true)
+            android.graphics.Bitmap.createScaledBitmap(small, src.width, src.height, true)
+        } catch (e: Exception) { null }
     }
 
     override fun onDestroy() {
