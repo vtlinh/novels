@@ -168,7 +168,9 @@ class ReaderActivity : AppCompatActivity() {
         if (!prefs.getBoolean("shakeEnabled", false)) return
         val sm = getSystemService(SENSOR_SERVICE) as? android.hardware.SensorManager ?: return
         val accel = sm.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER) ?: return
-        val threshold = prefs.getFloat("shakeThreshold", 12f)
+        /* stored as a 1–10 level; the physical accel threshold is level / 5
+           (so level 5 ≈ the old raw threshold of 1) */
+        val threshold = prefs.getInt("shakeLevel", 5).coerceIn(1, 10) / 5f
         val listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(e: android.hardware.SensorEvent) {
                 val g = Math.sqrt(
@@ -1157,26 +1159,34 @@ class ReaderActivity : AppCompatActivity() {
             isChecked = prefs.getBoolean("shakeEnabled", false)
         }
         shake.addView(shakeCheck)
+        val startLevel = prefs.getInt("shakeLevel", 5).coerceIn(1, 10)
+        val shakeLabel = TextView(ctx).apply {
+            text = "Shake threshold: $startLevel"; textSize = 13f
+            setTextColor(getColor(R.color.muted)); setPadding(0, dp(12), 0, dp(4))
+        }
+        shake.addView(shakeLabel)
+        val shakeBar = android.widget.SeekBar(ctx).apply {
+            min = 1; max = 10; progress = startLevel
+        }
         shake.addView(
-            TextView(ctx).apply {
-                text = "Shake sensitivity threshold"; textSize = 13f
-                setTextColor(getColor(R.color.muted)); setPadding(0, dp(12), 0, dp(4))
+            shakeBar,
+            android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        shakeBar.setOnSeekBarChangeListener(
+            object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: android.widget.SeekBar, p: Int, u: Boolean) {
+                    shakeLabel.text = "Shake threshold: ${p.coerceAtLeast(1)}"
+                }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar) {}
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar) {}
             },
         )
-        val shakeInput = android.widget.EditText(ctx).apply {
-            setBackgroundResource(R.drawable.bg_input)
-            setPadding(dp(11), dp(11), dp(11), dp(11))
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
-                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setTextColor(getColor(R.color.fg)); setHintTextColor(getColor(R.color.muted))
-            textSize = 14f
-            val tv = prefs.getFloat("shakeThreshold", 12f)
-            setText(if (tv % 1f == 0f) "%.0f".format(tv) else tv.toString())
-        }
-        shake.addView(shakeInput)
-        hint(shake, "Lower = more sensitive (12 is a firm shake; fractions like 0.5 catch a gentle nudge). Shake the phone now to test — the status below flashes red when a shake passes this threshold.")
+        hint(shake, "1 = the gentlest nudge (most sensitive), 10 = a firm shake. Shake the phone now to test — the status below flashes red when a shake passes this level.")
         /* live tester: flashes here so the threshold can be calibrated while
-           this page is open (uses the value typed above, not the saved one) */
+           this page is open (uses the slider's current level, not the saved one) */
         val shakeStatus = TextView(ctx).apply {
             text = "shaking — sleep timer reset"; textSize = 14f
             setTypeface(null, android.graphics.Typeface.BOLD)
@@ -1194,7 +1204,7 @@ class ReaderActivity : AppCompatActivity() {
                         (e.values[0] * e.values[0] + e.values[1] * e.values[1] +
                             e.values[2] * e.values[2]).toDouble(),
                     ) - android.hardware.SensorManager.GRAVITY_EARTH
-                    val thr = shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(0.05f) ?: 12f
+                    val thr = shakeBar.progress.coerceAtLeast(1) / 5f
                     if (Math.abs(g) > thr) {
                         val now = System.currentTimeMillis()
                         if (now - shownAt < 2500) return
@@ -1213,7 +1223,7 @@ class ReaderActivity : AppCompatActivity() {
         saveShake = {
             prefs.edit()
                 .putBoolean("shakeEnabled", shakeCheck.isChecked)
-                .putFloat("shakeThreshold", shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(0.05f) ?: 12f)
+                .putInt("shakeLevel", shakeBar.progress.coerceIn(1, 10))
                 .apply()
             /* re-arm with the new config if currently reading */
             if (speaking) { stopShakeDetection(); startShakeDetection() }
