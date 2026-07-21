@@ -120,6 +120,19 @@ object Updater {
         }
     }
 
+    /* Abandon any leftover PackageInstaller sessions for our own updates.
+       A stalled "Installing…" leaves a committed session that never resolves;
+       clearing it lets a fresh commit start clean (and stops sessions piling
+       up across retries). */
+    fun abandonSessions(context: Context) {
+        try {
+            val pi = context.packageManager.packageInstaller
+            for (s in pi.mySessions) {
+                try { pi.abandonSession(s.sessionId) } catch (e: Exception) {}
+            }
+        } catch (e: Exception) {}
+    }
+
     /* Commit the update through PackageInstaller. Silent when permitted
        (Android 12+, this app is its own installer of record); otherwise the
        system posts its confirmation UI via InstallReceiver. The process is
