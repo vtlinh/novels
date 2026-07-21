@@ -65,6 +65,10 @@ class NovelListActivity : AppCompatActivity() {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        findViewById<TextView>(R.id.navAbout).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+            startActivity(Intent(this, AboutActivity::class.java))
+        }
     }
 
     /* re-render on every return so the RECENTLY READ section reflects the
