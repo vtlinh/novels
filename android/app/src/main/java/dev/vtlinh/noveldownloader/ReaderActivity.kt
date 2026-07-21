@@ -984,11 +984,21 @@ class ReaderActivity : AppCompatActivity() {
         if (!speaking && currentChapterIdx <= first.idx && firstIdx > 0) prependChapters(2)
     }
 
+    /* A selectable TextView keeps a cursor where the user last tapped
+       (including the TTS double-tap); appending text to it can auto-scroll
+       back to that cursor. Drop selection and focus before changing text. */
+    private fun clearTextSelection() {
+        (text.text as? android.text.Spannable)?.let { android.text.Selection.removeSelection(it) }
+        if (text.isFocused) text.clearFocus()
+    }
+
     private fun appendChapters(n: Int) {
         val ch = chapters ?: return
         if (loading || nextIdx >= ch.ordered.size) return
         loading = true
         lifecycleScope.launch {
+            val keepY = scroll.scrollY
+            clearTextSelection()
             var added = 0
             while (added < n && nextIdx < ch.ordered.size) {
                 val idx = nextIdx
@@ -1007,7 +1017,15 @@ class ReaderActivity : AppCompatActivity() {
                 pendingSpeakContinue = false
                 if (speaking) speakNext()
             }
-            scroll.post { updateHeader() }
+            scroll.post {
+                /* appends never move existing text, so a big unprompted move
+                   across this append is the cursor auto-scroll — undo it
+                   (a real fling can't cover half a screen in these frames) */
+                if (!speaking && kotlin.math.abs(scroll.scrollY - keepY) > scroll.height / 2) {
+                    scroll.scrollTo(0, keepY)
+                }
+                updateHeader()
+            }
         }
     }
 
@@ -1044,6 +1062,7 @@ class ReaderActivity : AppCompatActivity() {
                 anchorOff = l.getLineStart(line)
                 withinLine = y - l.getLineTop(line)
             }
+            clearTextSelection()
             val block = bodies.joinToString(SEP) { it.second }
             val shift = block.length + SEP.length
             for (l in loadedChapters) l.start += shift
