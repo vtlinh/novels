@@ -1662,11 +1662,15 @@ class ReaderActivity : AppCompatActivity() {
             saveLastChapter(p)
 
             /* Place the viewport only once the layout reflects the FINAL text
-               (all window chapters added). Retry frame by frame until the
-               layout catches up, then place best-effort. */
+               AND the ScrollView has grown tall enough to actually reach the
+               target. With 20 chapters prepended the target sits deep in the
+               buffer; if the ScrollView hasn't re-measured its child height
+               yet, scrollTo() clamps short to the top (landing on the first
+               loaded chapter). So compute y, scroll, and if it clamped short,
+               retry a frame later until the child is tall enough. */
             fun place(attempt: Int) {
                 val layout = text.layout
-                if ((layout == null || layout.text.length != text.text.length) && attempt < 30) {
+                if ((layout == null || layout.text.length != text.text.length) && attempt < 60) {
                     scroll.post { place(attempt + 1) }
                     return
                 }
@@ -1691,6 +1695,12 @@ class ReaderActivity : AppCompatActivity() {
                     0
                 }
                 scroll.scrollTo(0, y)
+                /* scrollTo clamps to the current child height — if the target
+                   didn't stick (child still measuring), wait and try again */
+                if (y > 0 && scroll.scrollY < y - 4 && attempt < 60) {
+                    scroll.post { place(attempt + 1) }
+                    return
+                }
                 scroll.visibility = android.view.View.VISIBLE
                 loading = false
                 loadReady = true
