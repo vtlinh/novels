@@ -52,6 +52,13 @@ class SettingsActivity : AppCompatActivity() {
         zipCheck.setOnCheckedChangeListener { _, checked ->
             prefs.edit().putBoolean("zipDownloads", checked).apply()
         }
+
+        /* keep the reader's screen on while TTS reads aloud (off by default) */
+        val keepAwakeCheck = findViewById<android.widget.CheckBox>(R.id.keepAwakeCheck)
+        keepAwakeCheck.isChecked = prefs.getBoolean("keepAwake", false)
+        keepAwakeCheck.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean("keepAwake", checked).apply()
+        }
     }
 
     /* ---- chapter compression ----

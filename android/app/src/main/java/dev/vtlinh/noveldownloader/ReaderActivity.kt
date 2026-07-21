@@ -556,6 +556,7 @@ class ReaderActivity : AppCompatActivity() {
         /* foreground service keeps reading alive with the screen off */
         lastNotifHeading = currentHeading()
         TtsService.start(this, lastNotifHeading, true)
+        updateKeepAwake()
         updatePlayBtn()
         speakNext()
     }
@@ -658,6 +659,7 @@ class ReaderActivity : AppCompatActivity() {
         TtsService.start(this, currentHeading(), false)
         if (resumeCursor >= 0) speakCursor = resumeCursor
         clearHighlight()
+        updateKeepAwake()
         updatePlayBtn()
     }
 
@@ -667,7 +669,20 @@ class ReaderActivity : AppCompatActivity() {
         tts?.stop()
         TtsService.stop(this)
         clearHighlight()
+        updateKeepAwake()
         updatePlayBtn()
+    }
+
+    /* Hold the screen on while TTS is reading, IF the user opted in
+       (Settings → Reading). Cleared the moment reading pauses or stops so
+       the display can dim normally again. */
+    private fun updateKeepAwake() {
+        val keep = speaking && prefs.getBoolean("keepAwake", false)
+        if (keep) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     /* pause is drawn as two Dingbats bars \u2014 U+23F8 falls back to the emoji
