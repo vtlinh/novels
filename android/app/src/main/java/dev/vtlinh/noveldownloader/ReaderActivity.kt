@@ -318,7 +318,7 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
-        findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showReaderSettings(voiceOnly = true) }
+        findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
 
         /* the notification's Pause/Play action broadcasts back to us */
         ttsToggleReceiver = object : android.content.BroadcastReceiver() {
