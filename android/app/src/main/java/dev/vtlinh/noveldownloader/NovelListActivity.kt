@@ -82,7 +82,7 @@ class NovelListActivity : AppCompatActivity() {
         return Extractor.sanitize(vn).lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
     }
 
-    private val chapterFileRe = Regex("Chapter \\d+.*\\.txt")
+    private val chapterFileRe = Regex("Chapter \\d+.*\\.txt(\\.gz)?")
 
     /* Slug equality must survive punctuation drift: "Heaven's Path" is slug
        "library-of-heavens-path" on the site but the sanitized folder name

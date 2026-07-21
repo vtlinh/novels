@@ -24,6 +24,32 @@ object Zips {
     fun isRef(s: String) = s.startsWith(REF)
     fun entryOf(s: String) = s.removePrefix(REF)
 
+    /* ---- per-chapter gzip (the current compression format) ---- */
+
+    fun isGzName(name: String) = name.endsWith(".txt.gz")
+
+    private const val GZREF = "gz::"
+    fun gzRef(docId: String) = GZREF + docId
+    fun isGzRef(s: String) = s.startsWith(GZREF)
+    fun gzDocId(s: String) = s.removePrefix(GZREF)
+
+    fun readGz(cr: ContentResolver, treeUri: Uri, docId: String): String? = try {
+        cr.openInputStream(DocumentsContract.buildDocumentUriUsingTree(treeUri, docId))?.use { ins ->
+            java.util.zip.GZIPInputStream(ins).use { it.readBytes().toString(Charsets.UTF_8) }
+        }
+    } catch (e: Exception) { null }
+
+    fun writeGz(cr: ContentResolver, parentDocUri: Uri, name: String, text: String): Boolean = try {
+        val u = DocumentsContract.createDocument(cr, parentDocUri, "application/gzip", name)
+        val os = u?.let { cr.openOutputStream(it) }
+        if (os == null) {
+            false
+        } else {
+            java.util.zip.GZIPOutputStream(os).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+            true
+        }
+    } catch (e: Exception) { false }
+
     fun docSize(cr: ContentResolver, uri: Uri): Long = try {
         cr.query(uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use {
             if (it.moveToFirst()) it.getLong(0) else -1L
@@ -64,111 +90,153 @@ object Zips {
     private fun docUri(treeUri: Uri, docId: String) =
         DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
 
-    /* Fold a novel dir's loose chapters (+translated/) and any existing
-       archive into one freshly written chapters.zip, then delete the
-       originals. Write-then-swap: nothing is removed until the new zip is
-       complete. Returns true when the dir changed. */
+    /* Compress a novel ONE CHAPTER AT A TIME: each loose "Chapter N.txt"
+       (main and translated/) becomes "Chapter N.txt.gz" and the original is
+       deleted only after the compressed copy is written. Incremental by
+       nature — chapters downloaded later just get compressed on the next
+       pass without touching anything else. A legacy chapters.zip is
+       migrated entry-by-entry into per-chapter files, then removed.
+       Returns true when the dir changed. */
     fun compressDir(context: Context, cr: ContentResolver, treeUri: Uri, d: Saf.Entry): Boolean {
         val re = ChapterListActivity.CHAPTER_RE
-        val kids = Saf.children(cr, treeUri, d.docId)
-        val loose = kids.filter { !it.isDir && re.matches(it.name) }
-        val tdir = kids.firstOrNull { it.isDir && it.name == "translated" }
-        val tloose = tdir?.let { t ->
-            Saf.children(cr, treeUri, t.docId).filter { !it.isDir && re.matches(it.name) }
-        } ?: emptyList()
-        val oldZip = kids.firstOrNull { !it.isDir && isZipName(it.name) }
-        if (loose.isEmpty() && tloose.isEmpty()) {
-            /* nothing loose; at most normalize a stray chapters-new.zip name */
-            if (oldZip != null && oldZip.name != NAME) {
-                try {
-                    DocumentsContract.renameDocument(cr, docUri(treeUri, oldZip.docId), NAME)
-                    return true
-                } catch (e: Exception) {}
-            }
-            return false
-        }
-        val oldCached = oldZip?.let { cached(context, cr, treeUri, it.docId, d.name) }
+        var changed = false
 
-        /* write the new zip beside the old one, then swap */
-        val newUri = DocumentsContract.createDocument(
-            cr, docUri(treeUri, d.docId), "application/zip", "chapters-new.zip",
-        ) ?: return false
-        var count = 0
-        val written = HashSet<String>()
-        val os = cr.openOutputStream(newUri) ?: return false
-        java.util.zip.ZipOutputStream(os).use { z ->
-            fun put(entry: String, bytes: ByteArray) {
-                if (written.add(entry)) {
-                    z.putNextEntry(java.util.zip.ZipEntry(entry))
-                    z.write(bytes)
-                    z.closeEntry()
-                    count++
+        /* gz every loose chapter file directly under parentDocId */
+        fun gzChildren(parentDocId: String) {
+            val kids = Saf.children(cr, treeUri, parentDocId)
+            val names = kids.map { it.name }.toHashSet()
+            val parentUri = docUri(treeUri, parentDocId)
+            for (f in kids) {
+                if (f.isDir || isGzName(f.name) || !re.matches(f.name)) continue
+                val target = f.name + ".gz"
+                if (target !in names) {
+                    val text = Saf.readText(cr, treeUri, f.docId) ?: continue
+                    if (!writeGz(cr, parentUri, target, text)) continue
+                    names.add(target)
+                }
+                /* compressed copy exists — the loose original can go */
+                try { DocumentsContract.deleteDocument(cr, docUri(treeUri, f.docId)) } catch (e: Exception) { continue }
+                changed = true
+            }
+        }
+        gzChildren(d.docId)
+        val kids = Saf.children(cr, treeUri, d.docId)
+        var tDocId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
+        tDocId?.let { gzChildren(it) }
+
+        /* migrate a legacy whole-novel archive to per-chapter files */
+        val zipEnt = kids.firstOrNull { !it.isDir && isZipName(it.name) }
+        if (zipEnt != null) {
+            val zip = cached(context, cr, treeUri, zipEnt.docId, d.name)
+            if (zip != null) {
+                val mainNames = Saf.children(cr, treeUri, d.docId).map { it.name }.toHashSet()
+                val tNames = tDocId?.let { t ->
+                    Saf.children(cr, treeUri, t).map { it.name }.toHashSet()
+                } ?: hashSetOf()
+                var ok = true
+                for (e in entries(zip)) {
+                    val translatedEntry = e.startsWith("translated/")
+                    val n = if (translatedEntry) e.removePrefix("translated/") else e
+                    val have = if (translatedEntry) tNames else mainNames
+                    if (n in have || "$n.gz" in have) continue
+                    val content = read(zip, e)
+                    if (content == null) { ok = false; continue }
+                    if (translatedEntry && tDocId == null) {
+                        tDocId = DocumentsContract.createDocument(
+                            cr, docUri(treeUri, d.docId),
+                            DocumentsContract.Document.MIME_TYPE_DIR, "translated",
+                        )?.let { DocumentsContract.getDocumentId(it) }
+                    }
+                    val parent = if (translatedEntry) tDocId ?: continue else d.docId
+                    if (writeGz(cr, docUri(treeUri, parent), "$n.gz", content)) {
+                        have.add("$n.gz")
+                    } else {
+                        ok = false
+                    }
+                }
+                if (ok) {
+                    try {
+                        DocumentsContract.deleteDocument(cr, docUri(treeUri, zipEnt.docId))
+                        zip.delete()
+                        changed = true
+                    } catch (e: Exception) {}
                 }
             }
-            for (f in loose) {
-                Saf.readText(cr, treeUri, f.docId)?.let { put(f.name, it.toByteArray()) }
-            }
-            for (f in tloose) {
-                Saf.readText(cr, treeUri, f.docId)?.let { put("translated/" + f.name, it.toByteArray()) }
-            }
-            /* carry over anything already zipped that wasn't re-added */
-            oldCached?.let { oc ->
-                for (e in entries(oc)) {
-                    if (e !in written) read(oc, e)?.let { put(e, it.toByteArray()) }
-                }
-            }
         }
-        if (count == 0) {
-            try { DocumentsContract.deleteDocument(cr, newUri) } catch (e: Exception) {}
-            return false
-        }
-        /* the new zip is safely written: remove originals and rename it */
-        oldZip?.let {
-            try { DocumentsContract.deleteDocument(cr, docUri(treeUri, it.docId)) } catch (e: Exception) {}
-        }
-        for (f in loose + tloose) {
-            try { DocumentsContract.deleteDocument(cr, docUri(treeUri, f.docId)) } catch (e: Exception) {}
-        }
-        try {
-            DocumentsContract.renameDocument(cr, newUri, NAME)
-        } catch (e: Exception) { /* "chapters-new.zip" is also recognized */ }
-        return true
+        return changed
     }
 
-    /* extract a novel's chapters.zip back to loose files and remove it */
+    /* the reverse: each "Chapter N.txt.gz" back to a plain .txt (and any
+       legacy chapters.zip extracted), one chapter at a time */
     fun uncompressDir(context: Context, cr: ContentResolver, treeUri: Uri, d: Saf.Entry): Boolean {
-        val kids = Saf.children(cr, treeUri, d.docId)
-        val zipEnt = kids.firstOrNull { !it.isDir && isZipName(it.name) } ?: return false
-        val zip = cached(context, cr, treeUri, zipEnt.docId, d.name) ?: return false
-        val looseNames = kids.filter { !it.isDir }.map { it.name }.toHashSet()
-        var tDocId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
-        val tNames = tDocId?.let { t ->
-            Saf.children(cr, treeUri, t).map { it.name }.toHashSet()
-        } ?: hashSetOf()
-        for (e in entries(zip)) {
-            val content = read(zip, e) ?: continue
-            if (e.startsWith("translated/")) {
-                val n = e.removePrefix("translated/")
-                if (n in tNames) continue
-                if (tDocId == null) {
-                    tDocId = DocumentsContract.createDocument(
-                        cr, docUri(treeUri, d.docId),
-                        DocumentsContract.Document.MIME_TYPE_DIR, "translated",
-                    )?.let { DocumentsContract.getDocumentId(it) }
+        var changed = false
+
+        fun unGzChildren(parentDocId: String) {
+            val kids = Saf.children(cr, treeUri, parentDocId)
+            val names = kids.map { it.name }.toHashSet()
+            val parentUri = docUri(treeUri, parentDocId)
+            for (f in kids) {
+                if (f.isDir || !isGzName(f.name)) continue
+                val target = f.name.removeSuffix(".gz")
+                if (target !in names) {
+                    val text = readGz(cr, treeUri, f.docId) ?: continue
+                    val u = DocumentsContract.createDocument(cr, parentUri, "text/plain", target)
+                        ?: continue
+                    try {
+                        cr.openOutputStream(u)?.use { it.write(text.toByteArray(Charsets.UTF_8)) } ?: continue
+                    } catch (e: Exception) { continue }
+                    names.add(target)
                 }
-                val t = tDocId ?: continue
-                DocumentsContract.createDocument(cr, docUri(treeUri, t), "text/plain", n)
-                    ?.let { u -> cr.openOutputStream(u)?.use { it.write(content.toByteArray()) } }
-            } else {
-                if (e in looseNames) continue
-                DocumentsContract.createDocument(cr, docUri(treeUri, d.docId), "text/plain", e)
-                    ?.let { u -> cr.openOutputStream(u)?.use { it.write(content.toByteArray()) } }
+                try { DocumentsContract.deleteDocument(cr, docUri(treeUri, f.docId)) } catch (e: Exception) { continue }
+                changed = true
             }
         }
-        try {
-            DocumentsContract.deleteDocument(cr, docUri(treeUri, zipEnt.docId))
-        } catch (e: Exception) { return false }
-        zip.delete()
-        return true
+        unGzChildren(d.docId)
+        val kids = Saf.children(cr, treeUri, d.docId)
+        var tDocId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
+        tDocId?.let { unGzChildren(it) }
+
+        /* legacy whole-novel archive → loose files */
+        val zipEnt = kids.firstOrNull { !it.isDir && isZipName(it.name) }
+        if (zipEnt != null) {
+            val zip = cached(context, cr, treeUri, zipEnt.docId, d.name)
+            if (zip != null) {
+                val mainNames = Saf.children(cr, treeUri, d.docId).map { it.name }.toHashSet()
+                val tNames = tDocId?.let { t ->
+                    Saf.children(cr, treeUri, t).map { it.name }.toHashSet()
+                } ?: hashSetOf()
+                var ok = true
+                for (e in entries(zip)) {
+                    val translatedEntry = e.startsWith("translated/")
+                    val n = if (translatedEntry) e.removePrefix("translated/") else e
+                    val have = if (translatedEntry) tNames else mainNames
+                    if (n in have) continue
+                    val content = read(zip, e)
+                    if (content == null) { ok = false; continue }
+                    if (translatedEntry && tDocId == null) {
+                        tDocId = DocumentsContract.createDocument(
+                            cr, docUri(treeUri, d.docId),
+                            DocumentsContract.Document.MIME_TYPE_DIR, "translated",
+                        )?.let { DocumentsContract.getDocumentId(it) }
+                    }
+                    val parent = if (translatedEntry) tDocId ?: continue else d.docId
+                    val u = DocumentsContract.createDocument(cr, docUri(treeUri, parent), "text/plain", n)
+                    if (u == null) { ok = false; continue }
+                    try {
+                        cr.openOutputStream(u)?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+                            ?: run { ok = false }
+                    } catch (e2: Exception) { ok = false }
+                    have.add(n)
+                }
+                if (ok) {
+                    try {
+                        DocumentsContract.deleteDocument(cr, docUri(treeUri, zipEnt.docId))
+                        zip.delete()
+                        changed = true
+                    } catch (e: Exception) {}
+                }
+            }
+        }
+        return changed
     }
 }

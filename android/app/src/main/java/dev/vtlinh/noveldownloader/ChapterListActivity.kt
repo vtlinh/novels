@@ -43,19 +43,31 @@ class ChapterListActivity : AppCompatActivity() {
             val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
                 ?: return Chapters(emptyList(), emptyMap(), emptyMap())
             val source = HashMap<String, String>()
+            val gzSource = HashMap<String, String>()
             var translatedId: String? = null
             var zipDocId: String? = null
             for (e in Saf.children(cr, treeUri, dir.docId)) {
                 if (e.isDir && e.name == "translated") translatedId = e.docId
                 else if (!e.isDir && Zips.isZipName(e.name)) zipDocId = e.docId
-                else if (!e.isDir && CHAPTER_RE.matches(e.name)) source[e.name] = e.docId
+                else if (!e.isDir && Zips.isGzName(e.name)) {
+                    val n = e.name.removeSuffix(".gz")
+                    if (CHAPTER_RE.matches(n)) gzSource[n] = Zips.gzRef(e.docId)
+                } else if (!e.isDir && CHAPTER_RE.matches(e.name)) source[e.name] = e.docId
             }
             val translated = HashMap<String, String>()
+            val gzTranslated = HashMap<String, String>()
             translatedId?.let {
                 for (e in Saf.children(cr, treeUri, it)) {
-                    if (!e.isDir && CHAPTER_RE.matches(e.name)) translated[e.name] = e.docId
+                    if (e.isDir) continue
+                    if (Zips.isGzName(e.name)) {
+                        val n = e.name.removeSuffix(".gz")
+                        if (CHAPTER_RE.matches(n)) gzTranslated[n] = Zips.gzRef(e.docId)
+                    } else if (CHAPTER_RE.matches(e.name)) translated[e.name] = e.docId
                 }
             }
+            /* compressed chapters fill in behind loose .txt files */
+            for ((n, r) in gzSource) if (n !in source) source[n] = r
+            for ((n, r) in gzTranslated) if (n !in translated) translated[n] = r
             /* zipped chapters fill in anything not present as a loose file */
             val zipFile = zipDocId?.let { Zips.cached(context, cr, treeUri, it, dirName) }
             zipFile?.let { zf ->
