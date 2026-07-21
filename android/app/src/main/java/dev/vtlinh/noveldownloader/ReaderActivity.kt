@@ -78,7 +78,7 @@ class ReaderActivity : AppCompatActivity() {
         /* keep the reading notification on the current chapter */
         if (speaking && cur.heading.isNotEmpty() && cur.heading != lastNotifHeading) {
             lastNotifHeading = cur.heading
-            TtsService.start(this, cur.heading, true, mediaSession?.sessionToken)
+            TtsService.start(this, cur.heading, true, mediaSession?.sessionToken, intent.getStringExtra("slug"))
         }
         /* remember the exact paragraph too, so reopening this chapter
            returns to where we left off (paragraphs map 1:1 across EN/VI) */
@@ -155,10 +155,18 @@ class ReaderActivity : AppCompatActivity() {
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
         text.text = "Loading…"
 
-        /* mark as recently read */
+        /* mark as recently read + load the cover for the media notification */
         intent.getStringExtra("slug")?.let { slug ->
             lifecycleScope.launch(Dispatchers.IO) {
                 try { store.setLastRead(folder, slug, System.currentTimeMillis()) } catch (e: Exception) {}
+                val cf = DownloadEngine.coverFile(this@ReaderActivity, slug)
+                if (cf.exists()) {
+                    try { coverBitmap = android.graphics.BitmapFactory.decodeFile(cf.path) } catch (e: Exception) {}
+                    if (coverBitmap != null) runOnUiThread {
+                        metaChapterIdx = -1   // force a metadata push carrying the art
+                        if (speaking) updateMediaSessionState()
+                    }
+                }
             }
         }
 
@@ -486,21 +494,57 @@ class ReaderActivity : AppCompatActivity() {
         loadedChapters.firstOrNull { it.idx == currentChapterIdx }?.heading
             ?: titleBar.text.toString()
 
-    /* headset buttons route to the session that declares a playback state */
+    private var coverBitmap: android.graphics.Bitmap? = null
+    private var metaChapterIdx = -1
+
+    /* char span [start, end) of the loaded chapter that contains `off` */
+    private fun chapterSpanAt(off: Int): Pair<Int, Int>? {
+        if (off < 0) return null
+        val i = loadedChapters.indexOfLast { it.start <= off }
+        if (i < 0) return null
+        val start = loadedChapters[i].start
+        val end = loadedChapters.getOrNull(i + 1)?.let { it.start - SEP.length } ?: text.length()
+        return start to end
+    }
+
+    /* the MediaStyle notification's seekbar is fed by the session: duration =
+       current chapter length, position = how far TTS has read into it. */
     private fun updateMediaSessionState() {
+        val session = mediaSession ?: return
         val state = if (speaking) {
             android.media.session.PlaybackState.STATE_PLAYING
         } else {
             android.media.session.PlaybackState.STATE_PAUSED
         }
-        mediaSession?.setPlaybackState(
+        val cursor = if (resumeCursor >= 0) resumeCursor else speakCursor
+        val spanIdx = loadedChapters.indexOfLast { it.start <= cursor }
+        val span = chapterSpanAt(cursor)
+        val dur = span?.let { (it.second - it.first).toLong() } ?: 0L
+        val pos = span?.let { (cursor - it.first).coerceIn(0, (it.second - it.first)).toLong() } ?: 0L
+
+        /* metadata (duration + cover art) only when the chapter changes —
+           speed 0 so the bar sits at the reported position between sentences */
+        if (spanIdx != metaChapterIdx) {
+            metaChapterIdx = spanIdx
+            val heading = loadedChapters.getOrNull(spanIdx)?.heading ?: currentHeading()
+            val meta = android.media.MediaMetadata.Builder()
+                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, heading)
+                .putString(
+                    android.media.MediaMetadata.METADATA_KEY_ARTIST,
+                    intent.getStringExtra("title") ?: "",
+                )
+                .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, dur)
+            coverBitmap?.let { meta.putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, it) }
+            session.setMetadata(meta.build())
+        }
+        session.setPlaybackState(
             android.media.session.PlaybackState.Builder()
                 .setActions(
                     android.media.session.PlaybackState.ACTION_PLAY or
                         android.media.session.PlaybackState.ACTION_PAUSE or
                         android.media.session.PlaybackState.ACTION_PLAY_PAUSE,
                 )
-                .setState(state, android.media.session.PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f)
+                .setState(state, pos, 0f)
                 .build(),
         )
     }
@@ -555,7 +599,7 @@ class ReaderActivity : AppCompatActivity() {
         speaking = true
         /* foreground service keeps reading alive with the screen off */
         lastNotifHeading = currentHeading()
-        TtsService.start(this, lastNotifHeading, true, mediaSession?.sessionToken)
+        TtsService.start(this, lastNotifHeading, true, mediaSession?.sessionToken, intent.getStringExtra("slug"))
         updateKeepAwake()
         updatePlayBtn()
         speakNext()
@@ -597,6 +641,7 @@ class ReaderActivity : AppCompatActivity() {
         setHighlight(s0, s1)
         scrollToSpoken(s0)
         saveTtsPos(s0)
+        updateMediaSessionState()   // advance the notification's chapter progress
         t.speak(sentence, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
     }
 
@@ -656,7 +701,7 @@ class ReaderActivity : AppCompatActivity() {
         cancelAutoScroll()
         tts?.stop()
         /* paused: keep the notification with a Play action (wake lock off) */
-        TtsService.start(this, currentHeading(), false, mediaSession?.sessionToken)
+        TtsService.start(this, currentHeading(), false, mediaSession?.sessionToken, intent.getStringExtra("slug"))
         if (resumeCursor >= 0) speakCursor = resumeCursor
         clearHighlight()
         updateKeepAwake()
