@@ -55,6 +55,20 @@
                 android:focusable="true" />
 
             <TextView
+                android:id="@+id/speechEditsBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="✎"
+                android:textSize="18sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
                 android:id="@+id/settingsBtn"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
