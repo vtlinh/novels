@@ -53,6 +53,17 @@
         android:textSize="16sp"
         android:textColor="@color/fg"
         android:padding="16dp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <TextView
+        android:id="@+id/navAbout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="About"
+        android:textSize="16sp"
+        android:textColor="@color/fg"
+        android:padding="16dp"
         android:layout_marginBottom="12dp"
         android:clickable="true"
         android:focusable="true" />

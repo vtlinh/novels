@@ -124,6 +124,10 @@ class ChapterListActivity : AppCompatActivity() {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, SettingsActivity::class.java))
         }
+        findViewById<TextView>(R.id.navAbout).setOnClickListener {
+            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
+            startActivity(Intent(this, AboutActivity::class.java))
+        }
     }
 
     /* (re)load on every return to this screen — onResume also follows
