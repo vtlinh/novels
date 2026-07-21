@@ -60,4 +60,115 @@ object Zips {
             }
         }
     } catch (e: Exception) { null }
+
+    private fun docUri(treeUri: Uri, docId: String) =
+        DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+
+    /* Fold a novel dir's loose chapters (+translated/) and any existing
+       archive into one freshly written chapters.zip, then delete the
+       originals. Write-then-swap: nothing is removed until the new zip is
+       complete. Returns true when the dir changed. */
+    fun compressDir(context: Context, cr: ContentResolver, treeUri: Uri, d: Saf.Entry): Boolean {
+        val re = ChapterListActivity.CHAPTER_RE
+        val kids = Saf.children(cr, treeUri, d.docId)
+        val loose = kids.filter { !it.isDir && re.matches(it.name) }
+        val tdir = kids.firstOrNull { it.isDir && it.name == "translated" }
+        val tloose = tdir?.let { t ->
+            Saf.children(cr, treeUri, t.docId).filter { !it.isDir && re.matches(it.name) }
+        } ?: emptyList()
+        val oldZip = kids.firstOrNull { !it.isDir && isZipName(it.name) }
+        if (loose.isEmpty() && tloose.isEmpty()) {
+            /* nothing loose; at most normalize a stray chapters-new.zip name */
+            if (oldZip != null && oldZip.name != NAME) {
+                try {
+                    DocumentsContract.renameDocument(cr, docUri(treeUri, oldZip.docId), NAME)
+                    return true
+                } catch (e: Exception) {}
+            }
+            return false
+        }
+        val oldCached = oldZip?.let { cached(context, cr, treeUri, it.docId, d.name) }
+
+        /* write the new zip beside the old one, then swap */
+        val newUri = DocumentsContract.createDocument(
+            cr, docUri(treeUri, d.docId), "application/zip", "chapters-new.zip",
+        ) ?: return false
+        var count = 0
+        val written = HashSet<String>()
+        val os = cr.openOutputStream(newUri) ?: return false
+        java.util.zip.ZipOutputStream(os).use { z ->
+            fun put(entry: String, bytes: ByteArray) {
+                if (written.add(entry)) {
+                    z.putNextEntry(java.util.zip.ZipEntry(entry))
+                    z.write(bytes)
+                    z.closeEntry()
+                    count++
+                }
+            }
+            for (f in loose) {
+                Saf.readText(cr, treeUri, f.docId)?.let { put(f.name, it.toByteArray()) }
+            }
+            for (f in tloose) {
+                Saf.readText(cr, treeUri, f.docId)?.let { put("translated/" + f.name, it.toByteArray()) }
+            }
+            /* carry over anything already zipped that wasn't re-added */
+            oldCached?.let { oc ->
+                for (e in entries(oc)) {
+                    if (e !in written) read(oc, e)?.let { put(e, it.toByteArray()) }
+                }
+            }
+        }
+        if (count == 0) {
+            try { DocumentsContract.deleteDocument(cr, newUri) } catch (e: Exception) {}
+            return false
+        }
+        /* the new zip is safely written: remove originals and rename it */
+        oldZip?.let {
+            try { DocumentsContract.deleteDocument(cr, docUri(treeUri, it.docId)) } catch (e: Exception) {}
+        }
+        for (f in loose + tloose) {
+            try { DocumentsContract.deleteDocument(cr, docUri(treeUri, f.docId)) } catch (e: Exception) {}
+        }
+        try {
+            DocumentsContract.renameDocument(cr, newUri, NAME)
+        } catch (e: Exception) { /* "chapters-new.zip" is also recognized */ }
+        return true
+    }
+
+    /* extract a novel's chapters.zip back to loose files and remove it */
+    fun uncompressDir(context: Context, cr: ContentResolver, treeUri: Uri, d: Saf.Entry): Boolean {
+        val kids = Saf.children(cr, treeUri, d.docId)
+        val zipEnt = kids.firstOrNull { !it.isDir && isZipName(it.name) } ?: return false
+        val zip = cached(context, cr, treeUri, zipEnt.docId, d.name) ?: return false
+        val looseNames = kids.filter { !it.isDir }.map { it.name }.toHashSet()
+        var tDocId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
+        val tNames = tDocId?.let { t ->
+            Saf.children(cr, treeUri, t).map { it.name }.toHashSet()
+        } ?: hashSetOf()
+        for (e in entries(zip)) {
+            val content = read(zip, e) ?: continue
+            if (e.startsWith("translated/")) {
+                val n = e.removePrefix("translated/")
+                if (n in tNames) continue
+                if (tDocId == null) {
+                    tDocId = DocumentsContract.createDocument(
+                        cr, docUri(treeUri, d.docId),
+                        DocumentsContract.Document.MIME_TYPE_DIR, "translated",
+                    )?.let { DocumentsContract.getDocumentId(it) }
+                }
+                val t = tDocId ?: continue
+                DocumentsContract.createDocument(cr, docUri(treeUri, t), "text/plain", n)
+                    ?.let { u -> cr.openOutputStream(u)?.use { it.write(content.toByteArray()) } }
+            } else {
+                if (e in looseNames) continue
+                DocumentsContract.createDocument(cr, docUri(treeUri, d.docId), "text/plain", e)
+                    ?.let { u -> cr.openOutputStream(u)?.use { it.write(content.toByteArray()) } }
+            }
+        }
+        try {
+            DocumentsContract.deleteDocument(cr, docUri(treeUri, zipEnt.docId))
+        } catch (e: Exception) { return false }
+        zip.delete()
+        return true
+    }
 }
