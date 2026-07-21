@@ -343,21 +343,29 @@ class ReaderActivity : AppCompatActivity() {
 
     /* ---- TTS engine ---- */
 
+    /* live connection state, shown by the settings sheet's diagnostic line */
+    private var ttsInitState = "starting"
+
     /* engine=null → device default. Google is tried first and RETRIED once —
        a transient bind failure must not strand the session on the default
        engine (which can report no voices at all); only then fall back. */
     private fun initTts(engine: String?, attempt: Int = 0) {
+        ttsInitState = "connecting to " + (engine ?: "default engine")
         val listener = android.speech.tts.TextToSpeech.OnInitListener { st ->
             if (st == android.speech.tts.TextToSpeech.SUCCESS) {
                 ttsReady = true
+                ttsInitState = "connected to " + (engine ?: "default engine")
                 curTtsLang = ""   // re-apply the language profile on next speak
             } else if (engine != null) {
+                ttsInitState = "FAILED: " + engine
                 /* always post: the failure callback may fire synchronously
                    inside the constructor, before `tts = t` below runs */
                 android.os.Handler(mainLooper).post {
                     tts?.shutdown()
                     if (attempt < 1) initTts(engine, attempt + 1) else initTts(null)
                 }
+            } else {
+                ttsInitState = "FAILED: default engine"
             }
         }
         val t = if (engine != null) {
@@ -659,27 +667,58 @@ class ReaderActivity : AppCompatActivity() {
         }
         root.addView(spinner)
         if (voices.isEmpty()) {
-            /* engine dropped or still connecting: kick a fresh Google-first
-               init and refresh the list once it comes up */
-            val diag = label(
-                "No voices yet — reconnecting… (engines: " + (
-                    try { tts?.engines?.joinToString(", ") { it.name } } catch (e: Exception) { null }
-                        ?: "unknown"
-                    ) + ")",
-            )
+            /* Engine dropped, still connecting, or genuinely broken (e.g. a
+               crashed Google TTS). Keep polling while the sheet is open,
+               cycling through every installed engine, with a live status
+               line and a shortcut into Android's own TTS settings. */
+            val diag = label("No voices yet…")
             root.addView(diag)
-            if (!speaking) initTts("com.google.android.tts")
-            var tries = 0
+            root.addView(
+                TextView(ctx).apply {
+                    text = "Open Android TTS settings"
+                    textSize = 14f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setTextColor(getColor(R.color.accent))
+                    setPadding(0, dp(10), 0, dp(4))
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        try {
+                            startActivity(
+                                android.content.Intent("com.android.settings.TTS_SETTINGS")
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        } catch (e: Exception) { diag.text = "Couldn't open system TTS settings." }
+                    }
+                },
+            )
+            fun engines(): List<String> =
+                try { tts?.engines?.map { it.name } ?: emptyList() } catch (e: Exception) { emptyList() }
+            /* try Google, then the device default, then every other engine */
+            val candidates = ArrayList<String?>(listOf("com.google.android.tts", null))
+            for (e in engines()) if (e != "com.google.android.tts") candidates.add(e)
+            var cand = 0
+            var tick = 0
             fun refresh() {
+                if (!sheet.isShowing) return
                 voices = voiceList()
                 if (voices.isNotEmpty()) {
                     fillSpinner()
-                    diag.text = ""
-                } else if (tries++ < 6) {
-                    spinner.postDelayed({ refresh() }, 700)
+                    diag.text = "Voices found via $ttsInitState"
+                    return
                 }
+                tick++
+                /* every ~4s of no voices, reconnect with the next engine */
+                if (tick % 5 == 0 && !speaking) {
+                    cand = (cand + 1) % candidates.size
+                    initTts(candidates[cand])
+                }
+                diag.text = "No voices — $ttsInitState\nInstalled engines: " +
+                    (engines().joinToString(", ").ifEmpty { "none visible" })
+                spinner.postDelayed({ refresh() }, 800)
             }
-            spinner.postDelayed({ refresh() }, 700)
+            if (!speaking) initTts(candidates[0])
+            spinner.postDelayed({ refresh() }, 800)
         }
 
         fun sliderRow(title: String, get: () -> Float, set: (Float) -> Unit) {
