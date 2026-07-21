@@ -142,6 +142,67 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var titleBar: TextView
     private lateinit var scroll: ScrollView
 
+    /* ---- sleep timer + shake-to-reset ---- */
+    private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val sleepRunnable = Runnable { if (speaking) pauseTts() }
+    private var sensorManager: android.hardware.SensorManager? = null
+    private var shakeListener: android.hardware.SensorEventListener? = null
+    private var lastShakeStatusAt = 0L
+
+    /* (re)arm the sleep timer for the configured minutes; 0 = off. Called on
+       every play and whenever a shake resets it. */
+    private fun scheduleSleepTimer() {
+        sleepHandler.removeCallbacks(sleepRunnable)
+        val mins = prefs.getInt("sleepMinutes", 0)
+        if (mins > 0) sleepHandler.postDelayed(sleepRunnable, mins * 60_000L)
+    }
+
+    private fun cancelSleepTimer() {
+        sleepHandler.removeCallbacks(sleepRunnable)
+    }
+
+    /* accelerometer watch: a shake above the threshold re-arms the sleep
+       timer and flashes "shaking" for 2s. Only active while reading and
+       when the option is on. */
+    private fun startShakeDetection() {
+        if (shakeListener != null) return
+        if (!prefs.getBoolean("shakeEnabled", false)) return
+        val sm = getSystemService(SENSOR_SERVICE) as? android.hardware.SensorManager ?: return
+        val accel = sm.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER) ?: return
+        val threshold = prefs.getFloat("shakeThreshold", 12f)
+        val listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(e: android.hardware.SensorEvent) {
+                val g = Math.sqrt(
+                    (e.values[0] * e.values[0] + e.values[1] * e.values[1] +
+                        e.values[2] * e.values[2]).toDouble(),
+                ) - android.hardware.SensorManager.GRAVITY_EARTH
+                if (Math.abs(g) > threshold) onShake()
+            }
+            override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+        }
+        sm.registerListener(listener, accel, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+        sensorManager = sm
+        shakeListener = listener
+    }
+
+    private fun stopShakeDetection() {
+        shakeListener?.let { sensorManager?.unregisterListener(it) }
+        shakeListener = null
+    }
+
+    private fun onShake() {
+        if (!speaking) return
+        scheduleSleepTimer()   // shake keeps you reading
+        val now = System.currentTimeMillis()
+        /* show for 2s; don't re-show until it's cleared and shaken again */
+        if (now - lastShakeStatusAt < 2500) return
+        lastShakeStatusAt = now
+        val status = findViewById<TextView>(R.id.readerStatus)
+        status.text = "shaking — sleep timer reset"
+        status.visibility = android.view.View.VISIBLE
+        status.postDelayed({ status.visibility = android.view.View.GONE }, 2000)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         /* a new reader supersedes any previous one (which stops its TTS) */
@@ -263,7 +324,7 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
-        findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
+        findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showReaderSettings() }
 
         /* the notification's Pause/Play action broadcasts back to us */
         ttsToggleReceiver = object : android.content.BroadcastReceiver() {
@@ -317,7 +378,7 @@ class ReaderActivity : AppCompatActivity() {
                 if (slideOffset == 0f) prepared = false
             }
         })
-        findViewById<TextView>(R.id.settingsBtn).setOnClickListener { v -> showSettings(v) }
+        findViewById<TextView>(R.id.settingsBtn).setOnClickListener { showReaderSettings() }
     }
 
     /* Custom settings popup (a PopupMenu can't do this): the font controls
@@ -614,6 +675,8 @@ class ReaderActivity : AppCompatActivity() {
         speakCursor = paraStartOf(off)
         speaking = true
         requestAudioFocus()   // makes us the media-button session in the background
+        scheduleSleepTimer()  // the timer counts from each play
+        startShakeDetection()
         /* foreground service keeps reading alive with the screen off */
         lastNotifHeading = currentHeading()
         TtsService.start(this, lastNotifHeading, true, mediaSession?.sessionToken, intent.getStringExtra("slug"))
@@ -716,6 +779,8 @@ class ReaderActivity : AppCompatActivity() {
     private fun pauseTts() {
         speaking = false
         cancelAutoScroll()
+        cancelSleepTimer()
+        stopShakeDetection()
         tts?.stop()
         /* paused: keep the notification with a Play action (wake lock off) */
         TtsService.start(this, currentHeading(), false, mediaSession?.sessionToken, intent.getStringExtra("slug"))
@@ -728,6 +793,8 @@ class ReaderActivity : AppCompatActivity() {
     private fun stopTts() {
         speaking = false
         cancelAutoScroll()
+        cancelSleepTimer()
+        stopShakeDetection()
         tts?.stop()
         TtsService.stop(this)
         abandonAudioFocus()
@@ -838,6 +905,8 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (active === this) active = null
+        cancelSleepTimer()
+        stopShakeDetection()
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
         abandonAudioFocus()
         try { mediaSession?.release() } catch (e: Exception) {}
@@ -846,6 +915,267 @@ class ReaderActivity : AppCompatActivity() {
         ttsToggleReceiver = null
         TtsService.stop(this)
         super.onDestroy()
+    }
+
+    /* ---- full-page reader settings (styled like the main app Settings) ---- */
+    private fun showReaderSettings() {
+        val ctx = this
+        val dialog = android.app.Dialog(ctx, android.R.style.Theme_DeviceDefault_NoActionBar)
+        val outer = ScrollView(ctx).apply {
+            setBackgroundColor(getColor(R.color.bg))
+            isFillViewport = true
+        }
+        val root = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+        }
+        outer.addView(root)
+
+        /* header: back + title */
+        val header = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        header.addView(
+            TextView(ctx).apply {
+                text = "←"; textSize = 24f; setTextColor(getColor(R.color.fg))
+                setPadding(0, dp(2), dp(14), dp(2))
+                isClickable = true; isFocusable = true
+                setOnClickListener { dialog.dismiss() }
+            },
+        )
+        header.addView(
+            TextView(ctx).apply {
+                text = "Reading settings"; textSize = 22f
+                setTextColor(getColor(R.color.fg)); setTypeface(null, android.graphics.Typeface.BOLD)
+            },
+        )
+        root.addView(header)
+
+        fun card(): android.widget.LinearLayout {
+            val c = android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                background = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.bg_settings_card)
+                setPadding(dp(18), dp(18), dp(18), dp(18))
+            }
+            root.addView(
+                c,
+                android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(14) },
+            )
+            return c
+        }
+        fun cardTitle(c: android.widget.LinearLayout, t: String) = c.addView(
+            TextView(ctx).apply {
+                text = t; textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(getColor(R.color.fg))
+            },
+        )
+        fun hint(c: android.widget.LinearLayout, t: String) = c.addView(
+            TextView(ctx).apply {
+                text = t; textSize = 12f; setTextColor(getColor(R.color.muted))
+                setPadding(0, dp(6), 0, 0)
+            },
+        )
+
+        /* ── Display: language + font ── */
+        val disp = card()
+        cardTitle(disp, "Display")
+        if (chapters?.translated?.isNotEmpty() == true) {
+            disp.addView(
+                TextView(ctx).apply {
+                    text = if (english) "Switch to Tiếng Việt" else "Switch to English"
+                    textSize = 15f; setTextColor(getColor(R.color.accent))
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    setPadding(0, dp(12), 0, dp(6))
+                    isClickable = true; isFocusable = true
+                    setOnClickListener { dialog.dismiss(); toggleLanguage() }
+                },
+            )
+        }
+        val fontRow = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, 0)
+        }
+        fontRow.addView(
+            TextView(ctx).apply {
+                text = "Font size"; textSize = 15f; setTextColor(getColor(R.color.fg))
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            },
+        )
+        val fontVal = TextView(ctx).apply {
+            text = fontSp.toInt().toString(); textSize = 15f; setTextColor(getColor(R.color.fg))
+            minWidth = dp(36); gravity = android.view.Gravity.CENTER
+        }
+        fun fontBtn(t: String, d: Float) = TextView(ctx).apply {
+            text = t; textSize = 22f; setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.accent)); setPadding(dp(16), dp(2), dp(16), dp(2))
+            isClickable = true; isFocusable = true
+            setOnClickListener { adjustFont(d); fontVal.text = fontSp.toInt().toString() }
+        }
+        fontRow.addView(fontBtn("−", -1f))
+        fontRow.addView(fontVal)
+        fontRow.addView(fontBtn("+", +1f))
+        disp.addView(fontRow)
+
+        /* ── Reading aloud: voice + rate + pitch ── */
+        val aloud = card()
+        val lang = curTtsLang.ifEmpty { detectLang(text.text.toString().take(600)) }
+        cardTitle(aloud, "Reading aloud — " + if (lang == "vi") "Tiếng Việt" else "English")
+        aloud.addView(
+            TextView(ctx).apply {
+                text = "Voice"; textSize = 13f; setTextColor(getColor(R.color.muted))
+                setPadding(0, dp(12), 0, dp(4))
+            },
+        )
+        val voices = try {
+            val all = tts?.voices.orEmpty()
+            val forLang = all.filter { it.locale.language == lang }
+            (forLang.ifEmpty { all }).sortedBy { it.name }
+        } catch (e: Exception) { emptyList() }
+        val spinner = android.widget.Spinner(ctx)
+        spinner.adapter = android.widget.ArrayAdapter(
+            ctx, android.R.layout.simple_spinner_dropdown_item,
+            listOf("Default") + voices.map { "${it.locale} — ${it.name}" },
+        )
+        val savedVoice = prefs.getString("ttsVoice:$lang", null)
+        val savedIdx = voices.indexOfFirst { it.name == savedVoice }
+        spinner.setSelection(if (savedIdx >= 0) savedIdx + 1 else 0)
+        spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) {
+                if (pos == 0) prefs.edit().remove("ttsVoice:$lang").apply()
+                else prefs.edit().putString("ttsVoice:$lang", voices[pos - 1].name).apply()
+                applyTtsConfig(lang)
+            }
+            override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+        }
+        aloud.addView(spinner)
+        if (voices.isEmpty()) hint(aloud, "No voices found — open the ⚙ while stopped to reconnect Google TTS.")
+
+        fun slider(title: String, key: String) {
+            aloud.addView(
+                TextView(ctx).apply {
+                    text = title; textSize = 13f; setTextColor(getColor(R.color.muted))
+                    setPadding(0, dp(12), 0, dp(4))
+                },
+            )
+            val row = android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            fun get() = prefs.getFloat(key, 1f)
+            val valueTv = TextView(ctx).apply {
+                textSize = 14f; setTextColor(getColor(R.color.fg)); text = "%.2f".format(get())
+                minWidth = dp(46); setPadding(dp(8), 0, 0, 0)
+            }
+            val seek = android.widget.SeekBar(ctx).apply {
+                max = 50; progress = ((get() - 0.5f) * 20f + 0.5f).toInt()
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                )
+            }
+            fun applyVal(v: Float, fromSeek: Boolean) {
+                val c = (Math.round(v * 20f) / 20f).coerceIn(0.5f, 3f)
+                prefs.edit().putFloat(key, c).apply()
+                valueTv.text = "%.2f".format(c)
+                if (!fromSeek) seek.progress = ((c - 0.5f) * 20f + 0.5f).toInt()
+                applyTtsConfig(lang)
+            }
+            seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: android.widget.SeekBar?, pr: Int, fromUser: Boolean) {
+                    if (fromUser) applyVal(0.5f + pr / 20f, true)
+                }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+            })
+            fun step(t: String, d: Float) = TextView(ctx).apply {
+                text = t; textSize = 20f; setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(getColor(R.color.accent)); setPadding(dp(12), dp(4), dp(12), dp(4))
+                isClickable = true; isFocusable = true
+                setOnClickListener { applyVal(get() + d, false) }
+            }
+            row.addView(step("<", -0.05f)); row.addView(seek)
+            row.addView(step(">", +0.05f)); row.addView(valueTv)
+            aloud.addView(row)
+        }
+        slider("Rate", "ttsRate:$lang")
+        slider("Pitch", "ttsPitch:$lang")
+
+        /* ── Sleep timer ── */
+        val sleep = card()
+        cardTitle(sleep, "Sleep timer")
+        val sleepInput = android.widget.EditText(ctx).apply {
+            setBackgroundResource(R.drawable.bg_input)
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            hint = "0 = off"
+            setTextColor(getColor(R.color.fg)); setHintTextColor(getColor(R.color.muted))
+            textSize = 14f
+            val cur = prefs.getInt("sleepMinutes", 0)
+            if (cur > 0) setText(cur.toString())
+        }
+        val sleepLp = android.widget.LinearLayout.LayoutParams(
+            android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(12) }
+        sleep.addView(sleepInput, sleepLp)
+        hint(sleep, "Stop reading after this many minutes. The timer restarts each time you press play. Blank or 0 turns it off.")
+        val saveSleep = {
+            val mins = sleepInput.text.toString().toIntOrNull() ?: 0
+            prefs.edit().putInt("sleepMinutes", mins.coerceAtLeast(0)).apply()
+            if (speaking) scheduleSleepTimer()
+        }
+
+        /* ── Shake to reset ── */
+        val shake = card()
+        cardTitle(shake, "Shake to reset")
+        val shakeCheck = android.widget.CheckBox(ctx).apply {
+            text = "Reset the sleep timer when I shake the phone"
+            textSize = 14f; setTextColor(getColor(R.color.fg))
+            setPadding(dp(6), dp(10), 0, 0)
+            isChecked = prefs.getBoolean("shakeEnabled", false)
+        }
+        shake.addView(shakeCheck)
+        shake.addView(
+            TextView(ctx).apply {
+                text = "Shake sensitivity threshold"; textSize = 13f
+                setTextColor(getColor(R.color.muted)); setPadding(0, dp(12), 0, dp(4))
+            },
+        )
+        val shakeInput = android.widget.EditText(ctx).apply {
+            setBackgroundResource(R.drawable.bg_input)
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setTextColor(getColor(R.color.fg)); setHintTextColor(getColor(R.color.muted))
+            textSize = 14f
+            setText("%.0f".format(prefs.getFloat("shakeThreshold", 12f)))
+        }
+        shake.addView(shakeInput)
+        hint(shake, "Lower = more sensitive (12 is a firm shake). While reading, the status flashes “shaking” in red when a shake passes this threshold.")
+        val saveShake = {
+            prefs.edit()
+                .putBoolean("shakeEnabled", shakeCheck.isChecked)
+                .putFloat("shakeThreshold", shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(1f) ?: 12f)
+                .apply()
+            /* re-arm with the new config if currently reading */
+            if (speaking) { stopShakeDetection(); startShakeDetection() }
+        }
+
+        /* persist timer + shake settings when the page closes */
+        dialog.setOnDismissListener { saveSleep(); saveShake() }
+
+        dialog.setContentView(outer)
+        dialog.window?.setLayout(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        )
+        dialog.show()
     }
 
     /* bottom sheet: voice picker + rate/pitch sliders (0.5–3, step 0.1,

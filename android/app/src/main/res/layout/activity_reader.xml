@@ -69,23 +69,45 @@
                 android:focusable="true" />
         </LinearLayout>
 
-        <ScrollView
-            android:id="@+id/readerScroll"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
-            android:fillViewport="true">
+            android:layout_weight="1">
 
-            <TextView
-                android:id="@+id/readerText"
+            <ScrollView
+                android:id="@+id/readerScroll"
                 android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:fillViewport="true">
+
+                <TextView
+                    android:id="@+id/readerText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="18dp"
+                    android:textSize="16sp"
+                    android:textColor="@color/fg"
+                    android:lineSpacingMultiplier="1.45"
+                    android:textIsSelectable="true" />
+            </ScrollView>
+
+            <!-- transient status (e.g. "shaking") shown over the text -->
+            <TextView
+                android:id="@+id/readerStatus"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:padding="18dp"
-                android:textSize="16sp"
-                android:textColor="@color/fg"
-                android:lineSpacingMultiplier="1.45"
-                android:textIsSelectable="true" />
-        </ScrollView>
+                android:layout_gravity="top|center_horizontal"
+                android:layout_marginTop="8dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/err"
+                android:background="@color/card"
+                android:visibility="gone" />
+        </FrameLayout>
 
         <!-- TTS footer: play/pause centered, voice settings on the right -->
         <FrameLayout
