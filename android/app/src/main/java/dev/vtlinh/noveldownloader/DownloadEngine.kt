@@ -2,6 +2,7 @@ package dev.vtlinh.noveldownloader
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -548,6 +549,21 @@ class DownloadEngine(
                 t.translate(dir, store, folderKey, slug, chapters.mapNotNull { it.filename }) { stopRequested }
             } catch (e: Exception) {
                 log("TRANSLATION FAILED — ${e.message}")
+            }
+        }
+        /* "Download compressed": fold everything into chapters.zip */
+        if (!stopRequested &&
+            context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
+                .getBoolean("zipDownloads", true)
+        ) {
+            status("Compressing chapters…")
+            try {
+                val docId = DocumentsContract.getDocumentId(dir.uri)
+                if (Zips.compressDir(context, context.contentResolver, treeUri, Saf.Entry(docId, folderName, true))) {
+                    log("Chapters compressed into ${Zips.NAME}")
+                }
+            } catch (e: Exception) {
+                log("Compress failed — ${e.message}")
             }
         }
         status((if (stopRequested) "Stopped: " else "Done: ") + summary)
