@@ -822,14 +822,19 @@ class ReaderActivity : AppCompatActivity() {
     private var loadReady = false
     private var loadJob: kotlinx.coroutines.Job? = null
 
-    /* (re)arm the 5-second quiet window after every chapter open */
+    /* (re)arm the 5-second quiet window after every chapter open. When it
+       expires, stock up 2 chapters in BOTH directions; only after that do
+       the chapter-border triggers (maybeLoadMore) take over. */
     private fun armLoadTimer() {
         loadReady = false
         loadJob?.cancel()
         loadJob = lifecycleScope.launch {
             kotlinx.coroutines.delay(5000)
+            appendChapters(2)
+            while (loading) kotlinx.coroutines.delay(50)
+            if (!speaking) prependChapters(2)   // prepends shift text — not under TTS
+            while (loading) kotlinx.coroutines.delay(50)
             loadReady = true
-            maybeLoadMore()
         }
     }
 
