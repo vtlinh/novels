@@ -1,15 +1,15 @@
 package dev.vtlinh.noveldownloader
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.media.session.MediaSession
 import android.os.IBinder
 import android.os.PowerManager
+import android.support.v4.media.session.MediaSessionCompat
+import androidx.core.app.NotificationCompat
 
 /* Keeps the process alive (and the CPU awake between sentences) while the
    reader's TTS is speaking, so reading continues with the screen off or the
@@ -27,7 +27,7 @@ class TtsService : Service() {
         /* notification action → ReaderActivity's in-app receiver */
         const val ACTION_TOGGLE = "dev.vtlinh.noveldownloader.TTS_TOGGLE"
 
-        fun start(ctx: Context, title: String, speaking: Boolean, token: MediaSession.Token?, slug: String?) {
+        fun start(ctx: Context, title: String, speaking: Boolean, token: MediaSessionCompat.Token?, slug: String?) {
             ctx.startForegroundService(
                 Intent(ctx, TtsService::class.java)
                     .putExtra("title", title)
@@ -52,7 +52,7 @@ class TtsService : Service() {
         )
         val speaking = intent?.getBooleanExtra("speaking", true) ?: true
         @Suppress("DEPRECATION")
-        val token = intent?.getParcelableExtra<MediaSession.Token>("token")
+        val token = intent?.getParcelableExtra<MediaSessionCompat.Token>("token")
 
         /* tapping the notification brings the existing task (the reader) back */
         val openIntent = PendingIntent.getActivity(
@@ -65,19 +65,17 @@ class TtsService : Service() {
             Intent(ACTION_TOGGLE).setPackage(packageName),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val action = Notification.Action.Builder(
-            android.graphics.drawable.Icon.createWithResource(
-                this,
-                if (speaking) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-            ),
+        val action = NotificationCompat.Action(
+            if (speaking) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
             if (speaking) "Pause" else "Play",
             toggleIntent,
-        ).build()
+        )
 
-        val mediaStyle = Notification.MediaStyle().setShowActionsInCompactView(0)
+        val mediaStyle = androidx.media.app.NotificationCompat.MediaStyle()
+            .setShowActionsInCompactView(0)
         if (token != null) mediaStyle.setMediaSession(token)
 
-        val builder = Notification.Builder(this, CHANNEL)
+        val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(intent?.getStringExtra("title")?.ifEmpty { null } ?: "Reading aloud")
             .setContentIntent(openIntent)
