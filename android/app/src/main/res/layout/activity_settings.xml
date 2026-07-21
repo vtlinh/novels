@@ -43,7 +43,7 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- ══ Download folder ══ -->
+        <!-- ══ Storage (download folder + compression) ══ -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -55,41 +55,72 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Download folder"
+                android:text="Storage"
                 android:textSize="16sp"
                 android:textStyle="bold"
                 android:textColor="@color/fg" />
 
+            <!-- Download folder: {Folder} {edit icon} -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Download folder:"
+                    android:textSize="14sp"
+                    android:textColor="@color/muted" />
 
                 <TextView
                     android:id="@+id/folderLabel"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:layout_marginStart="6dp"
                     android:textSize="14sp"
-                    android:textColor="@color/muted"
+                    android:textColor="@color/fg"
+                    android:maxLines="1"
+                    android:ellipsize="end"
                     android:text="No folder selected" />
 
                 <TextView
                     android:id="@+id/folderBtn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Change"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
+                    android:text="✎"
+                    android:textSize="18sp"
                     android:textColor="@color/accent"
                     android:clickable="true"
                     android:focusable="true"
                     android:paddingStart="12dp"
-                    android:paddingTop="6dp"
-                    android:paddingBottom="6dp" />
+                    android:paddingEnd="4dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp" />
             </LinearLayout>
+
+            <CheckBox
+                android:id="@+id/compressCheck"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:paddingStart="6dp"
+                android:text="Compress my novels"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                app:buttonTint="@color/accent" />
+
+            <TextView
+                android:id="@+id/zipStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Stores chapters as per-chapter gzip (~70% smaller). New downloads follow this setting; existing novels are converted in the background. Reading works either way."
+                android:textSize="12sp"
+                android:textColor="@color/muted" />
         </LinearLayout>
 
         <!-- ══ Anthropic API key ══ -->
@@ -142,74 +173,6 @@
                 android:textColor="@color/accent"
                 android:clickable="true"
                 android:focusable="true" />
-        </LinearLayout>
-
-        <!-- ══ Storage ══ -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:orientation="vertical"
-            android:background="@drawable/bg_settings_card"
-            android:padding="18dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Storage"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:textColor="@color/fg" />
-
-            <CheckBox
-                android:id="@+id/zipDownloadsCheck"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:paddingStart="6dp"
-                android:text="Download compressed"
-                android:textSize="14sp"
-                android:textColor="@color/fg"
-                app:buttonTint="@color/accent" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="horizontal">
-
-                <Button
-                    android:id="@+id/compressBtn"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Compress"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/fg"
-                    app:backgroundTint="@color/btn_secondary"
-                    app:cornerRadius="8dp" />
-
-                <Button
-                    android:id="@+id/uncompressBtn"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:text="Uncompress"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/fg"
-                    app:backgroundTint="@color/btn_secondary"
-                    app:cornerRadius="8dp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/zipStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="Compresses each chapter file individually (~70% smaller). Reading works either way."
-                android:textSize="12sp"
-                android:textColor="@color/muted" />
         </LinearLayout>
 
         <!-- ══ Reading ══ -->

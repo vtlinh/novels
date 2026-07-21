@@ -576,10 +576,10 @@ class DownloadEngine(
                 log("TRANSLATION FAILED — ${e.message}")
             }
         }
-        /* "Download compressed": fold everything into chapters.zip */
+        /* "Compress my novels" on → gzip this novel's chapters after download */
         if (!stopRequested &&
             context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
-                .getBoolean("zipDownloads", true)
+                .let { it.getBoolean("compressNovels", it.getBoolean("zipDownloads", true)) }
         ) {
             status("Compressing chapters…")
             try {

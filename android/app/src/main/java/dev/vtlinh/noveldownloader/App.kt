@@ -22,6 +22,10 @@ class App : Application() {
             object : DefaultLifecycleObserver {
                 override fun onStart(owner: LifecycleOwner) {
                     Updater.autoCheck(applicationContext, scope)
+                    /* resume a compress/uncompress pass interrupted by an app
+                       kill — done on foreground so starting the service is
+                       allowed on Android 12+ */
+                    try { CompressService.resumeIfNeeded(applicationContext) } catch (e: Exception) {}
                 }
             },
         )
