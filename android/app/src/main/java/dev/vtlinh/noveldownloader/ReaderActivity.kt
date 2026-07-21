@@ -1009,7 +1009,6 @@ class ReaderActivity : AppCompatActivity() {
         if (loading || nextIdx >= ch.ordered.size) return
         loading = true
         lifecycleScope.launch {
-            val keepY = scroll.scrollY
             clearTextSelection()
             var added = 0
             while (added < n && nextIdx < ch.ordered.size) {
@@ -1029,15 +1028,7 @@ class ReaderActivity : AppCompatActivity() {
                 pendingSpeakContinue = false
                 if (speaking) speakNext()
             }
-            scroll.post {
-                /* appends never move existing text, so a big unprompted move
-                   across this append is the cursor auto-scroll — undo it
-                   (a real fling can't cover half a screen in these frames) */
-                if (!speaking && kotlin.math.abs(scroll.scrollY - keepY) > scroll.height / 2) {
-                    scroll.scrollTo(0, keepY)
-                }
-                updateHeader()
-            }
+            scroll.post { updateHeader() }
         }
     }
 
