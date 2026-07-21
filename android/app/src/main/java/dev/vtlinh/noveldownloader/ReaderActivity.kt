@@ -343,9 +343,10 @@ class ReaderActivity : AppCompatActivity() {
 
     /* ---- TTS engine ---- */
 
-    /* engine=null → device default. Tried Google first; if its init fails
-       (engine not installed) we retry once with the default engine. */
-    private fun initTts(engine: String?) {
+    /* engine=null → device default. Google is tried first and RETRIED once —
+       a transient bind failure must not strand the session on the default
+       engine (which can report no voices at all); only then fall back. */
+    private fun initTts(engine: String?, attempt: Int = 0) {
         val listener = android.speech.tts.TextToSpeech.OnInitListener { st ->
             if (st == android.speech.tts.TextToSpeech.SUCCESS) {
                 ttsReady = true
@@ -355,7 +356,7 @@ class ReaderActivity : AppCompatActivity() {
                    inside the constructor, before `tts = t` below runs */
                 android.os.Handler(mainLooper).post {
                     tts?.shutdown()
-                    initTts(null)
+                    if (attempt < 1) initTts(engine, attempt + 1) else initTts(null)
                 }
             }
         }
@@ -625,20 +626,24 @@ class ReaderActivity : AppCompatActivity() {
         )
 
         root.addView(label("Voice"))
-        val voices = try {
+        fun voiceList(): List<android.speech.tts.Voice> = try {
             val all = tts?.voices.orEmpty()
             val forLang = all.filter { it.locale.language == lang }
             /* nothing for this language → show everything rather than nothing */
             (forLang.ifEmpty { all }).sortedBy { it.name }
-        } catch (e: Exception) { emptyList<android.speech.tts.Voice>() }
+        } catch (e: Exception) { emptyList() }
+        var voices = voiceList()
         val spinner = android.widget.Spinner(ctx)
-        spinner.adapter = android.widget.ArrayAdapter(
-            ctx, android.R.layout.simple_spinner_dropdown_item,
-            listOf("Default") + voices.map { "${it.locale} — ${it.name}" },
-        )
-        val savedVoice = prefs.getString("ttsVoice:$lang", null)
-        val savedIdx = voices.indexOfFirst { it.name == savedVoice }
-        spinner.setSelection(if (savedIdx >= 0) savedIdx + 1 else 0)
+        fun fillSpinner() {
+            spinner.adapter = android.widget.ArrayAdapter(
+                ctx, android.R.layout.simple_spinner_dropdown_item,
+                listOf("Default") + voices.map { "${it.locale} — ${it.name}" },
+            )
+            val savedVoice = prefs.getString("ttsVoice:$lang", null)
+            val savedIdx = voices.indexOfFirst { it.name == savedVoice }
+            spinner.setSelection(if (savedIdx >= 0) savedIdx + 1 else 0)
+        }
+        fillSpinner()
         spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
                 parent: android.widget.AdapterView<*>?,
@@ -653,6 +658,29 @@ class ReaderActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
         root.addView(spinner)
+        if (voices.isEmpty()) {
+            /* engine dropped or still connecting: kick a fresh Google-first
+               init and refresh the list once it comes up */
+            val diag = label(
+                "No voices yet — reconnecting… (engines: " + (
+                    try { tts?.engines?.joinToString(", ") { it.name } } catch (e: Exception) { null }
+                        ?: "unknown"
+                    ) + ")",
+            )
+            root.addView(diag)
+            if (!speaking) initTts("com.google.android.tts")
+            var tries = 0
+            fun refresh() {
+                voices = voiceList()
+                if (voices.isNotEmpty()) {
+                    fillSpinner()
+                    diag.text = ""
+                } else if (tries++ < 6) {
+                    spinner.postDelayed({ refresh() }, 700)
+                }
+            }
+            spinner.postDelayed({ refresh() }, 700)
+        }
 
         fun sliderRow(title: String, get: () -> Float, set: (Float) -> Unit) {
             root.addView(label(title))
