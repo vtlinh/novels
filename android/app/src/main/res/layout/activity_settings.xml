@@ -161,4 +161,31 @@
         android:text="Compresses each chapter file individually (~70% smaller). Reading works either way."
         android:textSize="12sp"
         android:textColor="@color/muted" />
+
+    <!-- reading: keep the screen on while TTS reads aloud -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="Reading"
+        android:textSize="12sp"
+        android:textColor="@color/muted" />
+
+    <CheckBox
+        android:id="@+id/keepAwakeCheck"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Keep screen awake while reading aloud"
+        android:textSize="14sp"
+        android:textColor="@color/fg"
+        app:buttonTint="@color/accent" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="Stops the screen from dimming off on the reader while text-to-speech is playing."
+        android:textSize="12sp"
+        android:textColor="@color/muted" />
 </LinearLayout>
