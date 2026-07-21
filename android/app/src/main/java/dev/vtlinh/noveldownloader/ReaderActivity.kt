@@ -324,7 +324,7 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
-        findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showReaderSettings() }
+        findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showReaderSettings(voiceOnly = true) }
 
         /* the notification's Pause/Play action broadcasts back to us */
         ttsToggleReceiver = object : android.content.BroadcastReceiver() {
@@ -918,7 +918,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* ---- full-page reader settings (styled like the main app Settings) ---- */
-    private fun showReaderSettings() {
+    private fun showReaderSettings(voiceOnly: Boolean = false) {
         val ctx = this
         val dialog = android.app.Dialog(ctx, android.R.style.Theme_DeviceDefault_NoActionBar)
         val outer = ScrollView(ctx).apply {
@@ -946,7 +946,7 @@ class ReaderActivity : AppCompatActivity() {
         )
         header.addView(
             TextView(ctx).apply {
-                text = "Reading settings"; textSize = 22f
+                text = if (voiceOnly) "Voice settings" else "Reading settings"; textSize = 22f
                 setTextColor(getColor(R.color.fg)); setTypeface(null, android.graphics.Typeface.BOLD)
             },
         )
@@ -980,7 +980,8 @@ class ReaderActivity : AppCompatActivity() {
             },
         )
 
-        /* ── Display: language + font ── */
+        /* ── Display: language + font (top menu only) ── */
+        if (!voiceOnly) {
         val disp = card()
         cardTitle(disp, "Display")
         if (chapters?.translated?.isNotEmpty() == true) {
@@ -1036,8 +1037,10 @@ class ReaderActivity : AppCompatActivity() {
         fontRow.addView(fontBtn("+", +1f))
         disp.addView(fontRow)
         disp.addView(fontSample)
+        }
 
-        /* ── Reading aloud: voice + rate + pitch ── */
+        /* ── Reading aloud: voice + rate + pitch (bottom / voice menu only) ── */
+        if (voiceOnly) {
         val aloud = card()
         val lang = curTtsLang.ifEmpty { detectLang(text.text.toString().take(600)) }
         cardTitle(aloud, "Reading aloud — " + if (lang == "vi") "Tiếng Việt" else "English")
@@ -1119,7 +1122,13 @@ class ReaderActivity : AppCompatActivity() {
         }
         slider("Rate", "ttsRate:$lang")
         slider("Pitch", "ttsPitch:$lang")
+        }
 
+        /* saves for the timer/shake cards (no-ops on the voice menu) */
+        var saveSleep: () -> Unit = {}
+        var saveShake: () -> Unit = {}
+
+        if (!voiceOnly) {
         /* ── Sleep timer ── */
         val sleep = card()
         cardTitle(sleep, "Sleep timer")
@@ -1139,7 +1148,7 @@ class ReaderActivity : AppCompatActivity() {
         ).apply { topMargin = dp(12) }
         sleep.addView(sleepInput, sleepLp)
         hint(sleep, "Stop reading after this many minutes. The timer restarts each time you press play. Blank or 0 turns it off.")
-        val saveSleep = {
+        saveSleep = {
             val mins = sleepInput.text.toString().toIntOrNull() ?: 0
             prefs.edit().putInt("sleepMinutes", mins.coerceAtLeast(0)).apply()
             if (speaking) scheduleSleepTimer()
@@ -1172,13 +1181,14 @@ class ReaderActivity : AppCompatActivity() {
         }
         shake.addView(shakeInput)
         hint(shake, "Lower = more sensitive (12 is a firm shake). While reading, the status flashes “shaking” in red when a shake passes this threshold.")
-        val saveShake = {
+        saveShake = {
             prefs.edit()
                 .putBoolean("shakeEnabled", shakeCheck.isChecked)
                 .putFloat("shakeThreshold", shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(1f) ?: 12f)
                 .apply()
             /* re-arm with the new config if currently reading */
             if (speaking) { stopShakeDetection(); startShakeDetection() }
+        }
         }
 
         /* persist timer + shake settings when the page closes */
