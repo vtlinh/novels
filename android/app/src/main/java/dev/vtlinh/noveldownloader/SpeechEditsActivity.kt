@@ -126,7 +126,7 @@ class SpeechEditsActivity : AppCompatActivity() {
     }
 
     private fun currentList(): List<SpeechEdit> =
-        if (tab == 0) userList else SpeechEdits.defaultsWithState(this)
+        if (tab == 0) userList else SpeechEdits.defaults
 
     private fun switchTab(t: Int) {
         tab = t
@@ -170,15 +170,17 @@ class SpeechEditsActivity : AppCompatActivity() {
             )
         }
         val check = CheckBox(this).apply {
-            isChecked = edit.enabled
-            setOnClickListener {
-                if (tab == 0) {
+            if (tab == 0) {
+                isChecked = edit.enabled
+                setOnClickListener {
                     userList[index].enabled = isChecked
                     SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
-                } else {
-                    SpeechEdits.setDefaultEnabled(this@SpeechEditsActivity, edit.id, isChecked)
+                    refresh()
                 }
-                refresh()
+            } else {
+                // defaults are hard-coded and always applied — read-only
+                isChecked = true
+                isEnabled = false
             }
         }
         row.addView(check)

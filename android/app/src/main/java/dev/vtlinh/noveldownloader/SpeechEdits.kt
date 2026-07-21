@@ -55,7 +55,6 @@ data class SpeechEdit(
 object SpeechEdits {
     private const val PREFS = "speechEdits"
     private const val USER_KEY = "user"
-    private const val DISABLED_DEFAULTS = "disabledDefaults"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -109,26 +108,13 @@ object SpeechEdits {
 
     fun newId(): String = "u" + System.nanoTime()
 
-    private fun disabledDefaults(ctx: Context): MutableSet<String> =
-        prefs(ctx).getStringSet(DISABLED_DEFAULTS, emptySet())?.toMutableSet() ?: mutableSetOf()
-
-    fun setDefaultEnabled(ctx: Context, id: String, enabled: Boolean) {
-        val s = disabledDefaults(ctx)
-        if (enabled) s.remove(id) else s.add(id)
-        prefs(ctx).edit().putStringSet(DISABLED_DEFAULTS, s).apply()
-    }
-
-    /* defaults with their saved enabled/disabled state applied */
-    fun defaultsWithState(ctx: Context): List<SpeechEdit> {
-        val disabled = disabledDefaults(ctx)
-        return defaults.map { it.copy(enabled = !disabled.contains(it.id)) }
-    }
-
-    /* compiled enabled rules (user first, then defaults) for the reader */
+    /* compiled enabled rules for the reader: user rules (toggleable) first,
+       then ALL built-in defaults. The defaults are hard-coded and always
+       applied — they can't be disabled. */
     fun enabledRules(ctx: Context): List<Pair<Regex, String>> {
         val out = ArrayList<Pair<Regex, String>>()
         user(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
-        defaultsWithState(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
+        defaults.forEach { e -> e.compiled()?.let { out.add(it) } }
         return out
     }
 }
