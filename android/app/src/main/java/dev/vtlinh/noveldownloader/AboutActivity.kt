@@ -72,6 +72,7 @@ class AboutActivity : AppCompatActivity() {
             }
             status.text = "Installing v${latest.second}…"
             try {
+                Updater.abandonSessions(this@AboutActivity)   // clear any stuck session
                 Updater.install(this@AboutActivity, apk)
                 /* returning here (via onResume) means the install prompt was
                    dismissed — offer a retry */

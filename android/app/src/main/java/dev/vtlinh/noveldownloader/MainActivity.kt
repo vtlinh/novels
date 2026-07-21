@@ -151,6 +151,7 @@ class MainActivity : AppCompatActivity() {
         if (installInFlight) {
             /* returned to the app after the install prompt was dismissed */
             installInFlight = false
+            installStuckCheck?.let { installHandler.removeCallbacks(it) }
             updateFound = false
             val banner = findViewById<TextView>(R.id.updateBanner)
             banner.text = "Update ready — tap to install"
@@ -181,31 +182,66 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private var installRetries = 0
+    private var installStuckCheck: Runnable? = null
+    private val installHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     private fun installUpdate() {
         lifecycleScope.launch {
             val statusText = findViewById<TextView>(R.id.statusText)
             val banner = findViewById<TextView>(R.id.updateBanner)
             statusText.text = "Downloading update…"
             val apk = Updater.downloadApk(this@MainActivity)
-            if (apk != null) {
-                statusText.text = "Installing update…"
-                installInFlight = true
-                try {
-                    Updater.install(this@MainActivity, apk)
-                } catch (e: Exception) {
-                    installInFlight = false
-                    updateFound = false
-                    statusText.text = "Update failed — ${e.message}"
-                    banner.text = "Update ready — tap to install"
-                    banner.visibility = View.VISIBLE
-                }
-            } else {
+            if (apk == null) {
                 updateFound = false
                 statusText.text = "Update download failed — will retry later."
                 banner.text = "Update ready — tap to install"
                 banner.visibility = View.VISIBLE
+                return@launch
+            }
+            installRetries = 0
+            commitInstall(apk)
+        }
+    }
+
+    /* Commit the already-downloaded APK. If the Installing… phase stalls — a
+       silent install can leave a committed session that never resolves — abort
+       the stuck session and re-commit the SAME file (no re-download), up to a
+       couple of times, then fall back to the retry banner. */
+    private fun commitInstall(apk: java.io.File) {
+        val statusText = findViewById<TextView>(R.id.statusText)
+        val banner = findViewById<TextView>(R.id.updateBanner)
+        installStuckCheck?.let { installHandler.removeCallbacks(it) }
+        statusText.text = "Installing update…"
+        installInFlight = true
+        try {
+            Updater.abandonSessions(this)   // clear any stuck/previous session first
+            Updater.install(this, apk)
+        } catch (e: Exception) {
+            installInFlight = false
+            updateFound = false
+            statusText.text = "Update failed — ${e.message}"
+            banner.text = "Update ready — tap to install"
+            banner.visibility = View.VISIBLE
+            return
+        }
+        installStuckCheck = Runnable {
+            /* a successful silent install kills the process (so this never
+               runs); a shown confirmation pauses us (so we're not RESUMED).
+               Still here, foreground, and installing → the install stalled. */
+            if (!installInFlight) return@Runnable
+            if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return@Runnable
+            if (installRetries < 2) {
+                installRetries++
+                commitInstall(apk)   // reuse the downloaded APK, no re-download
+            } else {
+                installInFlight = false
+                statusText.text = "Update didn't install — tap to retry."
+                banner.text = "Update ready — tap to install"
+                banner.visibility = View.VISIBLE
             }
         }
+        installHandler.postDelayed(installStuckCheck!!, 40_000)
     }
 
     override fun onNewIntent(intent: Intent) {
