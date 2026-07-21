@@ -1170,10 +1170,11 @@ class ReaderActivity : AppCompatActivity() {
                 android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
             setTextColor(getColor(R.color.fg)); setHintTextColor(getColor(R.color.muted))
             textSize = 14f
-            setText("%.0f".format(prefs.getFloat("shakeThreshold", 12f)))
+            val tv = prefs.getFloat("shakeThreshold", 12f)
+            setText(if (tv % 1f == 0f) "%.0f".format(tv) else tv.toString())
         }
         shake.addView(shakeInput)
-        hint(shake, "Lower = more sensitive (12 is a firm shake). Shake the phone now to test — the status below flashes red when a shake passes this threshold.")
+        hint(shake, "Lower = more sensitive (12 is a firm shake; fractions like 0.5 catch a gentle nudge). Shake the phone now to test — the status below flashes red when a shake passes this threshold.")
         /* live tester: flashes here so the threshold can be calibrated while
            this page is open (uses the value typed above, not the saved one) */
         val shakeStatus = TextView(ctx).apply {
@@ -1193,7 +1194,7 @@ class ReaderActivity : AppCompatActivity() {
                         (e.values[0] * e.values[0] + e.values[1] * e.values[1] +
                             e.values[2] * e.values[2]).toDouble(),
                     ) - android.hardware.SensorManager.GRAVITY_EARTH
-                    val thr = shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(1f) ?: 12f
+                    val thr = shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(0.05f) ?: 12f
                     if (Math.abs(g) > thr) {
                         val now = System.currentTimeMillis()
                         if (now - shownAt < 2500) return
@@ -1212,7 +1213,7 @@ class ReaderActivity : AppCompatActivity() {
         saveShake = {
             prefs.edit()
                 .putBoolean("shakeEnabled", shakeCheck.isChecked)
-                .putFloat("shakeThreshold", shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(1f) ?: 12f)
+                .putFloat("shakeThreshold", shakeInput.text.toString().toFloatOrNull()?.coerceAtLeast(0.05f) ?: 12f)
                 .apply()
             /* re-arm with the new config if currently reading */
             if (speaking) { stopShakeDetection(); startShakeDetection() }
