@@ -99,8 +99,6 @@ class ChapterListActivity : AppCompatActivity() {
         val title = intent.getStringExtra("title") ?: dirName
         findViewById<TextView>(R.id.chapterTitle).text = title
 
-        findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
-
         /* same navigation drawer as the other list screens */
         val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
         findViewById<TextView>(R.id.menuBtn).setOnClickListener {
