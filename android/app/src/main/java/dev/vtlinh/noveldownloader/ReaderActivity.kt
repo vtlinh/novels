@@ -1657,6 +1657,11 @@ class ReaderActivity : AppCompatActivity() {
             firstIdx = loadedChapters.firstOrNull()?.idx ?: p
             nextIdx = (loadedChapters.lastOrNull()?.idx ?: (p - 1)) + 1
             text.setText(sb, TextView.BufferType.EDITABLE)
+            /* a selectable TextView drops an insertion cursor at offset 0 on
+               setText and then auto-scrolls the ScrollView to it on the next
+               layout — which would yank us back to the buffer top right after
+               we place the restore. Remove the selection so nothing competes. */
+            clearTextSelection()
             currentChapterIdx = p
             titleBar.text = loadedChapters.firstOrNull { it.idx == p }?.heading ?: ""
             saveLastChapter(p)
