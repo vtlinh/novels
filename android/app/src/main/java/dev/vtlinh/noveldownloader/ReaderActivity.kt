@@ -749,7 +749,54 @@ class ReaderActivity : AppCompatActivity() {
         scrollToSpoken(s0)
         saveTtsPos(s0)
         updateMediaSessionState()   // advance the notification's chapter progress
-        t.speak(sentence, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
+        /* normalize the spoken copy (URLs/emojis silenced, abbreviations
+           expanded); the on-screen text and s0/s1 offsets are untouched */
+        val toSpeak = cleanForSpeech(sentence, lang).ifBlank { " " }
+        t.speak(toSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
+    }
+
+    /* Speech edits applied to every sentence before it is spoken. Universal
+       ones (silence links & emoji, drop a leading ellipsis) run for any
+       language; the abbreviation/number rules run for English only. Faithful
+       port of the "English speech edits" defaults; offsets aren't affected
+       because only the copy handed to the engine is rewritten. */
+    private val universalSpeechEdits: List<Pair<Regex, String>> by lazy {
+        listOf(
+            // silence links (http(s)://…, www.…)
+            Regex("(([\\w-]+://?|www[.])[^\\s()<>]+(?:\\([\\w\\d]+\\)|([^\\p{Punct}\\s]|/)))") to " ",
+            // silence emoji (incl. surrogate-pair ranges)
+            Regex(
+                "([\\u00A9\\u00AE\\u200D\\u203C\\u2049\\u2122\\u2139\\u2194-\\u21AA\\u231A-\\u231B" +
+                    "\\u2328\\u23CF\\u23E9-\\u23FA\\u24C2\\u25AA\\u25FE\\u2600-\\u27BF\\u2934-\\u2935" +
+                    "\\u2B05-\\u2B07\\u2B1B-\\u2B1C\\u2B50\\u2B55\\u3030\\u303D\\u3297\\u3299\\uFE0F]|" +
+                    "\\uD83C[\\uDC00-\\uDFFF]|\\uD83D[\\uDC00-\\uDFFF]|\\uD83E[\\uDC00-\\uDEFF]|" +
+                    "\\uDB40[\\uDC20-\\uDC7F])+",
+            ) to " ",
+            // remove a leading ellipsis
+            Regex("^\\s*\\u2026") to "",
+        )
+    }
+    private val englishSpeechEdits: List<Pair<Regex, String>> by lazy {
+        listOf(
+            Regex("(?i)\\b(no\\.)(\\s+[0-9])") to "number$2",       // "No. 5" → "number 5"
+            Regex("(?i)\\b((no)\\.)(\\s+[^0-9]|\\s*$)") to "$2; $3", // bare "No." → pause
+            Regex("\\bMr\\.\\s") to "Mister ",
+            Regex("\\bMrs\\.") to "Mrs",
+            Regex("\\b[Ee]q\\.\\s+(\\d+)\\b") to "equation $1",
+            Regex("\\bMs\\.\\s") to "Mizz ",
+            Regex("\\bDr\\.\\s") to "Doctor ",
+            Regex("\\bFig\\.\\s") to "Figure ",
+            Regex("\\bGen\\.\\s") to "General ",
+            Regex("\\b([A-Z])\\.(?=\\s)") to "$1",                   // drop period after an initial
+            Regex("\\bSt\\.\\s+([A-Z][a-z]+)\\b") to "Saint $1",
+        )
+    }
+
+    private fun cleanForSpeech(sentence: String, lang: String): String {
+        var s = "$sentence "   // trailing space so end-anchored abbreviation rules fire
+        for ((re, rep) in universalSpeechEdits) s = re.replace(s, rep)
+        if (lang == "en") for ((re, rep) in englishSpeechEdits) s = re.replace(s, rep)
+        return s.replace(Regex("\\s+"), " ").trim()
     }
 
     /* Keep the line being read vertically centered while TTS plays. Posted a
@@ -1322,6 +1369,13 @@ class ReaderActivity : AppCompatActivity() {
         } catch (e: Exception) { emptyList() }
         var voices = voiceList()
         val spinner = android.widget.Spinner(ctx)
+        /* Only a real tap on the spinner may overwrite the saved voice. A
+           programmatic (re)fill selects "Default" whenever voices haven't
+           loaded yet — without this guard that fill fires onItemSelected and
+           WIPES ttsVoice:$lang, so the pick could never be recovered. */
+        var userPicked = false
+        @Suppress("ClickableViewAccessibility")
+        spinner.setOnTouchListener { _, _ -> userPicked = true; false }
         fun fillSpinner() {
             spinner.adapter = android.widget.ArrayAdapter(
                 ctx, android.R.layout.simple_spinner_dropdown_item,
@@ -1339,6 +1393,8 @@ class ReaderActivity : AppCompatActivity() {
                 pos: Int,
                 id: Long,
             ) {
+                if (!userPicked) return   // ignore programmatic fills
+                userPicked = false
                 if (pos == 0) prefs.edit().remove("ttsVoice:$lang").apply()
                 else prefs.edit().putString("ttsVoice:$lang", voices[pos - 1].name).apply()
                 applyTtsConfig(lang)
@@ -1429,6 +1485,7 @@ class ReaderActivity : AppCompatActivity() {
                 voices = voiceList()
                 if (voices.isNotEmpty()) {
                     fillSpinner()
+                    applyTtsConfig(lang)   // voices arrived → apply the saved voice now
                     diag.text = ""
                     return
                 }
