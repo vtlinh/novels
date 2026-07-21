@@ -192,7 +192,11 @@ class ReaderActivity : AppCompatActivity() {
             drawerList.adapter = drawerAdapter
             drawerList.setOnItemClickListener { _, _, pos, _ ->
                 drawer.closeDrawer(GravityCompat.END)
-                openAt(pos, savedParaFor(pos))
+                /* chapter already in the loaded buffer → just scroll there
+                   instead of rebuilding the whole view */
+                if (!jumpToLoaded(pos, savedParaFor(pos))) {
+                    openAt(pos, savedParaFor(pos))
+                }
             }
             val startIdx = ch.ordered.indexOf(start).coerceAtLeast(0)
             openAt(startIdx, savedParaFor(startIdx))
@@ -888,6 +892,27 @@ class ReaderActivity : AppCompatActivity() {
                 else -> Saf.readText(contentResolver, treeUri!!, ref)
             }
         }
+    }
+
+    /* Jump within the ALREADY-LOADED buffer: scroll straight to the chapter
+       (and its saved paragraph) without reloading anything. Returns false
+       when the chapter isn't loaded — caller falls back to openAt. */
+    private fun jumpToLoaded(pos: Int, targetPara: Int): Boolean {
+        if (loading) return false
+        val lc = loadedChapters.firstOrNull { it.idx == pos } ?: return false
+        val layout = text.layout ?: return false
+        stopTts()
+        resumeCursor = -1
+        clearTextSelection()
+        val off = if (targetPara > 0) offsetOfPara(lc.start, targetPara) else lc.start
+        val y = layout.getLineTop(layout.getLineForOffset(off.coerceIn(0, text.length()))) +
+            text.totalPaddingTop
+        scroll.scrollTo(0, y.coerceAtLeast(0))
+        scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
+        currentChapterIdx = lc.idx
+        saveLastChapter(lc.idx)
+        updateHeader()
+        return true
     }
 
     /* jump to a chapter: load it, append the next, prepend the previous.
