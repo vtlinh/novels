@@ -208,9 +208,8 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         /* TTS: double-tap anywhere in the text starts reading from there.
-           Prefer the Google engine (best voices); fall back to the device
-           default engine if it isn't installed. */
-        initTts("com.google.android.tts")
+           Google TTS only — no other engine is ever used. */
+        initTts()
         val doubleTap = android.view.GestureDetector(
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
@@ -346,33 +345,36 @@ class ReaderActivity : AppCompatActivity() {
     /* live connection state, shown by the settings sheet's diagnostic line */
     private var ttsInitState = "starting"
 
-    /* engine=null → device default. Google is tried first and RETRIED once —
-       a transient bind failure must not strand the session on the default
-       engine (which can report no voices at all); only then fall back. */
-    private fun initTts(engine: String?, attempt: Int = 0) {
-        ttsInitState = "connecting to " + (engine ?: "default engine")
+    private val GOOGLE_TTS = "com.google.android.tts"
+
+    /* Google TTS ONLY — never fall back to another engine (a voiceless
+       default engine is how the voice list went empty before). A failed
+       bind is retried with a growing delay instead. */
+    private fun initTts(attempt: Int = 0) {
+        ttsInitState = "connecting to Google TTS" +
+            (if (attempt > 0) " (retry $attempt)" else "")
         val listener = android.speech.tts.TextToSpeech.OnInitListener { st ->
             if (st == android.speech.tts.TextToSpeech.SUCCESS) {
                 ttsReady = true
-                ttsInitState = "connected to " + (engine ?: "default engine")
+                ttsInitState = "connected to Google TTS"
                 curTtsLang = ""   // re-apply the language profile on next speak
-            } else if (engine != null) {
-                ttsInitState = "FAILED: " + engine
+            } else {
+                ttsReady = false
+                ttsInitState = "FAILED to bind Google TTS — is it installed and enabled?"
                 /* always post: the failure callback may fire synchronously
                    inside the constructor, before `tts = t` below runs */
                 android.os.Handler(mainLooper).post {
                     tts?.shutdown()
-                    if (attempt < 1) initTts(engine, attempt + 1) else initTts(null)
+                    if (attempt < 4) {
+                        android.os.Handler(mainLooper).postDelayed(
+                            { initTts(attempt + 1) },
+                            1000L * (attempt + 1),
+                        )
+                    }
                 }
-            } else {
-                ttsInitState = "FAILED: default engine"
             }
         }
-        val t = if (engine != null) {
-            android.speech.tts.TextToSpeech(this, listener, engine)
-        } else {
-            android.speech.tts.TextToSpeech(this, listener)
-        }
+        val t = android.speech.tts.TextToSpeech(this, listener, GOOGLE_TTS)
         t.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
@@ -451,7 +453,10 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun startTtsFrom(off: Int) {
-        if (!ttsReady) return
+        if (!ttsReady) {
+            initTts()   // engine dropped — rebind Google TTS for the next tap
+            return
+        }
         speakCursor = paraStartOf(off)
         speaking = true
         /* foreground service keeps reading alive with the screen off */
@@ -692,32 +697,74 @@ class ReaderActivity : AppCompatActivity() {
                     }
                 },
             )
-            fun engines(): List<String> =
-                try { tts?.engines?.map { it.name } ?: emptyList() } catch (e: Exception) { emptyList() }
-            /* try Google, then the device default, then every other engine */
-            val candidates = ArrayList<String?>(listOf("com.google.android.tts", null))
-            for (e in engines()) if (e != "com.google.android.tts") candidates.add(e)
-            var cand = 0
+            root.addView(
+                TextView(ctx).apply {
+                    text = "Reset Google TTS (reinstall voice data)"
+                    textSize = 14f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setTextColor(getColor(R.color.accent))
+                    setPadding(0, dp(4), 0, dp(4))
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        /* closest in-app equivalent of the system-settings
+                           reset: drop our connection and launch the engine's
+                           own voice-data (re)install flow; the poll loop
+                           rebinds when we come back */
+                        try { tts?.shutdown() } catch (e: Exception) {}
+                        tts = null
+                        ttsReady = false
+                        try {
+                            startActivity(
+                                android.content.Intent(
+                                    android.speech.tts.TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA,
+                                ).setPackage(GOOGLE_TTS)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        } catch (e: Exception) { diag.text = "Couldn't launch the Google TTS data installer." }
+                    }
+                },
+            )
+            root.addView(
+                TextView(ctx).apply {
+                    text = "Update Google TTS on Play Store"
+                    textSize = 14f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setTextColor(getColor(R.color.accent))
+                    setPadding(0, dp(4), 0, dp(4))
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        try {
+                            startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("market://details?id=$GOOGLE_TTS"),
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        } catch (e: Exception) { diag.text = "Couldn't open the Play Store." }
+                    }
+                },
+            )
+            fun googleInstalled(): Boolean =
+                try { tts?.engines?.any { it.name == GOOGLE_TTS } == true } catch (e: Exception) { false }
             var tick = 0
             fun refresh() {
                 if (!sheet.isShowing) return
                 voices = voiceList()
                 if (voices.isNotEmpty()) {
                     fillSpinner()
-                    diag.text = "Voices found via $ttsInitState"
+                    diag.text = ""
                     return
                 }
                 tick++
-                /* every ~4s of no voices, reconnect with the next engine */
-                if (tick % 5 == 0 && !speaking) {
-                    cand = (cand + 1) % candidates.size
-                    initTts(candidates[cand])
-                }
-                diag.text = "No voices — $ttsInitState\nInstalled engines: " +
-                    (engines().joinToString(", ").ifEmpty { "none visible" })
+                /* every ~4s of no voices, rebind Google TTS (never another engine) */
+                if (tick % 5 == 0 && !speaking) initTts()
+                diag.text = "No voices — $ttsInitState" +
+                    if (!googleInstalled()) "\nGoogle TTS is not visible on this device" else ""
                 spinner.postDelayed({ refresh() }, 800)
             }
-            if (!speaking) initTts(candidates[0])
+            if (!speaking) initTts()
             spinner.postDelayed({ refresh() }, 800)
         }
 
