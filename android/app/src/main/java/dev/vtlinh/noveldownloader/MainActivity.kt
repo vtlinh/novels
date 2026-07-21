@@ -161,10 +161,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /* Check for a newer published version whenever the app returns to the
-       foreground, at most once a minute. When one is found it installs
-       automatically — silently where Android allows — unless a download is
-       running (the install kills the process), in which case the sticky
-       banner offers it for later. */
+       foreground, at most once a minute. When one is found, always surface
+       the sticky banner on the home screen — tapping it downloads and
+       installs. (We don't auto-install from here so the update is always
+       visible and user-initiated.) */
     private fun checkForUpdate() {
         if (updateFound) return
         val now = System.currentTimeMillis()
@@ -174,11 +174,9 @@ class MainActivity : AppCompatActivity() {
             val latest = Updater.latestVersion()
             if (latest != null && latest.first > Updater.currentVersionCode(this@MainActivity)) {
                 updateFound = true
-                if (DownloadService.runningFlow.value) {
-                    findViewById<TextView>(R.id.updateBanner).visibility = View.VISIBLE
-                } else {
-                    installUpdate()
-                }
+                val banner = findViewById<TextView>(R.id.updateBanner)
+                banner.text = "Update available (v${latest.second}) — tap to install"
+                banner.visibility = View.VISIBLE
             }
         }
     }
