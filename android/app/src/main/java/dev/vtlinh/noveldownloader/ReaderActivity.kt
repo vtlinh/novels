@@ -1661,46 +1661,23 @@ class ReaderActivity : AppCompatActivity() {
             titleBar.text = loadedChapters.firstOrNull { it.idx == p }?.heading ?: ""
             saveLastChapter(p)
 
-            /* Place the viewport only once the layout reflects the FINAL text
-               AND the ScrollView has grown tall enough to actually reach the
-               target. With 20 chapters prepended the target sits deep in the
-               buffer; if the ScrollView hasn't re-measured its child height
-               yet, scrollTo() clamps short to the top (landing on the first
-               loaded chapter). So compute y, scroll, and if it clamped short,
-               retry a frame later until the child is tall enough. */
-            fun place(attempt: Int) {
-                val layout = text.layout
-                if ((layout == null || layout.text.length != text.text.length) && attempt < 60) {
-                    scroll.post { place(attempt + 1) }
-                    return
+            fun targetOffset(): Int {
+                if (targetPara <= 0 || targetBodyLen <= 0) return targetStart
+                /* char offset of paragraph N within the target chapter */
+                val body = text.text.toString()
+                val end = targetStart + targetBodyLen
+                var off = targetStart
+                var count = 0
+                while (count < targetPara && off < end) {
+                    val n = body.indexOf('\n', off)
+                    if (n == -1 || n >= end) break
+                    off = n + 1
+                    count++
                 }
-                var targetOff = targetStart
-                if (targetPara > 0 && targetBodyLen > 0) {
-                    /* char offset of paragraph N within the target chapter */
-                    val body = text.text.toString()
-                    val end = targetStart + targetBodyLen
-                    var off = targetStart
-                    var count = 0
-                    while (count < targetPara && off < end) {
-                        val n = body.indexOf('\n', off)
-                        if (n == -1 || n >= end) break
-                        off = n + 1
-                        count++
-                    }
-                    targetOff = off
-                }
-                val y = if (layout != null) {
-                    layout.getLineTop(layout.getLineForOffset(targetOff)) + text.totalPaddingTop
-                } else {
-                    0
-                }
-                scroll.scrollTo(0, y)
-                /* scrollTo clamps to the current child height — if the target
-                   didn't stick (child still measuring), wait and try again */
-                if (y > 0 && scroll.scrollY < y - 4 && attempt < 60) {
-                    scroll.post { place(attempt + 1) }
-                    return
-                }
+                return off
+            }
+
+            fun finish(targetOff: Int) {
                 scroll.visibility = android.view.View.VISIBLE
                 loading = false
                 loadReady = true
@@ -1710,7 +1687,38 @@ class ReaderActivity : AppCompatActivity() {
                     startTtsFrom(targetOff)
                 }
             }
-            scroll.post { place(0) }
+
+            /* Place the viewport only AFTER a full layout pass — a global-layout
+               listener fires once the ScrollView has measured/laid out its (now
+               very tall) child, so scrollTo() can actually reach a target deep
+               in the buffer instead of clamping short to the top (which landed
+               on the first loaded chapter). A plain post() can run before that
+               layout completes; the listener cannot. */
+            val vto = scroll.viewTreeObserver
+            vto.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+                var tries = 0
+                override fun onGlobalLayout() {
+                    tries++
+                    val layout = text.layout
+                    if ((layout == null || layout.text.length != text.text.length) && tries < 120) {
+                        return   // text not fully laid out yet — wait for the next pass
+                    }
+                    val targetOff = targetOffset()
+                    val y = layout?.let {
+                        it.getLineTop(it.getLineForOffset(targetOff)) + text.totalPaddingTop
+                    } ?: 0
+                    scroll.scrollTo(0, y)
+                    /* still clamped short (child not tall enough yet) → wait for
+                       another layout pass, unless we've waited too long */
+                    if (y > 0 && scroll.scrollY < y - 4 && tries < 120) return
+                    if (scroll.viewTreeObserver.isAlive) {
+                        scroll.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                    }
+                    finish(targetOff)
+                }
+            })
+            /* nudge a layout pass so the listener is guaranteed to fire */
+            scroll.requestLayout()
         }
     }
 
