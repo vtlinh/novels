@@ -136,9 +136,23 @@ class MainActivity : AppCompatActivity() {
 
     private var updateFound = false
     private var lastUpdateCheck = 0L
+    /* set while an install is in flight; a successful install kills the
+       process, so if we ever come BACK to onResume with this still set the
+       system's confirmation was dismissed/interrupted — recover instead of
+       staying stuck on "Installing update…" */
+    private var installInFlight = false
 
     override fun onResume() {
         super.onResume()
+        if (installInFlight) {
+            /* returned to the app after the install prompt was dismissed */
+            installInFlight = false
+            updateFound = false
+            val banner = findViewById<TextView>(R.id.updateBanner)
+            banner.text = "Update ready — tap to install"
+            banner.visibility = View.VISIBLE
+            findViewById<TextView>(R.id.statusText).text = ""
+        }
         checkForUpdate()
     }
 
@@ -168,19 +182,26 @@ class MainActivity : AppCompatActivity() {
     private fun installUpdate() {
         lifecycleScope.launch {
             val statusText = findViewById<TextView>(R.id.statusText)
+            val banner = findViewById<TextView>(R.id.updateBanner)
             statusText.text = "Downloading update…"
             val apk = Updater.downloadApk(this@MainActivity)
             if (apk != null) {
                 statusText.text = "Installing update…"
+                installInFlight = true
                 try {
                     Updater.install(this@MainActivity, apk)
                 } catch (e: Exception) {
+                    installInFlight = false
+                    updateFound = false
                     statusText.text = "Update failed — ${e.message}"
-                    findViewById<TextView>(R.id.updateBanner).visibility = View.VISIBLE
+                    banner.text = "Update ready — tap to install"
+                    banner.visibility = View.VISIBLE
                 }
             } else {
+                updateFound = false
                 statusText.text = "Update download failed — will retry later."
-                findViewById<TextView>(R.id.updateBanner).visibility = View.VISIBLE
+                banner.text = "Update ready — tap to install"
+                banner.visibility = View.VISIBLE
             }
         }
     }
