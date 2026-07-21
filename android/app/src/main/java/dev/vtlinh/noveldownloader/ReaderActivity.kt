@@ -712,6 +712,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         speakCursor = paraStartOf(off)
         speaking = true
+        clearTextSelection()  // remove the start-tap cursor so it can't yank later
         requestAudioFocus()   // makes us the media-button session in the background
         scheduleSleepTimer()  // the timer counts from each play
         startShakeDetection()
@@ -854,6 +855,9 @@ class ReaderActivity : AppCompatActivity() {
         TtsService.start(this, currentHeading(), false, mediaSession?.sessionToken, intent.getStringExtra("slug"))
         if (resumeCursor >= 0) speakCursor = resumeCursor
         clearHighlight()
+        /* drop any insertion cursor left by a tap (e.g. the start-TTS double
+           tap) so it can't bringPointIntoView and yank the scroll up on stop */
+        clearTextSelection()
         updateKeepAwake()
         updatePlayBtn()
     }
@@ -867,6 +871,7 @@ class ReaderActivity : AppCompatActivity() {
         TtsService.stop(this)
         abandonAudioFocus()
         clearHighlight()
+        clearTextSelection()   // no tap cursor to yank the scroll up on stop
         updateKeepAwake()
         updatePlayBtn()
     }
