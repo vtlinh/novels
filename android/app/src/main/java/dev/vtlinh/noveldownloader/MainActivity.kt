@@ -140,6 +140,7 @@ class MainActivity : AppCompatActivity() {
 
     private var updateFound = false
     private var lastUpdateCheck = 0L
+    private var latestVersionCode = 0L
     /* set while an install is in flight; a successful install kills the
        process, so if we ever come BACK to onResume with this still set the
        system's confirmation was dismissed/interrupted — recover instead of
@@ -175,6 +176,7 @@ class MainActivity : AppCompatActivity() {
             val latest = Updater.latestVersion()
             if (latest != null && latest.first > Updater.currentVersionCode(this@MainActivity)) {
                 updateFound = true
+                latestVersionCode = latest.first
                 val banner = findViewById<TextView>(R.id.updateBanner)
                 banner.text = "Update available (v${latest.second}) — tap to install"
                 banner.visibility = View.VISIBLE
@@ -190,8 +192,12 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val statusText = findViewById<TextView>(R.id.statusText)
             val banner = findViewById<TextView>(R.id.updateBanner)
-            statusText.text = "Downloading update…"
-            val apk = Updater.downloadApk(this@MainActivity)
+            statusText.text = "Preparing update…"
+            /* download once per version; reused for every retry, even across
+               restarts, until a newer version supersedes it */
+            var version = latestVersionCode
+            if (version <= 0L) version = Updater.latestVersion()?.first ?: 0L
+            val apk = if (version > 0L) Updater.ensureApk(this@MainActivity, version) else null
             if (apk == null) {
                 updateFound = false
                 statusText.text = "Update download failed — will retry later."

@@ -55,8 +55,11 @@ object Updater {
             if (!canInstall(context)) return@launch
             /* re-check the guards after the network round-trip */
             if (DownloadService.runningFlow.value || TtsService.isRunning) return@launch
-            val apk = downloadApk(context) ?: return@launch
-            try { install(context, apk) } catch (e: Exception) {}
+            val apk = ensureApk(context, latest.first) ?: return@launch
+            try {
+                abandonSessions(context)
+                install(context, apk)
+            } catch (e: Exception) {}
         }
     }
 
@@ -106,18 +109,52 @@ object Updater {
         }
     }
 
-    suspend fun downloadApk(context: Context): File? = withContext(Dispatchers.IO) {
+    private const val APK_NAME = "update.apk"
+    private const val CACHED_VERSION_KEY = "cachedApkVersion"
+
+    private fun apkFile(context: Context) = File(context.cacheDir, APK_NAME)
+    private fun prefs(context: Context) =
+        context.getSharedPreferences("app", Context.MODE_PRIVATE)
+
+    /* Return a ready-to-install APK for `versionCode`, downloading it ONLY if
+       we don't already have that exact version cached. Every install (and every
+       retry, across process restarts) reuses this single file until a newer
+       version supersedes it. */
+    suspend fun ensureApk(context: Context, versionCode: Long): File? = withContext(Dispatchers.IO) {
+        val f = apkFile(context)
+        if (f.exists() && f.length() > 0 &&
+            prefs(context).getLong(CACHED_VERSION_KEY, -1L) == versionCode
+        ) {
+            return@withContext f   // already downloaded this version
+        }
         try {
-            val f = File(context.cacheDir, "update.apk")
             client.newCall(Request.Builder().url(APK_URL).build()).execute().use { r ->
                 if (!r.isSuccessful) return@withContext null
                 val stream = r.body?.byteStream() ?: return@withContext null
                 stream.use { input -> f.outputStream().use { out -> input.copyTo(out) } }
             }
+            prefs(context).edit().putLong(CACHED_VERSION_KEY, versionCode).apply()
             f
         } catch (e: Exception) {
+            /* a partial download is useless — drop it so we start clean */
+            try { f.delete() } catch (e2: Exception) {}
+            prefs(context).edit().remove(CACHED_VERSION_KEY).apply()
             null
         }
+    }
+
+    /* delete the cached APK and its version marker */
+    fun cleanupApk(context: Context) {
+        try { apkFile(context).delete() } catch (e: Exception) {}
+        prefs(context).edit().remove(CACHED_VERSION_KEY).apply()
+    }
+
+    /* Called on app start: if the running version is already at (or past) the
+       cached APK's version, the update went through (or is moot) — clean it up.
+       Otherwise the cached APK is kept for a retry. */
+    fun cleanupIfInstalled(context: Context) {
+        val cached = prefs(context).getLong(CACHED_VERSION_KEY, -1L)
+        if (cached >= 0 && cached <= currentVersionCode(context)) cleanupApk(context)
     }
 
     /* Abandon any leftover PackageInstaller sessions for our own updates.
