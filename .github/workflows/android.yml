@@ -40,7 +40,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"0.1.${GITHUB_RUN_NUMBER}\"}" > version.json
+          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"1.0.${GITHUB_RUN_NUMBER}\"}" > version.json
           gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create android-latest --repo "$GITHUB_REPOSITORY" \
               --title "Android app (latest)" --notes "APK auto-built from main." --latest=false
