@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.net.Uri
 import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import kotlinx.coroutines.Dispatchers
@@ -49,10 +50,38 @@ object Updater {
         scope.launch {
             val latest = latestVersion() ?: return@launch
             if (latest.first <= currentVersionCode(context)) return@launch
+            /* no install permission → don't download or trip the OS block;
+               the About screen guides the user to grant it */
+            if (!canInstall(context)) return@launch
             /* re-check the guards after the network round-trip */
             if (DownloadService.runningFlow.value || TtsService.isRunning) return@launch
             val apk = downloadApk(context) ?: return@launch
             try { install(context, apk) } catch (e: Exception) {}
+        }
+    }
+
+    /* Android requires a per-app "Install unknown apps" grant before an app
+       can install packages. Without it, PackageInstaller is blocked with
+       "Prevented … from installing another app". */
+    fun canInstall(context: Context): Boolean =
+        context.packageManager.canRequestPackageInstalls()
+
+    /* deep-link straight to this app's "Install unknown apps" toggle */
+    fun openInstallPermission(context: Context) {
+        try {
+            context.startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${context.packageName}"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: Exception) {
+            try {
+                context.startActivity(
+                    Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (e2: Exception) {}
         }
     }
 
