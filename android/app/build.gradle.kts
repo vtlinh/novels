@@ -68,4 +68,5 @@ dependencies {
     implementation("org.jsoup:jsoup:1.17.2")
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.media:media:1.7.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.4")
 }

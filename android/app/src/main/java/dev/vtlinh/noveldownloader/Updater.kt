@@ -7,6 +7,7 @@ import android.content.pm.PackageInstaller
 import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -31,6 +32,29 @@ object Updater {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
+
+    @Volatile private var lastAutoCheck = 0L
+
+    /* Runs whenever the app is brought to the foreground (from ANY screen —
+       ProcessLifecycleOwner), throttled to once a minute. Downloads and
+       installs a newer build, but never while a download or a reading
+       session is running, so it can't interrupt them. The system may still
+       show its one-tap confirmation until this app is its own installer of
+       record. */
+    fun autoCheck(context: Context, scope: kotlinx.coroutines.CoroutineScope) {
+        val now = System.currentTimeMillis()
+        if (now - lastAutoCheck < 60_000) return
+        lastAutoCheck = now
+        if (DownloadService.runningFlow.value || TtsService.isRunning) return
+        scope.launch {
+            val latest = latestVersion() ?: return@launch
+            if (latest.first <= currentVersionCode(context)) return@launch
+            /* re-check the guards after the network round-trip */
+            if (DownloadService.runningFlow.value || TtsService.isRunning) return@launch
+            val apk = downloadApk(context) ?: return@launch
+            try { install(context, apk) } catch (e: Exception) {}
+        }
+    }
 
     fun currentVersionCode(context: Context): Long {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
