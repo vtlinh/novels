@@ -122,6 +122,9 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
     @Volatile private var loading = false
+    /* scroll events before this time are ignored — they're the programmatic
+       settling right after an open/jump, not the user or TTS reading */
+    private var suppressScrollUntil = 0L
     private var english = true
     private var fontSp = 16f
 
@@ -282,6 +285,12 @@ class ReaderActivity : AppCompatActivity() {
            and crossing into the FIRST prepends LOAD_BATCH (loadReady gates
            this until the open placement has landed). */
         scroll.setOnScrollChangeListener { _, _, _, _, _ ->
+            /* ignore the programmatic settling right after an open/jump (e.g. a
+               selectable-TextView cursor yank) — it must not change the current
+               chapter, save progress, or trigger a prepend */
+            if (loading || android.os.SystemClock.uptimeMillis() < suppressScrollUntil) {
+                return@setOnScrollChangeListener
+            }
             updateHeader()
             maybeLoadMore()
         }
@@ -1592,6 +1601,8 @@ class ReaderActivity : AppCompatActivity() {
         val off = if (targetPara > 0) offsetOfPara(lc.start, targetPara) else lc.start
         val y = layout.getLineTop(layout.getLineForOffset(off.coerceIn(0, text.length()))) +
             text.totalPaddingTop
+        /* ignore the settling scroll(s) so they can't overwrite the target */
+        suppressScrollUntil = android.os.SystemClock.uptimeMillis() + 900
         scroll.scrollTo(0, y.coerceAtLeast(0))
         scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
         currentChapterIdx = lc.idx
@@ -1683,6 +1694,9 @@ class ReaderActivity : AppCompatActivity() {
             }
 
             fun finish(targetOff: Int) {
+                /* the chapter + progress are set from the target below; ignore
+                   any settling scroll for a beat so it can't overwrite them */
+                suppressScrollUntil = android.os.SystemClock.uptimeMillis() + 900
                 scroll.visibility = android.view.View.VISIBLE
                 loading = false
                 loadReady = true
