@@ -127,9 +127,21 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Used for chapter translation. Stored only on this device."
+                android:text="Used for chapter translation, which costs money — each translation is billed to your Anthropic account balance. Stored only on this device."
                 android:textSize="12sp"
                 android:textColor="@color/muted" />
+
+            <TextView
+                android:id="@+id/apiKeyLink"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Get an API key ↗"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent"
+                android:clickable="true"
+                android:focusable="true" />
         </LinearLayout>
 
         <!-- ══ Storage ══ -->

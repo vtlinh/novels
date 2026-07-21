@@ -41,6 +41,13 @@ class SettingsActivity : AppCompatActivity() {
         key.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) saveKey()
         }
+        findViewById<TextView>(R.id.apiKeyLink).setOnClickListener {
+            try {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://console.anthropic.com/settings/keys")),
+                )
+            } catch (e: Exception) {}
+        }
         updateFolderLabel()
 
         findViewById<android.widget.Button>(R.id.compressBtn).setOnClickListener { processNovels(true) }
