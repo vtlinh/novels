@@ -548,7 +548,9 @@ class DownloadEngine(
         val summary = "${saved.get()} saved, $skipped skipped, ${failed.size} failed.$avg"
         log((if (stopRequested) "Stopped — re-run to resume. " else "✓ Finished. ") + summary)
 
-        if (translate && apiKey.isNotBlank() && !stopRequested) {
+        if (translate && site.english) {
+            log("Source is already in English — skipping translation.")
+        } else if (translate && apiKey.isNotBlank() && !stopRequested) {
             try {
                 val t = translator ?: Translator(context, apiKey, log, status).also { translator = it }
                 t.translate(dir, store, folderKey, slug, chapters.mapNotNull { it.filename }) { stopRequested }

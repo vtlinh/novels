@@ -249,7 +249,10 @@ class MainActivity : AppCompatActivity() {
         if (tree == null) { pickFolder.launch(null); return }
         val translate = findViewById<android.widget.CheckBox>(R.id.translateCheck).isChecked
         val apiKey = (prefs.getString("apiKey", "") ?: "").trim()
-        if (translate && apiKey.isEmpty()) {
+        /* an already-English source ignores the translate toggle, so a key
+           isn't required for it */
+        val needsKey = translate && Sites.forUrl(url)?.english != true
+        if (needsKey && apiKey.isEmpty()) {
             findViewById<TextView>(R.id.statusText).text =
                 "Set your Anthropic API key in Settings to translate."
             return
