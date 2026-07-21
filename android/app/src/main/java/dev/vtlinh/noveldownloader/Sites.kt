@@ -19,8 +19,6 @@ class Site(
     /* container of the REAL chapter list — pages also carry a "latest
        chapters" widget whose links must not pollute the chapter order */
     val listScope: String = "#list-chapter",
-    /* source is already English → "Translate to English" is a no-op */
-    val english: Boolean = false,
 ) {
     fun matches(url: String) = urlRe.containsMatchIn(url.trim())
 }
@@ -91,7 +89,6 @@ object Sites {
             isCompleted = { doc ->
                 doc.select("a[href*=/status/]").any { it.text().trim().equals("Completed", true) }
             },
-            english = true,
         ),
     )
 

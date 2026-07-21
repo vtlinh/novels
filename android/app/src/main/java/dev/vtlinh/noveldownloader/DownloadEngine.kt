@@ -548,7 +548,7 @@ class DownloadEngine(
         val summary = "${saved.get()} saved, $skipped skipped, ${failed.size} failed.$avg"
         log((if (stopRequested) "Stopped — re-run to resume. " else "✓ Finished. ") + summary)
 
-        if (translate && site.english) {
+        if (translate && !stopRequested && looksEnglish(dir, chapters.mapNotNull { it.filename })) {
             log("Source is already in English — skipping translation.")
         } else if (translate && apiKey.isNotBlank() && !stopRequested) {
             try {
@@ -574,6 +574,26 @@ class DownloadEngine(
             }
         }
         status((if (stopRequested) "Stopped: " else "Done: ") + summary)
+    }
+
+    /* already English? sample the downloaded chapters and skip translation
+       when more than half the characters are English-alphabet letters
+       (Vietnamese's diacritics push its ratio below that). */
+    private fun looksEnglish(dir: DocumentFile, filenames: List<String>): Boolean {
+        val sb = StringBuilder()
+        for (name in filenames) {
+            val f = dir.findFile(name) ?: continue
+            try {
+                context.contentResolver.openInputStream(f.uri)?.use {
+                    sb.append(it.readBytes().toString(Charsets.UTF_8))
+                }
+            } catch (e: Exception) {}
+            if (sb.length >= 5000) break
+        }
+        if (sb.isEmpty()) return false
+        var eng = 0
+        for (c in sb) if (c in 'a'..'z' || c in 'A'..'Z') eng++
+        return eng.toDouble() / sb.length > 0.5
     }
 
     private fun writeFile(dir: DocumentFile, name: String, text: String): String {
