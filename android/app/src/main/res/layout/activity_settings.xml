@@ -1,191 +1,240 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="@color/bg"
-    android:padding="16dp">
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:orientation="vertical"
+        android:padding="16dp">
 
-        <TextView
-            android:id="@+id/backBtn"
-            android:layout_width="wrap_content"
+        <!-- header -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="←"
-            android:textSize="24sp"
-            android:textColor="@color/fg"
-            android:paddingEnd="14dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp"
-            android:clickable="true"
-            android:focusable="true" />
+            android:layout_marginBottom="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
-        <TextView
-            android:layout_width="0dp"
+            <TextView
+                android:id="@+id/backBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="←"
+                android:textSize="24sp"
+                android:textColor="@color/fg"
+                android:paddingEnd="14dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Settings"
+                android:textSize="22sp"
+                android:textColor="@color/fg"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- ══ Download folder ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Settings"
-            android:textSize="22sp"
-            android:textColor="@color/fg"
-            android:textStyle="bold" />
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:padding="18dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Download folder"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/folderLabel"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="14sp"
+                    android:textColor="@color/muted"
+                    android:text="No folder selected" />
+
+                <TextView
+                    android:id="@+id/folderBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Change"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingStart="12dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ══ Anthropic API key ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:padding="18dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Anthropic API key"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg" />
+
+            <EditText
+                android:id="@+id/apiKeyInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_input"
+                android:padding="11dp"
+                android:hint="sk-ant-…"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                android:textColorHint="@color/muted"
+                android:inputType="textPassword"
+                android:importantForAutofill="no" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Used for chapter translation. Stored only on this device."
+                android:textSize="12sp"
+                android:textColor="@color/muted" />
+        </LinearLayout>
+
+        <!-- ══ Storage ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:padding="18dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Storage"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg" />
+
+            <CheckBox
+                android:id="@+id/zipDownloadsCheck"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:paddingStart="6dp"
+                android:text="Download compressed"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                app:buttonTint="@color/accent" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/compressBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Compress"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/fg"
+                    app:backgroundTint="@color/btn_secondary"
+                    app:cornerRadius="8dp" />
+
+                <Button
+                    android:id="@+id/uncompressBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Uncompress"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/fg"
+                    app:backgroundTint="@color/btn_secondary"
+                    app:cornerRadius="8dp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/zipStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Compresses each chapter file individually (~70% smaller). Reading works either way."
+                android:textSize="12sp"
+                android:textColor="@color/muted" />
+        </LinearLayout>
+
+        <!-- ══ Reading ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:padding="18dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reading"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg" />
+
+            <CheckBox
+                android:id="@+id/keepAwakeCheck"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:paddingStart="6dp"
+                android:text="Keep screen awake while reading aloud"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                app:buttonTint="@color/accent" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Stops the screen from dimming off on the reader while text-to-speech is playing."
+                android:textSize="12sp"
+                android:textColor="@color/muted" />
+        </LinearLayout>
     </LinearLayout>
-
-    <!-- download folder -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="Download folder"
-        android:textSize="12sp"
-        android:textColor="@color/muted" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
-
-        <TextView
-            android:id="@+id/folderLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="14sp"
-            android:textColor="@color/fg"
-            android:text="No folder selected" />
-
-        <TextView
-            android:id="@+id/folderBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text=" — change"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/accent"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="4dp" />
-    </LinearLayout>
-
-    <!-- Anthropic API key -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="Anthropic API key"
-        android:textSize="12sp"
-        android:textColor="@color/muted" />
-
-    <EditText
-        android:id="@+id/apiKeyInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:background="@drawable/bg_input"
-        android:padding="11dp"
-        android:hint="sk-ant-…"
-        android:textSize="14sp"
-        android:textColor="@color/fg"
-        android:textColorHint="@color/muted"
-        android:inputType="textPassword"
-        android:importantForAutofill="no" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="Used for chapter translation. Stored only on this device."
-        android:textSize="12sp"
-        android:textColor="@color/muted" />
-
-    <!-- storage: zip / unzip the downloaded chapters -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="Storage"
-        android:textSize="12sp"
-        android:textColor="@color/muted" />
-
-    <CheckBox
-        android:id="@+id/zipDownloadsCheck"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="Download compressed"
-        android:textSize="14sp"
-        android:textColor="@color/fg"
-        app:buttonTint="@color/accent" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/compressBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Compress"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:textColor="@color/fg"
-            app:backgroundTint="@color/btn_secondary"
-            app:cornerRadius="8dp" />
-
-        <Button
-            android:id="@+id/uncompressBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="Uncompress"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:textColor="@color/fg"
-            app:backgroundTint="@color/btn_secondary"
-            app:cornerRadius="8dp" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/zipStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="Compresses each chapter file individually (~70% smaller). Reading works either way."
-        android:textSize="12sp"
-        android:textColor="@color/muted" />
-
-    <!-- reading: keep the screen on while TTS reads aloud -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="Reading"
-        android:textSize="12sp"
-        android:textColor="@color/muted" />
-
-    <CheckBox
-        android:id="@+id/keepAwakeCheck"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="Keep screen awake while reading aloud"
-        android:textSize="14sp"
-        android:textColor="@color/fg"
-        app:buttonTint="@color/accent" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="Stops the screen from dimming off on the reader while text-to-speech is playing."
-        android:textSize="12sp"
-        android:textColor="@color/muted" />
-</LinearLayout>
+</ScrollView>
