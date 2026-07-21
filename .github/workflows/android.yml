@@ -25,6 +25,34 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      # Version name = "<year>.<week>.<patch>":
+      #   year  — years since 2025, 1-indexed (2026 -> 1)
+      #   week  — ISO week of the year, 1-indexed (matched to the ISO year)
+      #   patch — running build within that week; restarts at 1 the first
+      #           build of a new week, otherwise the previous published
+      #           patch + 1 (read back from the android-latest version.json)
+      # The versionCode (GITHUB_RUN_NUMBER, set in build.gradle.kts) is what
+      # the in-app updater compares, so this string is display-only and may
+      # reset freely.
+      - name: Compute version name
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          YEAR=$(( $(date -u +%G) - 2025 ))
+          WEEK=$(( 10#$(date -u +%V) ))
+          PATCH=1
+          if gh release download android-latest --repo "$GITHUB_REPOSITORY" \
+               --pattern version.json --output prev.json --clobber 2>/dev/null; then
+            PREV=$(sed -n 's/.*"versionName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' prev.json)
+            PY=${PREV%%.*}; REST=${PREV#*.}; PW=${REST%%.*}; PP=${REST##*.}
+            if [ "$PY" = "$YEAR" ] && [ "$PW" = "$WEEK" ] && [ -n "$PP" ]; then
+              PATCH=$(( PP + 1 ))
+            fi
+            rm -f prev.json
+          fi
+          echo "APP_VERSION_NAME=${YEAR}.${WEEK}.${PATCH}" >> "$GITHUB_ENV"
+          echo "Computed version name: ${YEAR}.${WEEK}.${PATCH}"
+
       - name: Build release APK
         run: gradle -p android assembleRelease
 
@@ -40,8 +68,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION_NAME=$(sed -n 's/^val appVersionName = "\(.*\)"/\1/p' android/app/build.gradle.kts)
-          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"${VERSION_NAME}\"}" > version.json
+          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"${APP_VERSION_NAME}\"}" > version.json
           gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create android-latest --repo "$GITHUB_REPOSITORY" \
               --title "Android app (latest)" --notes "APK auto-built from main." --latest=false

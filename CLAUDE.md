@@ -23,11 +23,15 @@
   after merging and, if red, fix on a fresh branch and merge that the same
   way. A red main build is safe — it just doesn't publish a new APK, the
   previous release stays live.
-- The human-facing version is `appVersionName` in
-  `android/app/build.gradle.kts` (currently `1.1`), a two-part `major.minor`
-  string — bump the minor by 1 on every change we ship (1.1 → 1.2 → …). The
-  workflow reads it back out of that file for `version.json`, so it's the
-  single source of truth. `versionCode` is still `GITHUB_RUN_NUMBER` (that's
-  what the in-app update check compares).
+- The human-facing versionName is computed by the android.yml "Compute
+  version name" step as `<year>.<week>.<patch>` and passed to Gradle via the
+  `APP_VERSION_NAME` env var (so it's baked into both the APK and
+  `version.json`). `year` = years since 2025, 1-indexed (2026 → 1); `week` =
+  ISO week of the year (1-indexed); `patch` = running build within that week,
+  restarting at 1 the first build of a new week (read back from the previous
+  `version.json`). It's fully automatic — nothing to hand-edit per release.
+  `versionCode` is still `GITHUB_RUN_NUMBER` (that's what the in-app update
+  check compares; versionName may reset freely).
 - Always tell the user which app version is being deployed after a merge:
-  report `v<appVersionName>` (e.g. `v1.1`).
+  read the published `version.json`'s `versionName` (or the android.yml run's
+  "Compute version name" log) and report `v<versionName>`.
