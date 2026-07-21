@@ -83,6 +83,12 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- Foreground service: bulk compress/uncompress survives backgrounding -->
+        <service
+            android:name=".CompressService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- PackageInstaller session results for self-updates -->
         <receiver
             android:name=".InstallReceiver"

@@ -104,17 +104,24 @@ object Zips {
         /* gz every loose chapter file directly under parentDocId */
         fun gzChildren(parentDocId: String) {
             val kids = Saf.children(cr, treeUri, parentDocId)
-            val names = kids.map { it.name }.toHashSet()
+            val byName = kids.associateBy { it.name }
             val parentUri = docUri(treeUri, parentDocId)
             for (f in kids) {
                 if (f.isDir || isGzName(f.name) || !re.matches(f.name)) continue
                 val target = f.name + ".gz"
-                if (target !in names) {
+                val existing = byName[target]
+                /* a VALID compressed copy must exist before the loose original
+                   is deleted; a partial .gz from an interrupted run is rewritten
+                   from the still-present original, never trusted */
+                val valid = existing != null && readGz(cr, treeUri, existing.docId) != null
+                if (!valid) {
                     val text = Saf.readText(cr, treeUri, f.docId) ?: continue
+                    existing?.let {
+                        try { DocumentsContract.deleteDocument(cr, docUri(treeUri, it.docId)) } catch (e: Exception) {}
+                    }
                     if (!writeGz(cr, parentUri, target, text)) continue
-                    names.add(target)
                 }
-                /* compressed copy exists — the loose original can go */
+                /* compressed copy verified — the loose original can go */
                 try { DocumentsContract.deleteDocument(cr, docUri(treeUri, f.docId)) } catch (e: Exception) { continue }
                 changed = true
             }

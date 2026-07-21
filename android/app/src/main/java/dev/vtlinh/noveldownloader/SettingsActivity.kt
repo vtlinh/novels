@@ -3,16 +3,19 @@ package dev.vtlinh.noveldownloader
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-/* App settings: the download folder and the Anthropic API key (moved off
-   the home screen). The key is saved on focus loss and when leaving. */
+/* App settings: the Storage card (download folder + "Compress my novels"),
+   the Anthropic API key, and reading options. Toggling compression starts a
+   background pass that converts every novel to match; new downloads follow the
+   same flag. The key is saved on focus loss and when leaving. */
 class SettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -50,73 +53,38 @@ class SettingsActivity : AppCompatActivity() {
         }
         updateFolderLabel()
 
-        findViewById<android.widget.Button>(R.id.compressBtn).setOnClickListener { processNovels(true) }
-        findViewById<android.widget.Button>(R.id.uncompressBtn).setOnClickListener { processNovels(false) }
+        /* single "Compress my novels" switch: on → compress every novel and
+           new downloads, off → uncompress everything and download plain. The
+           background service converts the library to match either way. */
+        val compressCheck = findViewById<CheckBox>(R.id.compressCheck)
+        compressCheck.isChecked = prefs.getBoolean("compressNovels", prefs.getBoolean("zipDownloads", true))
+        compressCheck.setOnCheckedChangeListener { _, checked ->
+            prefs.edit()
+                .putBoolean("compressNovels", checked)
+                .putBoolean("compressJobActive", true)
+                .apply()
+            if (prefs.getString("tree", null) == null) {
+                findViewById<TextView>(R.id.zipStatus).text = "Pick a download folder first."
+                prefs.edit().putBoolean("compressJobActive", false).apply()
+            } else {
+                try { CompressService.start(this) } catch (e: Exception) {}
+            }
+        }
 
-        /* new downloads compress themselves when this is on (default) */
-        val zipCheck = findViewById<android.widget.CheckBox>(R.id.zipDownloadsCheck)
-        zipCheck.isChecked = prefs.getBoolean("zipDownloads", true)
-        zipCheck.setOnCheckedChangeListener { _, checked ->
-            prefs.edit().putBoolean("zipDownloads", checked).apply()
+        /* live compression status (falls back to the descriptive hint) */
+        val zipStatus = findViewById<TextView>(R.id.zipStatus)
+        val defaultStatus = zipStatus.text.toString()
+        lifecycleScope.launch {
+            CompressService.statusFlow.collectLatest { s ->
+                zipStatus.text = if (s.isEmpty()) defaultStatus else s
+            }
         }
 
         /* keep the reader's screen on while TTS reads aloud (off by default) */
-        val keepAwakeCheck = findViewById<android.widget.CheckBox>(R.id.keepAwakeCheck)
+        val keepAwakeCheck = findViewById<CheckBox>(R.id.keepAwakeCheck)
         keepAwakeCheck.isChecked = prefs.getBoolean("keepAwake", false)
         keepAwakeCheck.setOnCheckedChangeListener { _, checked ->
             prefs.edit().putBoolean("keepAwake", checked).apply()
-        }
-    }
-
-    /* ---- chapter compression ----
-       Compress: each novel's loose "Chapter N.txt" files (plus translated/)
-       are folded into one chapters.zip and the originals deleted.
-       Uncompress: entries are extracted back to files and the zip removed.
-       The reader handles both formats, including mixed. */
-
-    private fun setZipStatus(msg: String) {
-        runOnUiThread { findViewById<TextView>(R.id.zipStatus).text = msg }
-    }
-
-    private fun processNovels(compress: Boolean) {
-        val folder = prefs.getString("tree", null)
-        if (folder == null) {
-            setZipStatus("Pick a download folder first.")
-            return
-        }
-        val btns = listOf<android.widget.Button>(
-            findViewById(R.id.compressBtn), findViewById(R.id.uncompressBtn),
-        )
-        btns.forEach { it.isEnabled = false }
-        lifecycleScope.launch(Dispatchers.IO) {
-            val treeUri = Uri.parse(folder)
-            val cr = contentResolver
-            var changed = 0
-            var failed = 0
-            try {
-                val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri)).filter { it.isDir }
-                for ((i, d) in dirs.withIndex()) {
-                    setZipStatus(
-                        (if (compress) "Compressing" else "Uncompressing") +
-                            " ${i + 1}/${dirs.size}: ${d.name}",
-                    )
-                    try {
-                        val ok = if (compress) {
-                            Zips.compressDir(this@SettingsActivity, cr, treeUri, d)
-                        } else {
-                            Zips.uncompressDir(this@SettingsActivity, cr, treeUri, d)
-                        }
-                        if (ok) changed++
-                    } catch (e: Exception) { failed++ }
-                }
-                setZipStatus(
-                    "Done — $changed novel(s) ${if (compress) "compressed" else "uncompressed"}" +
-                        (if (failed > 0) ", $failed failed" else "") + ".",
-                )
-            } catch (e: Exception) {
-                setZipStatus("Error: ${e.message}")
-            }
-            runOnUiThread { btns.forEach { it.isEnabled = true } }
         }
     }
 
