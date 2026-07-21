@@ -1629,12 +1629,15 @@ class ReaderActivity : AppCompatActivity() {
        app-restart restore and chapter-list picks (including re-picking the
        current chapter to return to where we left off). */
     private fun goTo(pos: Int, targetPara: Int) {
-        /* picking the chapter TTS is already reading → keep reading; nothing
-           new to load, so don't stop or scroll away from the spoken line */
+        /* picking the chapter TTS is already reading → keep reading (nothing new
+           to load); just bring the spoken line back into view */
         if (speaking) {
             val cursor = if (resumeCursor >= 0) resumeCursor else speakCursor
             val reading = loadedChapters.lastOrNull { it.start <= cursor }?.idx
-            if (reading == pos) return
+            if (reading == pos) {
+                scrollToSpoken(cursor)
+                return
+            }
         }
         gotoJob?.cancel()
         gotoJob = lifecycleScope.launch {
@@ -1679,11 +1682,15 @@ class ReaderActivity : AppCompatActivity() {
             saveLastChapter(p)
 
             /* the opened chapter starts at offset 0, so scroll straight to its
-               paragraph once the text has laid out (a frame or two) */
+               paragraph once the text has laid out. Retry one FRAME apart
+               (postDelayed, not post) — plain post()s drain faster than layout
+               passes run, so they'd exhaust before text.layout is ready and we
+               would fall through and land at the chapter top instead of the
+               saved paragraph. */
             fun place(attempt: Int) {
                 val layout = text.layout
-                if ((layout == null || layout.text.length != text.text.length) && attempt < 10) {
-                    scroll.post { place(attempt + 1) }
+                if ((layout == null || layout.text.length != text.text.length) && attempt < 40) {
+                    scroll.postDelayed({ place(attempt + 1) }, 16)
                     return
                 }
                 val targetOff =
