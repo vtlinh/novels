@@ -869,10 +869,19 @@ class ReaderActivity : AppCompatActivity() {
             if (speaking && curSentStart >= 0) {
                 setHighlight(curSentStart + shift, curSentEnd + shift)
             }
-            scroll.post {
-                text.layout?.let { l ->
-                    val line = l.getLineForOffset(anchorOff + shift)
-                    scroll.scrollTo(0, l.getLineTop(line) + withinLine + pad)
+            /* Re-anchor only once the layout includes the prepended text.
+               Anchoring against a stale layout clamps the scroll near the
+               top, which retriggers prepend — cascading several chapters
+               upward from where the user actually opened. */
+            fun anchor(attempt: Int) {
+                val l = text.layout
+                if ((l == null || l.text.length != text.text.length) && attempt < 20) {
+                    scroll.post { anchor(attempt + 1) }
+                    return
+                }
+                l?.let {
+                    val line = it.getLineForOffset(anchorOff + shift)
+                    scroll.scrollTo(0, it.getLineTop(line) + withinLine + pad)
                 }
                 loading = false
                 updateHeader()
@@ -882,6 +891,7 @@ class ReaderActivity : AppCompatActivity() {
                    freshly inserted chapter */
                 if (speaking && resumeCursor >= 0) scrollToSpoken(resumeCursor)
             }
+            scroll.post { anchor(0) }
         }
     }
 }
