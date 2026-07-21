@@ -18,6 +18,9 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        /* if we're now running the version we had cached, the update went
+           through — delete the leftover APK (kept otherwise for a retry) */
+        try { Updater.cleanupIfInstalled(applicationContext) } catch (e: Exception) {}
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             object : DefaultLifecycleObserver {
                 override fun onStart(owner: LifecycleOwner) {

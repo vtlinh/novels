@@ -62,9 +62,9 @@ class AboutActivity : AppCompatActivity() {
                 btn.isEnabled = true
                 return@launch
             }
-            /* newer build available → download and install right away */
+            /* newer build available → download (once per version) and install */
             status.text = "Downloading v${latest.second}…"
-            val apk = Updater.downloadApk(this@AboutActivity)
+            val apk = Updater.ensureApk(this@AboutActivity, latest.first)
             if (apk == null) {
                 status.text = "Update download failed — try again."
                 btn.isEnabled = true
