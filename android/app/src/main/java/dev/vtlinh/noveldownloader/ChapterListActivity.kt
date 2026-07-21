@@ -17,7 +17,9 @@ import kotlinx.coroutines.withContext
 class ChapterListActivity : AppCompatActivity() {
 
     companion object {
-        val CHAPTER_RE = Regex("Chapter (\\d+)(?:-(\\d+))?\\.txt")
+        /* accepts "Chapter 70.txt", "Chapter 70-71.txt" AND legacy names
+           with a title suffix like "Chapter 70 - Hoan chinh van.txt" */
+        val CHAPTER_RE = Regex("Chapter (\\d+)(?:-(\\d+))?.*\\.txt")
 
         class Chapters(
             val ordered: List<String>,               // chapter filenames in order
