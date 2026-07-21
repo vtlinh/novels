@@ -78,6 +78,15 @@ object Updater {
         if (Build.VERSION.SDK_INT >= 31) {
             params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
+        /* Android 14+ only honors USER_ACTION_NOT_REQUIRED silently when this
+           app is the package's registered "update owner". Claim it here so
+           that from the first ownership-claiming update onward, every future
+           self-update installs with no banner tap. (That very first claim
+           still shows one confirmation; there's no way around the initial
+           handshake.) */
+        if (Build.VERSION.SDK_INT >= 34) {
+            params.setRequestUpdateOwnership(true)
+        }
         val sessionId = pi.createSession(params)
         pi.openSession(sessionId).use { session ->
             session.openWrite("app.apk", 0, apk.length()).use { out ->
