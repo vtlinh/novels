@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = ciRunNumber
-        versionName = "0.1.$ciRunNumber"
+        versionName = "1.0.$ciRunNumber"
     }
 
     /* one committed key signs every build: Android only installs an update

@@ -25,4 +25,4 @@
   previous release stays live.
 - Always tell the user which app version is being deployed after a merge:
   find the android.yml run for the merge commit on main and report
-  `v0.1.<run_number>` (versionCode comes from `GITHUB_RUN_NUMBER`).
+  `v1.0.<run_number>` (versionCode comes from `GITHUB_RUN_NUMBER`).
