@@ -198,16 +198,13 @@ class ReaderActivity : AppCompatActivity() {
             openAt(startIdx, savedParaFor(startIdx))
         }
 
-        /* Past half of the loaded content -> append the next chapter; back at
-           the top -> prepend the previous one. NEVER prepend while TTS is
-           speaking: speech only moves forward, and a prepend shifts every
-           pixel coordinate under the auto-scroll — the exact source of the
-           reading-position jumps. Manual scrolling regains it on pause. */
-        scroll.setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            val content = text.height
-            if (content > 0 && (scrollY + scroll.height) * 2 > content) appendNext()
-            if (scrollY < 300 && !speaking) prependPrev()
+        /* Chapter loading is border-driven: crossing into the LAST loaded
+           chapter appends 2 more, crossing into the FIRST prepends 2 — and
+           nothing loads during the first 5 seconds after opening a chapter
+           (loadReady), so the open placement is never disturbed. */
+        scroll.setOnScrollChangeListener { _, _, _, _, _ ->
             updateHeader()
+            maybeLoadMore()
         }
 
         /* TTS: double-tap anywhere in the text starts reading from there.
@@ -464,13 +461,24 @@ class ReaderActivity : AppCompatActivity() {
             clearHighlight()
             if (nextIdx < (chapters?.ordered?.size ?: 0)) {
                 pendingSpeakContinue = true
-                appendNext()
+                appendChapters(2)
             } else {
                 stopTts()
             }
             return
         }
         val (s0, s1) = sent
+        /* about to enter the LAST loaded chapter: hold this sentence, append
+           2 more chapters (appends never move existing text), then resume —
+           reading always has at least 2 chapters of runway ahead */
+        val lastLoaded = loadedChapters.lastOrNull()
+        if (!loading && lastLoaded != null && s0 >= lastLoaded.start &&
+            nextIdx < (chapters?.ordered?.size ?: 0)
+        ) {
+            pendingSpeakContinue = true
+            appendChapters(2)
+            return
+        }
         resumeCursor = s0
         speakCursor = s1
         val sentence = body.substring(s0, s1)
@@ -797,59 +805,103 @@ class ReaderActivity : AppCompatActivity() {
                     pendingSpeakAfterOpen = false
                     startTtsFrom(targetOff)
                 }
-                /* eager prepend keeps the position for manual reading, but
-                   never under active speech — the coordinate shift right as
-                   TTS starts is a guaranteed position jump */
-                if (!speaking) prependPrev()
+                /* no immediate prepend/append: the 5-second quiet window
+                   keeps the just-placed position undisturbed */
+                armLoadTimer()
             }
             scroll.post { place(0) }
         }
     }
 
-    private fun appendNext() {
+    /* ---- border-driven chapter loading ----
+       Nothing loads for the first 5 seconds after a chapter is opened
+       (loadReady), loads always come 2 chapters at a time, and the triggers
+       are chapter borders: viewport inside the LAST loaded chapter → append,
+       inside the FIRST → prepend (never during speech). */
+
+    private var loadReady = false
+    private var loadJob: kotlinx.coroutines.Job? = null
+
+    /* (re)arm the 5-second quiet window after every chapter open */
+    private fun armLoadTimer() {
+        loadReady = false
+        loadJob?.cancel()
+        loadJob = lifecycleScope.launch {
+            kotlinx.coroutines.delay(5000)
+            loadReady = true
+            maybeLoadMore()
+        }
+    }
+
+    private fun maybeLoadMore() {
+        if (!loadReady || loading) return
+        val ch = chapters ?: return
+        val first = loadedChapters.firstOrNull() ?: return
+        val last = loadedChapters.lastOrNull() ?: return
+        val more = nextIdx < ch.ordered.size
+        /* inside the last loaded chapter, or content too short to scroll */
+        if (more && (currentChapterIdx >= last.idx ||
+                (text.height > 0 && text.height < scroll.height * 3 / 2))
+        ) {
+            appendChapters(2)
+            return
+        }
+        /* inside the first loaded chapter; prepends shift coordinates, so
+           never while TTS drives the scroll */
+        if (!speaking && currentChapterIdx <= first.idx && firstIdx > 0) prependChapters(2)
+    }
+
+    private fun appendChapters(n: Int) {
         val ch = chapters ?: return
         if (loading || nextIdx >= ch.ordered.size) return
         loading = true
-        val idx = nextIdx
         lifecycleScope.launch {
-            val body = readAt(idx)
-            if (body != null) {
-                val start = if (text.text.isEmpty()) 0 else text.text.length + SEP.length
-                loadedChapters.add(LoadedChapter(idx, start, headingOf(body)))
-                text.append(if (text.text.isEmpty()) body else SEP + body)
+            var added = 0
+            while (added < n && nextIdx < ch.ordered.size) {
+                val idx = nextIdx
+                val body = readAt(idx)
+                if (body != null) {
+                    val start = if (text.text.isEmpty()) 0 else text.text.length + SEP.length
+                    loadedChapters.add(LoadedChapter(idx, start, headingOf(body)))
+                    text.append(if (text.text.isEmpty()) body else SEP + body)
+                }
+                nextIdx = idx + 1
+                added++
             }
-            nextIdx = idx + 1
             loading = false
+            /* TTS paused at the border waiting for this — resume reading */
             if (pendingSpeakContinue) {
                 pendingSpeakContinue = false
                 if (speaking) speakNext()
             }
-            /* short chapters may not fill the screen — keep filling */
-            scroll.post {
-                if (text.height > 0 && (scroll.scrollY + scroll.height) * 2 > text.height) appendNext()
-                updateHeader()
-            }
+            scroll.post { updateHeader() }
         }
     }
 
-    /* load the previous chapter above the current content, keeping the
-       reader's place (scroll compensated by the added height) */
-    private fun prependPrev() {
+    /* load up to n chapters above the current content in ONE text update,
+       keeping the reader's place (single anchor compensation) */
+    private fun prependChapters(n: Int) {
         val ch = chapters ?: return
         if (loading || firstIdx <= 0) return
         loading = true
-        val idx = firstIdx - 1
         lifecycleScope.launch {
-            val body = readAt(idx)
-            if (body == null) {
-                firstIdx = idx
+            /* gather the chapters directly above, kept in ascending order */
+            val bodies = ArrayList<Pair<Int, String>>()
+            var idx = firstIdx - 1
+            while (idx >= 0 && bodies.size < n) {
+                val b = readAt(idx) ?: break
+                bodies.add(0, Pair(idx, b))
+                idx--
+            }
+            if (bodies.isEmpty()) {
+                /* chapter above unreadable (not downloaded) — skip past it */
+                firstIdx = (firstIdx - 1).coerceAtLeast(0)
                 loading = false
                 return@launch
             }
             /* Anchor the viewport by CHARACTER offset, not pixels: with a
                line-spacing multiplier the text height isn't additive, so a
-               pixel delta lands slightly off and the header shows the wrong
-               chapter after a jump. */
+               pixel delta lands slightly off. */
             val pad = text.totalPaddingTop
             var anchorOff = 0
             var withinLine = 0
@@ -859,13 +911,20 @@ class ReaderActivity : AppCompatActivity() {
                 anchorOff = l.getLineStart(line)
                 withinLine = y - l.getLineTop(line)
             }
-            val shift = body.length + SEP.length
+            val block = bodies.joinToString(SEP) { it.second }
+            val shift = block.length + SEP.length
             for (l in loadedChapters) l.start += shift
             speakCursor += shift
             if (resumeCursor >= 0) resumeCursor += shift
-            loadedChapters.add(0, LoadedChapter(idx, 0, headingOf(body)))
-            text.setText(body + SEP + text.text.toString(), TextView.BufferType.EDITABLE)
-            firstIdx = idx
+            var acc = 0
+            val newLoaded = ArrayList<LoadedChapter>()
+            for ((chapterIdx, body) in bodies) {
+                newLoaded.add(LoadedChapter(chapterIdx, acc, headingOf(body)))
+                acc += body.length + SEP.length
+            }
+            loadedChapters.addAll(0, newLoaded)
+            text.setText(block + SEP + text.text.toString(), TextView.BufferType.EDITABLE)
+            firstIdx = bodies.first().first
             if (speaking && curSentStart >= 0) {
                 setHighlight(curSentStart + shift, curSentEnd + shift)
             }
@@ -887,8 +946,7 @@ class ReaderActivity : AppCompatActivity() {
                 updateHeader()
                 /* a smooth scroll in flight when the prepend landed still
                    animates toward pre-shift coordinates — restart it against
-                   the new layout so TTS centering doesn't jump into the
-                   freshly inserted chapter */
+                   the new layout */
                 if (speaking && resumeCursor >= 0) scrollToSpoken(resumeCursor)
             }
             scroll.post { anchor(0) }
