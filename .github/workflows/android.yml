@@ -40,7 +40,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"1.0.${GITHUB_RUN_NUMBER}\"}" > version.json
+          VERSION_NAME=$(sed -n 's/^val appVersionName = "\(.*\)"/\1/p' android/app/build.gradle.kts)
+          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"${VERSION_NAME}\"}" > version.json
           gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create android-latest --repo "$GITHUB_REPOSITORY" \
               --title "Android app (latest)" --notes "APK auto-built from main." --latest=false

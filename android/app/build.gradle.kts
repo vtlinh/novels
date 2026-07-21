@@ -7,6 +7,12 @@ plugins {
    a higher versionCode — that's what the in-app update check compares. */
 val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
+/* Human-facing version. Single source of truth — the android.yml workflow
+   reads it back out of this file for version.json. Bump the right-hand part
+   by 1 on every change we ship (1.1 → 1.2 → …); the versionCode above keeps
+   the update check working regardless. */
+val appVersionName = "1.1"
+
 android {
     namespace = "dev.vtlinh.noveldownloader"
     compileSdk = 34
@@ -16,7 +22,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = ciRunNumber
-        versionName = "1.0.$ciRunNumber"
+        versionName = appVersionName
     }
 
     /* one committed key signs every build: Android only installs an update
