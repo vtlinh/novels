@@ -556,6 +556,15 @@ class ReaderActivity : AppCompatActivity() {
         return body.lastIndexOf('\n', (o - 1).coerceAtLeast(0)) + 1
     }
 
+    /* scroll Y that places the line at `off` a small gap below the top edge,
+       so a navigated-to chapter's heading isn't jammed under the header (the
+       plain top-of-line position scrolls past the text's top padding) */
+    private fun navScrollY(off: Int): Int {
+        val layout = text.layout ?: return 0
+        val line = layout.getLineForOffset(off.coerceIn(0, text.length()))
+        return (layout.getLineTop(line) + text.totalPaddingTop - dp(16)).coerceAtLeast(0)
+    }
+
     private fun offsetOfPara(chapterStart: Int, para: Int): Int {
         val body = text.text.toString()
         var off = chapterStart
@@ -1591,13 +1600,17 @@ class ReaderActivity : AppCompatActivity() {
         resumeCursor = -1
         clearTextSelection()
         val off = if (targetPara > 0) offsetOfPara(lc.start, targetPara) else lc.start
-        val y = layout.getLineTop(layout.getLineForOffset(off.coerceIn(0, text.length()))) +
-            text.totalPaddingTop
+        val y = navScrollY(off)
+        /* this programmatic jump must not itself trigger a prepend — the small
+           top gap makes it look like an upward scroll into the first chapter.
+           Gate maybeLoadMore off until the placement scroll has settled. */
+        loadReady = false
         scroll.scrollTo(0, y.coerceAtLeast(0))
         scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
         currentChapterIdx = lc.idx
         saveLastChapter(lc.idx)
         updateHeader()
+        scroll.post { loadReady = true }
         return true
     }
 
@@ -1616,6 +1629,13 @@ class ReaderActivity : AppCompatActivity() {
        app-restart restore and chapter-list picks (including re-picking the
        current chapter to return to where we left off). */
     private fun goTo(pos: Int, targetPara: Int) {
+        /* picking the chapter TTS is already reading → keep reading; nothing
+           new to load, so don't stop or scroll away from the spoken line */
+        if (speaking) {
+            val cursor = if (resumeCursor >= 0) resumeCursor else speakCursor
+            val reading = loadedChapters.lastOrNull { it.start <= cursor }?.idx
+            if (reading == pos) return
+        }
         gotoJob?.cancel()
         gotoJob = lifecycleScope.launch {
             var waited = 0
@@ -1668,11 +1688,7 @@ class ReaderActivity : AppCompatActivity() {
                 }
                 val targetOff =
                     if (targetPara > 0 && targetBodyLen > 0) offsetOfPara(0, targetPara) else 0
-                val y = layout?.let {
-                    it.getLineTop(it.getLineForOffset(targetOff.coerceIn(0, text.length()))) +
-                        text.totalPaddingTop
-                } ?: 0
-                scroll.scrollTo(0, y)
+                scroll.scrollTo(0, navScrollY(targetOff))
                 loading = false
                 loadReady = true
                 updateHeader()
