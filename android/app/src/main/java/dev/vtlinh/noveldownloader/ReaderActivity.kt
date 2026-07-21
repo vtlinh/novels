@@ -122,9 +122,6 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
     @Volatile private var loading = false
-    /* scroll events before this time are ignored — they're the programmatic
-       settling right after an open/jump, not the user or TTS reading */
-    private var suppressScrollUntil = 0L
     private var english = true
     private var fontSp = 16f
 
@@ -284,15 +281,10 @@ class ReaderActivity : AppCompatActivity() {
            then crossing into the LAST loaded chapter appends LOAD_BATCH more
            and crossing into the FIRST prepends LOAD_BATCH (loadReady gates
            this until the open placement has landed). */
-        scroll.setOnScrollChangeListener { _, _, _, _, _ ->
-            /* ignore the programmatic settling right after an open/jump (e.g. a
-               selectable-TextView cursor yank) — it must not change the current
-               chapter, save progress, or trigger a prepend */
-            if (loading || android.os.SystemClock.uptimeMillis() < suppressScrollUntil) {
-                return@setOnScrollChangeListener
-            }
+        scroll.setOnScrollChangeListener { _, _, sy, _, oldY ->
+            if (loading) return@setOnScrollChangeListener
             updateHeader()
-            maybeLoadMore()
+            maybeLoadMore(sy, oldY)
         }
 
         /* TTS: double-tap anywhere in the text starts reading from there.
@@ -1601,8 +1593,6 @@ class ReaderActivity : AppCompatActivity() {
         val off = if (targetPara > 0) offsetOfPara(lc.start, targetPara) else lc.start
         val y = layout.getLineTop(layout.getLineForOffset(off.coerceIn(0, text.length()))) +
             text.totalPaddingTop
-        /* ignore the settling scroll(s) so they can't overwrite the target */
-        suppressScrollUntil = android.os.SystemClock.uptimeMillis() + 900
         scroll.scrollTo(0, y.coerceAtLeast(0))
         scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
         currentChapterIdx = lc.idx
@@ -1634,11 +1624,11 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /* Open a chapter by building the WHOLE surrounding window up front —
-       LOAD_BATCH chapters behind and ahead — then scrolling to the target
-       position ONCE, after every chapter is in the buffer. Placing the scroll
-       only after all text is added means the target's final offset (shifted by
-       the chapters loaded above it) is known, so the restore lands correctly. */
+    /* Open a chapter by loading it plus LOAD_BATCH chapters AHEAD (forward
+       only): the opened chapter is the FIRST in the buffer, at offset 0, so the
+       scroll target is just its paragraph — a small offset that needs no
+       placement tricks. Previous chapters load lazily when the reader scrolls
+       up into the top chapter (see maybeLoadMore). */
     private fun openAt(pos: Int, targetPara: Int = 0) {
         val ch = chapters ?: return
         if (loading || ch.ordered.isEmpty()) return
@@ -1647,57 +1637,42 @@ class ReaderActivity : AppCompatActivity() {
         loading = true
         loadReady = false
         val p = pos.coerceIn(0, ch.ordered.size - 1)
-        /* hide the page while the window is assembled so the restore scroll
-           isn't seen jumping through intermediate layouts */
-        scroll.visibility = android.view.View.INVISIBLE
         lifecycleScope.launch {
-            val firstToLoad = (p - LOAD_BATCH).coerceAtLeast(0)
             val lastToLoad = (p + LOAD_BATCH).coerceAtMost(ch.ordered.size - 1)
             loadedChapters.clear()
             val sb = StringBuilder()
-            var targetStart = 0
             var targetBodyLen = 0
-            for (i in firstToLoad..lastToLoad) {
+            for (i in p..lastToLoad) {
                 val body = readAt(i) ?: continue   // skip a chapter that won't read
                 if (sb.isNotEmpty()) sb.append(SEP)
                 val start = sb.length
                 sb.append(body)
                 loadedChapters.add(LoadedChapter(i, start, headingOf(body)))
-                if (i == p) { targetStart = start; targetBodyLen = body.length }
+                if (i == p) targetBodyLen = body.length
             }
-            firstIdx = loadedChapters.firstOrNull()?.idx ?: p
+            firstIdx = p
             nextIdx = (loadedChapters.lastOrNull()?.idx ?: (p - 1)) + 1
             text.setText(sb, TextView.BufferType.EDITABLE)
-            /* a selectable TextView drops an insertion cursor at offset 0 on
-               setText and then auto-scrolls the ScrollView to it on the next
-               layout — which would yank us back to the buffer top right after
-               we place the restore. Remove the selection so nothing competes. */
-            clearTextSelection()
+            clearTextSelection()   // no stray insertion cursor to auto-scroll
             currentChapterIdx = p
             titleBar.text = loadedChapters.firstOrNull { it.idx == p }?.heading ?: ""
             saveLastChapter(p)
 
-            fun targetOffset(): Int {
-                if (targetPara <= 0 || targetBodyLen <= 0) return targetStart
-                /* char offset of paragraph N within the target chapter */
-                val body = text.text.toString()
-                val end = targetStart + targetBodyLen
-                var off = targetStart
-                var count = 0
-                while (count < targetPara && off < end) {
-                    val n = body.indexOf('\n', off)
-                    if (n == -1 || n >= end) break
-                    off = n + 1
-                    count++
+            /* the opened chapter starts at offset 0, so scroll straight to its
+               paragraph once the text has laid out (a frame or two) */
+            fun place(attempt: Int) {
+                val layout = text.layout
+                if ((layout == null || layout.text.length != text.text.length) && attempt < 10) {
+                    scroll.post { place(attempt + 1) }
+                    return
                 }
-                return off
-            }
-
-            fun finish(targetOff: Int) {
-                /* the chapter + progress are set from the target below; ignore
-                   any settling scroll for a beat so it can't overwrite them */
-                suppressScrollUntil = android.os.SystemClock.uptimeMillis() + 900
-                scroll.visibility = android.view.View.VISIBLE
+                val targetOff =
+                    if (targetPara > 0 && targetBodyLen > 0) offsetOfPara(0, targetPara) else 0
+                val y = layout?.let {
+                    it.getLineTop(it.getLineForOffset(targetOff.coerceIn(0, text.length()))) +
+                        text.totalPaddingTop
+                } ?: 0
+                scroll.scrollTo(0, y)
                 loading = false
                 loadReady = true
                 updateHeader()
@@ -1706,50 +1681,19 @@ class ReaderActivity : AppCompatActivity() {
                     startTtsFrom(targetOff)
                 }
             }
-
-            /* Place the viewport only AFTER a full layout pass — a global-layout
-               listener fires once the ScrollView has measured/laid out its (now
-               very tall) child, so scrollTo() can actually reach a target deep
-               in the buffer instead of clamping short to the top (which landed
-               on the first loaded chapter). A plain post() can run before that
-               layout completes; the listener cannot. */
-            val vto = scroll.viewTreeObserver
-            vto.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
-                var tries = 0
-                override fun onGlobalLayout() {
-                    tries++
-                    val layout = text.layout
-                    if ((layout == null || layout.text.length != text.text.length) && tries < 120) {
-                        return   // text not fully laid out yet — wait for the next pass
-                    }
-                    val targetOff = targetOffset()
-                    val y = layout?.let {
-                        it.getLineTop(it.getLineForOffset(targetOff)) + text.totalPaddingTop
-                    } ?: 0
-                    scroll.scrollTo(0, y)
-                    /* still clamped short (child not tall enough yet) → wait for
-                       another layout pass, unless we've waited too long */
-                    if (y > 0 && scroll.scrollY < y - 4 && tries < 120) return
-                    if (scroll.viewTreeObserver.isAlive) {
-                        scroll.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                    }
-                    finish(targetOff)
-                }
-            })
-            /* nudge a layout pass so the listener is guaranteed to fire */
-            scroll.requestLayout()
+            scroll.post { place(0) }
         }
     }
 
     /* ---- border-driven chapter loading ----
-       The initial window is built by openAt; from there the chapter-border
-       triggers keep it topped up LOAD_BATCH at a time: viewport inside the
-       LAST loaded chapter → append, inside the FIRST → prepend (never during
-       speech, since prepends shift coordinates). */
+       openAt loads the opened chapter + LOAD_BATCH ahead; from there scrolling
+       tops the buffer up LOAD_BATCH at a time: reaching the LAST loaded chapter
+       appends more, scrolling UP into the FIRST loaded chapter prepends the
+       previous batch (never during speech, since prepends shift coordinates). */
 
     private var loadReady = false
 
-    private fun maybeLoadMore() {
+    private fun maybeLoadMore(newY: Int, oldY: Int) {
         if (!loadReady || loading) return
         val ch = chapters ?: return
         val first = loadedChapters.firstOrNull() ?: return
@@ -1762,9 +1706,13 @@ class ReaderActivity : AppCompatActivity() {
             appendChapters(LOAD_BATCH)
             return
         }
-        /* inside the first loaded chapter; prepends shift coordinates, so
-           never while TTS drives the scroll */
-        if (!speaking && currentChapterIdx <= first.idx && firstIdx > 0) prependChapters(LOAD_BATCH)
+        /* SCROLLING UP into the top loaded chapter → load the previous
+           LOAD_BATCH at once. Requires an actual upward scroll (newY < oldY) so
+           it never fires on open (the opened chapter starts as the first one).
+           Prepends shift coordinates, so never while TTS drives the scroll. */
+        if (!speaking && firstIdx > 0 && newY < oldY && currentChapterIdx <= first.idx) {
+            prependChapters(LOAD_BATCH)
+        }
     }
 
     /* A selectable TextView keeps a cursor where the user last tapped
