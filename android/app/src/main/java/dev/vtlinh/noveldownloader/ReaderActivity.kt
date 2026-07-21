@@ -1610,6 +1610,7 @@ class ReaderActivity : AppCompatActivity() {
            top gap makes it look like an upward scroll into the first chapter.
            Gate maybeLoadMore off until the placement scroll has settled. */
         loadReady = false
+        prependArmed = false   // jumped to this chapter; not a scroll-up-to-top
         scroll.scrollTo(0, y.coerceAtLeast(0))
         scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
         currentChapterIdx = lc.idx
@@ -1703,6 +1704,7 @@ class ReaderActivity : AppCompatActivity() {
                 scroll.scrollTo(0, navScrollY(targetOff))
                 loading = false
                 loadReady = true
+                prependArmed = false   // just landed on the first chapter
                 updateHeader()
                 if (pendingSpeakAfterOpen) {
                     pendingSpeakAfterOpen = false
@@ -1720,6 +1722,10 @@ class ReaderActivity : AppCompatActivity() {
        previous batch (never during speech, since prepends shift coordinates). */
 
     private var loadReady = false
+    /* the prepend only arms once the reader has moved PAST the first loaded
+       chapter; a fresh open/jump lands ON the first chapter, so without this a
+       settle scroll would immediately load the previous batch */
+    private var prependArmed = false
 
     private fun maybeLoadMore(newY: Int, oldY: Int) {
         if (!loadReady || loading) return
@@ -1734,11 +1740,16 @@ class ReaderActivity : AppCompatActivity() {
             appendChapters(LOAD_BATCH)
             return
         }
-        /* SCROLLING UP into the top loaded chapter → load the previous
-           LOAD_BATCH at once. Requires an actual upward scroll (newY < oldY) so
-           it never fires on open (the opened chapter starts as the first one).
+        /* arm once the viewport is past the first loaded chapter */
+        if (currentChapterIdx > first.idx) prependArmed = true
+        /* SCROLLING UP back into the top loaded chapter (after having read past
+           it) → load the previous LOAD_BATCH. The armed flag keeps a fresh
+           open/jump — which lands on the first chapter — from triggering it.
            Prepends shift coordinates, so never while TTS drives the scroll. */
-        if (!speaking && firstIdx > 0 && newY < oldY && currentChapterIdx <= first.idx) {
+        if (prependArmed && !speaking && firstIdx > 0 && newY < oldY &&
+            currentChapterIdx <= first.idx
+        ) {
+            prependArmed = false
             prependChapters(LOAD_BATCH)
         }
     }
