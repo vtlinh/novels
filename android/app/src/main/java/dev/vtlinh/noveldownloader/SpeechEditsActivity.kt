@@ -118,14 +118,27 @@ class SpeechEditsActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             },
         )
-        fun headerBtn(t: String, onTap: () -> Unit) = TextView(this).apply {
-            text = t; textSize = 14f; setTextColor(getColor(R.color.accent))
-            setPadding(dp(10), dp(12), dp(10), dp(12))
+        /* ⋮ context menu: import/export live behind it to keep the header clean */
+        val menuBtn = TextView(this).apply {
+            text = "⋮"; textSize = 20f; setTypeface(null, Typeface.BOLD)
+            setTextColor(getColor(R.color.fg))
+            setPadding(dp(16), dp(12), dp(16), dp(12))
             isClickable = true; isFocusable = true
-            setOnClickListener { onTap() }
         }
-        header.addView(headerBtn("Import") { importLauncher.launch(arrayOf("*/*")) })
-        header.addView(headerBtn("Export") { exportLauncher.launch("replaceeng.txt") })
+        menuBtn.setOnClickListener {
+            val menu = android.widget.PopupMenu(this, menuBtn)
+            menu.menu.add("Import…")
+            menu.menu.add("Export…")
+            menu.setOnMenuItemClickListener { item ->
+                when (item.title.toString()) {
+                    "Import…" -> importLauncher.launch(arrayOf("*/*"))
+                    "Export…" -> exportLauncher.launch("replaceeng.txt")
+                }
+                true
+            }
+            menu.show()
+        }
+        header.addView(menuBtn)
         root.addView(header)
 
         /* User / Default tabs */
