@@ -1246,7 +1246,7 @@ class ReaderActivity : AppCompatActivity() {
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
         }
         aloud.addView(spinner)
-        if (voices.isEmpty()) hint(aloud, "No voices found — open the ⚙ while stopped to reconnect Google TTS.")
+        if (voices.isEmpty()) hint(aloud, "No voices found — open the 🕪︎ while stopped to reconnect Google TTS.")
 
         fun slider(title: String, key: String) {
             aloud.addView(

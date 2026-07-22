@@ -91,7 +91,7 @@
                     android:id="@+id/folderBtn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="✎"
+                    android:text="✎&#xFE0E;"
                     android:textSize="18sp"
                     android:textColor="@color/accent"
                     android:clickable="true"

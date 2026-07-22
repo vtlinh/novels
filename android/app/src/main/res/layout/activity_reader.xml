@@ -62,7 +62,7 @@
                 android:paddingEnd="8dp"
                 android:paddingTop="10dp"
                 android:paddingBottom="10dp"
-                android:text="✎"
+                android:text="✎&#xFE0E;"
                 android:textSize="18sp"
                 android:textColor="@color/fg"
                 android:clickable="true"
@@ -76,7 +76,7 @@
                 android:paddingEnd="14dp"
                 android:paddingTop="10dp"
                 android:paddingBottom="10dp"
-                android:text="⚙"
+                android:text="⚙&#xFE0E;"
                 android:textSize="18sp"
                 android:textColor="@color/fg"
                 android:clickable="true"
@@ -144,8 +144,9 @@
                 android:clickable="true"
                 android:focusable="true" />
 
-            <!-- speaker glyph: this ⚙-free icon says "voice", distinguishing it
-                 from the header's reading-settings gear -->
+            <!-- monochrome speaker (U+1F56A, a text pictograph — the emoji
+                 U+1F50A always renders colored): says "voice" while matching
+                 the app's black-and-white icons -->
             <TextView
                 android:id="@+id/ttsSettingsBtn"
                 android:layout_width="wrap_content"
@@ -155,7 +156,7 @@
                 android:paddingEnd="16dp"
                 android:paddingTop="8dp"
                 android:paddingBottom="8dp"
-                android:text="&#x1F50A;"
+                android:text="&#x1F56A;&#xFE0E;"
                 android:textSize="18sp"
                 android:textColor="@color/fg"
                 android:clickable="true"
