@@ -77,6 +77,12 @@ class AboutActivity : AppCompatActivity() {
                 /* returning here (via onResume) means the install prompt was
                    dismissed — offer a retry */
                 installInFlight = true
+                /* keep the button tappable: a healthy silent install kills the
+                   process within seconds, so still sitting here means the
+                   session stalled — another tap abandons it and re-commits
+                   the cached APK (no re-download) */
+                status.text = "Installing v${latest.second}… — tap Check for updates again if nothing happens."
+                btn.isEnabled = true
             } catch (e: Exception) {
                 status.text = "Install failed — ${e.message}"
                 btn.isEnabled = true

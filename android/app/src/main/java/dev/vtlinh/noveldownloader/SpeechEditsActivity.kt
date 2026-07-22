@@ -347,8 +347,9 @@ class SpeechEditsActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val line1 = edit.title.ifEmpty { edit.pattern }
-        val line2 = if (edit.title.isNotEmpty()) edit.pattern else edit.replace
+        /* titles are gone from the UI — a rule IS its pattern/replacement */
+        val line1 = edit.pattern
+        val line2 = edit.replace
         texts.addView(
             TextView(this).apply {
                 text = line1; textSize = 15f
@@ -520,10 +521,6 @@ class SpeechEditsActivity : AppCompatActivity() {
             },
         )
 
-        form.addView(label("Title (optional)"))
-        val titleField = field(existing?.title ?: "", "")
-        form.addView(titleField)
-
         form.addView(label("Type"))
         val typeSpinner = Spinner(this)
         typeSpinner.adapter = ArrayAdapter(
@@ -578,7 +575,7 @@ class SpeechEditsActivity : AppCompatActivity() {
 
         fun previewEdit(): SpeechEdit = SpeechEdit(
             id = existing?.id ?: "preview",
-            title = titleField.text.toString(),
+            title = existing?.title ?: "",   // titles no longer edited; keep as-is
             type = typeSpinner.selectedItemPosition,
             wholeWord = wholeWord.isChecked,
             pattern = patternField.text.toString(),
