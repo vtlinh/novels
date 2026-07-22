@@ -144,6 +144,8 @@
                 android:clickable="true"
                 android:focusable="true" />
 
+            <!-- speaker glyph: this ⚙-free icon says "voice", distinguishing it
+                 from the header's reading-settings gear -->
             <TextView
                 android:id="@+id/ttsSettingsBtn"
                 android:layout_width="wrap_content"
@@ -153,7 +155,7 @@
                 android:paddingEnd="16dp"
                 android:paddingTop="8dp"
                 android:paddingBottom="8dp"
-                android:text="⚙"
+                android:text="&#x1F50A;"
                 android:textSize="18sp"
                 android:textColor="@color/fg"
                 android:clickable="true"
