@@ -566,6 +566,15 @@ class DownloadEngine(
         val summary = "${saved.get()} saved, $skipped skipped, ${failed.size} failed.$avg"
         log((if (stopRequested) "Stopped — re-run to resume. " else "✓ Finished. ") + summary)
 
+        /* record the site's chapter count + finished flag right here at
+           download time (not only when the user taps Check status). Complete =
+           the site says finished AND every listed chapter is on disk after
+           this run (nothing failed, nothing stopped). */
+        try {
+            val allOnDisk = !stopRequested && failed.isEmpty()
+            store.updateNovelCheck(folderKey, slug, chapters.size, site.isCompleted(doc) && allOnDisk)
+        } catch (e: Exception) {}
+
         if (translate && sourceEnglish && !forceTranslate) {
             log("Source is already in English — skipping translation.")
         } else if (translate && apiKey.isNotBlank() && !stopRequested) {
