@@ -416,6 +416,29 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    /* The chapter list opens the reader with REORDER_TO_FRONT, so picking a
+       chapter of the novel ALREADY being read lands here on the live instance
+       — keeping TTS and the loaded buffer — instead of stacking a fresh
+       reader on top. Same novel → jump within it (goTo keeps TTS running when
+       it's already reading that chapter). Different novel (or the chapter
+       list isn't loaded yet) → full rebuild via recreate. */
+    override fun onNewIntent(newIntent: android.content.Intent) {
+        super.onNewIntent(newIntent)
+        val sameNovel = newIntent.getStringExtra("slug") == intent.getStringExtra("slug")
+        val start = newIntent.getStringExtra("start")
+        val idx = if (sameNovel && start != null) {
+            chapters?.ordered?.indexOf(start) ?: -1
+        } else {
+            -1
+        }
+        setIntent(newIntent)
+        if (idx >= 0) {
+            goTo(idx, restoreParaFor(idx))
+        } else {
+            recreate()
+        }
+    }
+
     /* Custom settings popup (a PopupMenu can't do this): the font controls
        sit on ONE line — "Font size  −  +" — and adjusting the size keeps the
        popup open so the effect can be watched live. */
