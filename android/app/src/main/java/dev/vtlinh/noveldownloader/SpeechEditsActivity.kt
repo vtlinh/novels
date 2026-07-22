@@ -513,10 +513,26 @@ class SpeechEditsActivity : AppCompatActivity() {
 
         /* live test */
         form.addView(label("Test"))
-        val testInput = field(
-            "There is a tinge of annoyance on Azure Dragon's face.",
-            "text to test against",
-        )
+        val SAMPLE = "There is a tinge of annoyance on Azure Dragon's face."
+        val ttsPara = getSharedPreferences("app", MODE_PRIVATE)
+            .getString("lastTtsPara", null)?.takeIf { it.isNotBlank() }
+        /* the paragraph TTS last stopped at is the default test text when one
+           exists; the checkbox flips between it and a manual text */
+        val useTtsPara = CheckBox(this).apply {
+            text = "Test with the paragraph TTS stopped at"
+            textSize = 14f; setTextColor(getColor(R.color.fg))
+            setPadding(dp(6), dp(4), 0, dp(4))
+            isEnabled = ttsPara != null
+            isChecked = ttsPara != null
+        }
+        form.addView(useTtsPara)
+        val applyAll = CheckBox(this).apply {
+            text = "Apply all active edits"
+            textSize = 14f; setTextColor(getColor(R.color.fg))
+            setPadding(dp(6), 0, 0, dp(4))
+        }
+        form.addView(applyAll)
+        val testInput = field(ttsPara ?: SAMPLE, "text to test against")
         form.addView(testInput)
         val testResult = TextView(this).apply {
             textSize = 14f; setTextColor(getColor(R.color.accent)); setPadding(0, dp(10), 0, 0)
@@ -533,20 +549,57 @@ class SpeechEditsActivity : AppCompatActivity() {
             enabled = true,
             isDefault = false,
         )
+        /* every active rule in speaking order — user rules then defaults —
+           with the form's in-progress version substituted for the rule being
+           edited (or appended after the user rules when adding a new one) */
+        fun allActiveRules(cur: Pair<Regex, String>): List<Pair<Regex, String>> {
+            val out = ArrayList<Pair<Regex, String>>()
+            for (e in userList) {
+                if (!forDefault && existing != null && e.id == existing.id) out.add(cur)
+                else if (e.enabled) e.compiled()?.let { out.add(it) }
+            }
+            if (existing == null) out.add(cur)
+            for (e in SpeechEdits.effectiveDefaults(this)) {
+                if (forDefault && existing != null && e.id == existing.id) out.add(cur)
+                else if (e.enabled) e.compiled()?.let { out.add(it) }
+            }
+            return out
+        }
         fun updateTest() {
             val edit = previewEdit()
             val compiled = edit.compiled()
             testResult.setTextColor(getColor(if (compiled == null) R.color.err else R.color.accent))
-            testResult.text = if (compiled == null) {
-                "Invalid pattern"
-            } else {
-                try {
+            if (compiled == null) {
+                testResult.text = "Invalid pattern"
+                return
+            }
+            testResult.text = try {
+                if (applyAll.isChecked) {
+                    /* mirror the reader's cleanForSpeech: trailing space so
+                       end-anchored rules fire, one bad rule skipped not fatal */
+                    var s = testInput.text.toString() + " "
+                    for ((re, rep) in allActiveRules(compiled)) {
+                        s = try { re.replace(s, rep) } catch (e: Exception) { s }
+                    }
+                    s.replace(Regex("\\s+"), " ").trim()
+                } else {
                     compiled.first.replace(testInput.text.toString(), compiled.second)
-                } catch (e: Exception) {
-                    "Invalid pattern"
                 }
+            } catch (e: Exception) {
+                "Invalid pattern"
             }
         }
+        var manualText = SAMPLE
+        useTtsPara.setOnCheckedChangeListener { _, checked ->
+            if (checked && ttsPara != null) {
+                manualText = testInput.text.toString()
+                testInput.setText(ttsPara)
+            } else {
+                testInput.setText(manualText)
+            }
+            /* testInput's watcher reruns the preview */
+        }
+        applyAll.setOnCheckedChangeListener { _, _ -> updateTest() }
         val watcher = object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}

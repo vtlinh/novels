@@ -917,13 +917,21 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* persist "chapter file | paragraph in chapter" so the next session's
-       play button continues from here (paragraphs map 1:1 across EN/VI) */
+       play button continues from here (paragraphs map 1:1 across EN/VI).
+       The paragraph's TEXT is stored too — the Speech-edits test box can
+       offer "test against the paragraph TTS stopped at". */
     private fun saveTtsPos(off: Int) {
         val slug = intent.getStringExtra("slug") ?: return
         val ch = loadedChapters.lastOrNull { it.start <= off } ?: return
         val name = chapters?.ordered?.getOrNull(ch.idx) ?: return
         val para = text.text.subSequence(ch.start, off.coerceAtLeast(ch.start)).count { it == '\n' }
-        prefs.edit().putString("ttsPos:$slug", "$name|$para").apply()
+        val body = text.text
+        val pStart = paraStartOf(off)
+        val nl = body.toString().indexOf('\n', pStart)
+        val pEnd = if (nl == -1) body.length else nl
+        prefs.edit().putString("ttsPos:$slug", "$name|$para")
+            .putString("lastTtsPara", body.subSequence(pStart, pEnd).toString())
+            .apply()
     }
 
     /* pause replays the interrupted sentence on resume */
