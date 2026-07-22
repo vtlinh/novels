@@ -36,7 +36,13 @@ class SpeechEditsActivity : AppCompatActivity() {
     private var selected: java.util.SortedSet<Int> = sortedSetOf()
     private var userList = mutableListOf<SpeechEdit>()
 
-    private lateinit var listBox: LinearLayout
+    /* the rows shown right now: (index in the FULL current list, edit) — the
+       full-list index keeps move/delete/restore addressing the right items
+       while the hide-inactive filter is on */
+    private val visible = ArrayList<Pair<Int, SpeechEdit>>()
+    private lateinit var listView: android.widget.ListView
+    private var listAdapter: android.widget.BaseAdapter? = null
+    private lateinit var emptyMsg: TextView
     private lateinit var footer: TextView
     private lateinit var userTab: TextView
     private lateinit var defaultTab: TextView
@@ -213,15 +219,42 @@ class SpeechEditsActivity : AppCompatActivity() {
         userOnlyBtns = listOf(addBtn, upBtn, downBtn, delBtn)
         root.addView(toolbar)
 
-        /* scrollable list */
-        val scroll = ScrollView(this).apply {
+        /* fast-scrollable list (a real ListView so the fast-scroll thumb
+           works, like the reader's chapter drawer) */
+        val listWrap = android.widget.FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
             )
         }
-        listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(listBox)
-        root.addView(scroll)
+        listAdapter = object : android.widget.BaseAdapter() {
+            override fun getCount() = visible.size
+            override fun getItem(pos: Int) = visible[pos]
+            override fun getItemId(pos: Int) = pos.toLong()
+            override fun getView(pos: Int, convertView: View?, parent: ViewGroup?): View {
+                val (idx, edit) = visible[pos]
+                return rowView(idx, edit)
+            }
+        }
+        listView = android.widget.ListView(this).apply {
+            divider = null
+            isFastScrollEnabled = true
+            isFastScrollAlwaysVisible = true
+            adapter = listAdapter
+        }
+        emptyMsg = TextView(this).apply {
+            setTextColor(getColor(R.color.muted)); textSize = 14f
+            setPadding(dp(16), dp(24), dp(16), dp(24)); gravity = Gravity.CENTER
+            visibility = View.GONE
+        }
+        listWrap.addView(listView)
+        listWrap.addView(
+            emptyMsg,
+            android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER,
+            ),
+        )
+        root.addView(listWrap)
 
         /* footer count */
         footer = TextView(this).apply {
@@ -254,7 +287,6 @@ class SpeechEditsActivity : AppCompatActivity() {
     }
 
     private fun refresh() {
-        listBox.removeAllViews()
         ovrIds = if (tab == 1) SpeechEdits.overrides(this).keys else emptySet()
         val list = currentList()
         /* a row hidden by the filter must not linger in the selection — ✕/⟲
@@ -265,26 +297,19 @@ class SpeechEditsActivity : AppCompatActivity() {
                 if (list.getOrNull(it.next())?.enabled == false) it.remove()
             }
         }
+        visible.clear()
         var hidden = 0
         list.forEachIndexed { i, edit ->
-            /* indices stay FULL-list positions, so move/delete/restore keep
-               addressing the right items while the filter is on */
-            if (hideInactive && !edit.enabled) { hidden++; return@forEachIndexed }
-            listBox.addView(rowView(i, edit))
+            if (hideInactive && !edit.enabled) hidden++ else visible.add(i to edit)
         }
-        if (list.isEmpty() || listBox.childCount == 0) {
-            listBox.addView(
-                TextView(this).apply {
-                    text = when {
-                        list.isNotEmpty() -> "All ${list.size} edits here are inactive (hidden by the ⋮ filter)."
-                        tab == 0 -> "No custom edits yet. Tap + to add one."
-                        else -> "No default edits."
-                    }
-                    setTextColor(getColor(R.color.muted)); textSize = 14f
-                    setPadding(dp(16), dp(24), dp(16), dp(24)); gravity = Gravity.CENTER
-                },
-            )
+        listAdapter?.notifyDataSetChanged()
+        emptyMsg.text = when {
+            list.isNotEmpty() && visible.isEmpty() ->
+                "All ${list.size} edits here are inactive (hidden by the ⋮ filter)."
+            tab == 0 -> "No custom edits yet. Tap + to add one."
+            else -> "No default edits."
         }
+        emptyMsg.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
         val enabled = list.count { it.enabled }
         footer.text = "Enabled $enabled of ${list.size}" +
             (if (hidden > 0) "  ·  $hidden hidden" else "") +

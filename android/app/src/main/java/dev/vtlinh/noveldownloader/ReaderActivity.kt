@@ -340,6 +340,11 @@ class ReaderActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
         findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
+        /* the not-ready spinner doubles as a retry button once a bind gave up */
+        findViewById<android.widget.ProgressBar>(R.id.ttsSpinner).setOnClickListener {
+            if (!ttsReady && !ttsConnecting) initTts()
+        }
+        updatePlayBtn()   // engine still binding at this point → show the spinner
 
         /* the notification's Pause/Play action broadcasts back to us */
         ttsToggleReceiver = object : android.content.BroadcastReceiver() {
@@ -531,6 +536,7 @@ class ReaderActivity : AppCompatActivity() {
                    as its data finishes loading */
                 voiceRestoreTicks = 0
                 ensureSavedVoice()
+                runOnUiThread { updatePlayBtn() }   // spinner → play triangle
             } else {
                 ttsReady = false
                 ttsInitState = "FAILED to bind Google TTS — is it installed and enabled?"
@@ -1015,8 +1021,14 @@ class ReaderActivity : AppCompatActivity() {
        font on many devices even with the text-presentation selector, so it
        would render in a different style and color than the play triangle */
     private fun updatePlayBtn() {
-        findViewById<TextView>(R.id.ttsPlayBtn)?.text =
-            if (speaking) "\u275a\u275a" else "\u25b6\ufe0e"
+        /* engine still binding \u2192 the play button is an indeterminate spinner;
+           the triangle/bars come back the moment TTS is ready */
+        findViewById<android.widget.ProgressBar>(R.id.ttsSpinner)?.visibility =
+            if (ttsReady) android.view.View.GONE else android.view.View.VISIBLE
+        findViewById<TextView>(R.id.ttsPlayBtn)?.apply {
+            visibility = if (ttsReady) android.view.View.VISIBLE else android.view.View.INVISIBLE
+            text = if (speaking) "\u275a\u275a" else "\u25b6\ufe0e"
+        }
         updateMediaSessionState()
     }
 
@@ -1246,7 +1258,7 @@ class ReaderActivity : AppCompatActivity() {
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
         }
         aloud.addView(spinner)
-        if (voices.isEmpty()) hint(aloud, "No voices found — open the 🕪︎ while stopped to reconnect Google TTS.")
+        if (voices.isEmpty()) hint(aloud, "No voices found — open the ♪ menu while stopped to reconnect Google TTS.")
 
         fun slider(title: String, key: String) {
             aloud.addView(

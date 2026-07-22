@@ -144,9 +144,19 @@
                 android:clickable="true"
                 android:focusable="true" />
 
-            <!-- monochrome speaker (U+1F56A, a text pictograph — the emoji
-                 U+1F50A always renders colored): says "voice" while matching
-                 the app's black-and-white icons -->
+            <!-- shown in place of the play button while the TTS engine is
+                 still binding (tap = retry a given-up bind) -->
+            <ProgressBar
+                android:id="@+id/ttsSpinner"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:indeterminate="true"
+                android:indeterminateTint="@color/fg"
+                android:visibility="gone" />
+
+            <!-- ♪: monochrome, universally rendered, and reads as "audio" —
+                 the voice/rate/pitch sheet lives behind it -->
             <TextView
                 android:id="@+id/ttsSettingsBtn"
                 android:layout_width="wrap_content"
@@ -156,7 +166,7 @@
                 android:paddingEnd="16dp"
                 android:paddingTop="8dp"
                 android:paddingBottom="8dp"
-                android:text="&#x1F56A;&#xFE0E;"
+                android:text="&#x266A;"
                 android:textSize="18sp"
                 android:textColor="@color/fg"
                 android:clickable="true"
