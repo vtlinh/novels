@@ -183,13 +183,16 @@ class NovelListActivity : AppCompatActivity() {
         val garbage = garbageSet()
         return byNorm.values.filter { normKey(it.slug) !in garbage }.map { rec ->
             val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
+            /* the cached resolved listing also counts chapters living inside
+               chapters.zip, which the index and the scan both miss */
+            val listCount = try { store.chapterListCount(folder, rec.slug) } catch (e: Exception) { 0 }
             Row(
                 rec,
                 Extractor.stripAuthor(
                     store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
                     rec.author,
                 ),
-                maxOf(dbCount, rec.diskCount),
+                maxOf(dbCount, rec.diskCount, listCount),
             )
         }.sortedWith(
             /* finished (user-marked) novels sink to the bottom; hot novels
