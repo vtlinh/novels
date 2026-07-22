@@ -36,8 +36,18 @@ data class NovelRec(
     val lastRead: Long,  // when it was last opened in the reader (0 = never)
 )
 
+/* a cached, fully-resolved chapter listing (DownloadStore.chlist): filenames
+   in reading order plus each name's source/translated ref, so opening a big
+   novel doesn't re-list a 7k-file folder */
+class CachedChapterList(
+    val ordered: List<String>,
+    val source: Map<String, String>,
+    val translated: Map<String, String>,
+    val zipDocId: String?,
+)
+
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 11) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 12) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -56,6 +66,13 @@ class DownloadStore(context: Context) :
             "CREATE TABLE IF NOT EXISTS chapter_order (" +
                 "folder TEXT, slug TEXT, filename TEXT, ord INTEGER, " +
                 "PRIMARY KEY(folder, slug, filename))"
+        /* cached resolved chapter listing (see CachedChapterList); pos -1 is
+           the meta row carrying the chapters.zip docId. Invalidated by every
+           write to the chapter index / order, and by the compress pass. */
+        private const val CHLIST_TABLE =
+            "CREATE TABLE IF NOT EXISTS chlist (" +
+                "folder TEXT, slug TEXT, pos INTEGER, name TEXT, src TEXT, tr TEXT, " +
+                "PRIMARY KEY(folder, slug, pos))"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -82,6 +99,7 @@ class DownloadStore(context: Context) :
         db.execSQL(NOVELS_TABLE)
         db.execSQL(SCANNED_TABLE)
         db.execSQL(ORDER_TABLE)
+        db.execSQL(CHLIST_TABLE)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -107,6 +125,7 @@ class DownloadStore(context: Context) :
         /* v10 orders were polluted by the sites' "latest chapters" widget —
            purge so downloads / Check status re-index with correct scoping */
         if (oldVersion == 10) db.execSQL("DELETE FROM chapter_order")
+        if (oldVersion < 12) db.execSQL(CHLIST_TABLE)
     }
 
     /* ---- site chapter order (reader sorts by this, not by filename) ---- */
@@ -122,10 +141,73 @@ class DownloadStore(context: Context) :
                     arrayOf(folder, slug, fn, i),
                 )
             }
+            db.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))   // order changed
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
+    }
+
+    /* ---- cached resolved chapter listing (chlist) ---- */
+
+    fun saveChapterList(
+        folder: String,
+        slug: String,
+        list: CachedChapterList,
+    ) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))
+            db.execSQL(
+                "INSERT INTO chlist(folder,slug,pos,name,src,tr) VALUES(?,?,-1,'',?,'')",
+                arrayOf(folder, slug, list.zipDocId ?: ""),
+            )
+            for ((i, name) in list.ordered.withIndex()) {
+                db.execSQL(
+                    "INSERT INTO chlist(folder,slug,pos,name,src,tr) VALUES(?,?,?,?,?,?)",
+                    arrayOf(folder, slug, i, name, list.source[name] ?: "", list.translated[name] ?: ""),
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun getChapterList(folder: String, slug: String): CachedChapterList? {
+        val ordered = ArrayList<String>()
+        val source = HashMap<String, String>()
+        val translated = HashMap<String, String>()
+        var zipDocId: String? = null
+        var any = false
+        readableDatabase.query(
+            "chlist", arrayOf("pos", "name", "src", "tr"),
+            "folder=? AND slug=?", arrayOf(folder, slug), null, null, "pos",
+        ).use { c ->
+            while (c.moveToNext()) {
+                any = true
+                if (c.getInt(0) < 0) {
+                    zipDocId = c.getString(2).ifEmpty { null }
+                    continue
+                }
+                val name = c.getString(1)
+                ordered.add(name)
+                c.getString(2).ifEmpty { null }?.let { source[name] = it }
+                c.getString(3).ifEmpty { null }?.let { translated[name] = it }
+            }
+        }
+        if (!any || ordered.isEmpty()) return null
+        return CachedChapterList(ordered, source, translated, zipDocId)
+    }
+
+    fun clearChapterList(folder: String, slug: String) {
+        writableDatabase.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))
+    }
+
+    /* the compress pass rewrites refs across the whole library */
+    fun clearAllChapterLists(folder: String) {
+        writableDatabase.delete("chlist", "folder=?", arrayOf(folder))
     }
 
     fun getChapterOrder(folder: String, slug: String): Map<String, Int> {
@@ -369,6 +451,7 @@ class DownloadStore(context: Context) :
             "INSERT OR REPLACE INTO chapters(folder,slug,filename,uri) VALUES(?,?,?,?)",
             arrayOf(folder, slug, filename, uri),
         )
+        clearChapterList(folder, slug)   // listing changed
     }
 
     fun addAll(folder: String, slug: String, items: List<Pair<String, String>>) {
@@ -381,6 +464,7 @@ class DownloadStore(context: Context) :
                     arrayOf(folder, slug, name, uri),
                 )
             }
+            db.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))   // listing changed
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -389,5 +473,6 @@ class DownloadStore(context: Context) :
 
     fun clear(folder: String, slug: String) {
         writableDatabase.delete("chapters", "folder=? AND slug=?", arrayOf(folder, slug))
+        clearChapterList(folder, slug)
     }
 }
