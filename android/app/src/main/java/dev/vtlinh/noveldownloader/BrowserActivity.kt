@@ -209,10 +209,13 @@ class BrowserActivity : AppCompatActivity() {
             val site = Sites.forUrl(currentUrl) ?: return@setOnClickListener
             val novel = site.normalize(currentUrl).first
             prefs.edit().putString("url", novel).apply()
-            // hand back to MainActivity, which auto-starts if a folder is set
+            /* hand back to MainActivity, which auto-starts if a folder is set.
+               REORDER_TO_FRONT (not CLEAR_TOP) so a reader reading aloud
+               deeper in the stack isn't destroyed; the existing home gets the
+               URL via onNewIntent either way */
             startActivity(
                 Intent(this, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                     .setAction(Intent.ACTION_SEND).setType("text/plain")
                     .putExtra(Intent.EXTRA_TEXT, novel),
             )
