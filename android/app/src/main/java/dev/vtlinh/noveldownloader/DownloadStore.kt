@@ -169,10 +169,26 @@ class DownloadStore(context: Context) :
                     arrayOf(folder, slug, i, name, list.source[name] ?: "", list.translated[name] ?: ""),
                 )
             }
+            /* this listing is the truest on-disk count (it sees loose, .gz AND
+               zipped chapters, which the scan/index counters don't) — persist
+               it so the Library's x/y stays right even for zipped novels */
+            db.execSQL(
+                "UPDATE novels SET disk_count=? WHERE folder=? AND slug=? AND disk_count<?",
+                arrayOf(list.ordered.size, folder, slug, list.ordered.size),
+            )
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
+    }
+
+    /* chapters in the cached resolved listing (counts zipped chapters too) */
+    fun chapterListCount(folder: String, slug: String): Int {
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM chlist WHERE folder=? AND slug=? AND pos>=0",
+            arrayOf(folder, slug),
+        ).use { c -> if (c.moveToNext()) return c.getInt(0) }
+        return 0
     }
 
     fun getChapterList(folder: String, slug: String): CachedChapterList? {
