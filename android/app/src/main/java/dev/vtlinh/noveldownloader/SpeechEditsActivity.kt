@@ -46,6 +46,9 @@ class SpeechEditsActivity : AppCompatActivity() {
     private var ovrIds: Set<String> = emptySet()    // overridden default ids
     /* ⋮ menu toggle: list only the enabled edits (persisted) */
     private var hideInactive = false
+    /* long-press enters multi-select; taps then toggle rows. Outside it, a
+       tap opens the row in the editor. Deselecting the last row exits. */
+    private var multiSelect = false
 
     /* @Voice-format import/export via the Storage Access Framework */
     private val exportLauncher = registerForActivityResult(
@@ -135,21 +138,22 @@ class SpeechEditsActivity : AppCompatActivity() {
         }
         menuBtn.setOnClickListener {
             val menu = android.widget.PopupMenu(this, menuBtn)
-            menu.menu.add("Import…")
-            menu.menu.add("Export…")
+            menu.menu.add("Import")
+            menu.menu.add("Export")
             menu.menu.add("Hide inactive").apply {
                 isCheckable = true
                 isChecked = hideInactive
             }
             menu.setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
-                    "Import…" -> importLauncher.launch(arrayOf("*/*"))
-                    "Export…" -> exportLauncher.launch("replaceeng.txt")
+                    "Import" -> importLauncher.launch(arrayOf("*/*"))
+                    "Export" -> exportLauncher.launch("replaceeng.txt")
                     "Hide inactive" -> {
                         hideInactive = !hideInactive
                         getSharedPreferences("app", MODE_PRIVATE).edit()
                             .putBoolean("hideInactiveEdits", hideInactive).apply()
-                        selected = sortedSetOf()   // hidden rows must not stay selected
+                        multiSelect = false          // hidden rows must not stay selected
+                        selected = sortedSetOf()
                         refresh()
                     }
                 }
@@ -193,7 +197,7 @@ class SpeechEditsActivity : AppCompatActivity() {
         }
         val addBtn = toolBtn("+") { openEditor(null) }
         toolbar.addView(addBtn)
-        toolbar.addView(toolBtn("✎") { editSelected() })
+        /* no edit button: tapping a row (outside multi-select) opens it */
         /* short press nudges one step; long press moves all selected to the
            very top (↑) or very bottom (↓) after a confirm dialog */
         val upBtn = toolBtn("↑") { moveSelected(-1) }
@@ -236,6 +240,7 @@ class SpeechEditsActivity : AppCompatActivity() {
 
     private fun switchTab(t: Int) {
         tab = t
+        multiSelect = false
         selected = sortedSetOf()
         val on = getColor(R.color.fg)
         val off = getColor(R.color.muted)
@@ -346,25 +351,26 @@ class SpeechEditsActivity : AppCompatActivity() {
 
         row.isClickable = true
         row.setOnClickListener {
-            /* tap toggles this row in/out of the multi-selection */
-            if (index in selected) selected.remove(index) else selected.add(index)
-            refresh()
+            if (multiSelect) {
+                /* in multi-select a tap toggles the row; dropping the last
+                   selected row leaves multi-select mode */
+                if (index in selected) selected.remove(index) else selected.add(index)
+                if (selected.isEmpty()) multiSelect = false
+                refresh()
+            } else {
+                /* normal mode: tap opens the row in the editor */
+                val list = currentList()
+                if (index in list.indices) openEditor(list[index], forDefault = tab == 1)
+            }
         }
-        /* long-press edits just this row (defaults are editable too) */
+        /* long-press enters multi-select mode with this row selected */
         row.setOnLongClickListener {
-            selected = sortedSetOf(index); refresh(); editSelected(); true
+            multiSelect = true
+            selected.add(index)
+            refresh()
+            true
         }
         return row
-    }
-
-    private fun editSelected() {
-        if (selected.size != 1) {
-            Toast.makeText(this, "Select a single edit to edit", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val i = selected.first()
-        val list = currentList()
-        if (i in list.indices) openEditor(list[i], forDefault = tab == 1)
     }
 
     /* ⟲ (Default tab): confirm, then drop the overrides of every selected
@@ -394,7 +400,12 @@ class SpeechEditsActivity : AppCompatActivity() {
     private fun moveSelected(delta: Int) {
         if (tab != 0) return
         if (selected.size != 1) {
-            Toast.makeText(this, "Long-press ↑/↓ to move to the top/bottom", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                this,
+                if (selected.isEmpty()) "Long-press an edit to select it first"
+                else "Long-press ↑/↓ to move all selected to the top/bottom",
+                Toast.LENGTH_SHORT,
+            ).show()
             return
         }
         val from = selected.first()
@@ -411,7 +422,7 @@ class SpeechEditsActivity : AppCompatActivity() {
        their relative order */
     private fun confirmMoveToEdge(top: Boolean) {
         if (tab != 0 || selected.isEmpty()) {
-            Toast.makeText(this, "Select item(s) first", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Long-press an edit to select it first", Toast.LENGTH_SHORT).show()
             return
         }
         val n = selected.size
@@ -447,6 +458,7 @@ class SpeechEditsActivity : AppCompatActivity() {
         for (i in selected.toList().sortedDescending()) {
             if (i in userList.indices) userList.removeAt(i)
         }
+        multiSelect = false
         selected = sortedSetOf()
         SpeechEdits.saveUser(this, userList)
         refresh()
@@ -646,7 +658,6 @@ class SpeechEditsActivity : AppCompatActivity() {
                     userList.add(
                         edit.copy(id = SpeechEdits.newId()),
                     )
-                    selected = sortedSetOf(userList.size - 1)
                     SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
                 } else {
                     val idx = userList.indexOfFirst { it.id == existing.id }
