@@ -545,21 +545,12 @@ class SpeechEditsActivity : AppCompatActivity() {
         val replaceField = field(existing?.replace ?: "", "replacement text")
         form.addView(replaceField)
 
-        /* live test */
+        /* live test — the text box starts as the paragraph TTS last stopped
+           at (falling back to a sample sentence); it stays freely editable */
         form.addView(label("Test"))
         val SAMPLE = "There is a tinge of annoyance on Azure Dragon's face."
         val ttsPara = getSharedPreferences("app", MODE_PRIVATE)
             .getString("lastTtsPara", null)?.takeIf { it.isNotBlank() }
-        /* the paragraph TTS last stopped at is the default test text when one
-           exists; the checkbox flips between it and a manual text */
-        val useTtsPara = CheckBox(this).apply {
-            text = "Test with the paragraph TTS stopped at"
-            textSize = 14f; setTextColor(getColor(R.color.fg))
-            setPadding(dp(6), dp(4), 0, dp(4))
-            isEnabled = ttsPara != null
-            isChecked = ttsPara != null
-        }
-        form.addView(useTtsPara)
         val applyAll = CheckBox(this).apply {
             text = "Apply all active edits"
             textSize = 14f; setTextColor(getColor(R.color.fg))
@@ -622,16 +613,6 @@ class SpeechEditsActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 "Invalid pattern"
             }
-        }
-        var manualText = SAMPLE
-        useTtsPara.setOnCheckedChangeListener { _, checked ->
-            if (checked && ttsPara != null) {
-                manualText = testInput.text.toString()
-                testInput.setText(ttsPara)
-            } else {
-                testInput.setText(manualText)
-            }
-            /* testInput's watcher reruns the preview */
         }
         applyAll.setOnCheckedChangeListener { _, _ -> updateTest() }
         val watcher = object : TextWatcher {
