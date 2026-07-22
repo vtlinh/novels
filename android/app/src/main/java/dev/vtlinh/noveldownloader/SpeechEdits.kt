@@ -111,13 +111,58 @@ object SpeechEdits {
 
     fun newId(): String = "u" + System.nanoTime()
 
-    /* compiled enabled rules for the reader: user rules (toggleable) first,
-       then ALL built-in defaults. The defaults are hard-coded and always
-       applied — they can't be disabled. */
+    /* ── per-rule overrides of the built-in defaults ──
+       The default rules stay hard-coded, but each can be EDITED: the edited
+       version is stored here keyed by the default's id and shadows the
+       built-in in its original slot. "Restore" just drops the override,
+       falling straight back to the hard-coded rule. */
+
+    private const val OVR_KEY = "defaultOverrides"
+
+    fun overrides(ctx: Context): MutableMap<String, SpeechEdit> {
+        val raw = prefs(ctx).getString(OVR_KEY, null) ?: return mutableMapOf()
+        return try {
+            val o = JSONObject(raw)
+            val out = mutableMapOf<String, SpeechEdit>()
+            for (k in o.keys()) {
+                out[k] = SpeechEdit.fromJson(o.getJSONObject(k)).copy(isDefault = true)
+            }
+            out
+        } catch (e: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    private fun saveOverrides(ctx: Context, map: Map<String, SpeechEdit>) {
+        val o = JSONObject()
+        map.forEach { (k, v) -> o.put(k, v.toJson()) }
+        prefs(ctx).edit().putString(OVR_KEY, o.toString()).apply()
+    }
+
+    fun saveOverride(ctx: Context, edit: SpeechEdit) {
+        val m = overrides(ctx)
+        m[edit.id] = edit
+        saveOverrides(ctx, m)
+    }
+
+    fun clearOverride(ctx: Context, id: String) {
+        val m = overrides(ctx)
+        if (m.remove(id) != null) saveOverrides(ctx, m)
+    }
+
+    /* the default list with any overrides applied, in the built-in order */
+    fun effectiveDefaults(ctx: Context): List<SpeechEdit> {
+        val ovr = overrides(ctx)
+        return defaults.map { d -> ovr[d.id] ?: d }
+    }
+
+    /* compiled enabled rules for the reader: user rules first, then the
+       built-in defaults (each possibly overridden, and skippable when its
+       override disables it) */
     fun enabledRules(ctx: Context): List<Pair<Regex, String>> {
         val out = ArrayList<Pair<Regex, String>>()
         user(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
-        defaults.forEach { e -> e.compiled()?.let { out.add(it) } }
+        effectiveDefaults(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
         return out
     }
 
