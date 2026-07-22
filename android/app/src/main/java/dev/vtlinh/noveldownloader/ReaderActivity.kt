@@ -759,7 +759,11 @@ class ReaderActivity : AppCompatActivity() {
             startTtsFrom(resumeCursor)
             return
         }
-        /* saved position from a previous session: continue from it */
+        /* Saved position from a previous session: continue from it. The spot
+           is per NOVEL (ttsPos:$slug) — like the remembered reading chapter —
+           so play returns to it even from another chapter, loading the TTS
+           chapter if needed. Reading from somewhere else explicitly is what
+           the double-tap is for. */
         val slugX = intent.getStringExtra("slug")
         val saved = slugX?.let { prefs.getString("ttsPos:$it", null) }
         val ord = chapters?.ordered
@@ -767,10 +771,7 @@ class ReaderActivity : AppCompatActivity() {
             val name = saved.substringBefore('|')
             val para = saved.substringAfter('|').toIntOrNull() ?: 0
             val idx = ord.indexOf(name)
-            /* the saved TTS spot only applies when the user is ON that
-               chapter — picking a different chapter and pressing play
-               reads from where they are, not where TTS once stopped */
-            if (idx >= 0 && idx == currentChapterIdx) {
+            if (idx >= 0) {
                 val lc = loadedChapters.firstOrNull { it.idx == idx }
                 if (lc != null) {
                     startTtsFrom(offsetOfPara(lc.start, para))

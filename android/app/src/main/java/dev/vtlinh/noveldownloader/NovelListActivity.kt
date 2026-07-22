@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -90,6 +91,23 @@ class NovelListActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.navAbout).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, AboutActivity::class.java))
+        }
+
+        /* inline download feedback: live status while a download runs, and a
+           re-render when it finishes so the chapter counts refresh */
+        lifecycleScope.launch {
+            DownloadService.statusFlow.collectLatest { s ->
+                if (DownloadService.runningFlow.value && s.isNotEmpty()) {
+                    findViewById<TextView>(R.id.statusText).text = s
+                }
+            }
+        }
+        var seenRunning = false
+        lifecycleScope.launch {
+            DownloadService.runningFlow.collectLatest { r ->
+                if (r) seenRunning = true
+                else if (seenRunning) { seenRunning = false; render() }
+            }
         }
     }
 
@@ -341,8 +359,10 @@ class NovelListActivity : AppCompatActivity() {
             append(row.display)
             if (row.rec.author.isNotEmpty()) append("\n${row.rec.author}")
             if (!row.rec.complete) {
-                append("\n${row.local} chapter(s)")
-                if (row.rec.total > 0) append(" of ${row.rec.total}")
+                /* "on-disk / site-total" — total is filled in by downloads
+                   and Check status */
+                if (row.rec.total > 0) append("\n${row.local}/${row.rec.total} chapters")
+                else append("\n${row.local} chapter(s)")
                 if (upToDate) append(" — up to date")
                 if (row.rec.url.isEmpty()) append(" — tap Check status to locate")
             }
@@ -499,12 +519,12 @@ class NovelListActivity : AppCompatActivity() {
         }
     }
 
+    /* Download INLINE: stay on this page. The service queues requests made
+       while another novel is downloading, so tapping several Download buttons
+       just lines them up. */
     private fun startResume(url: String) {
         val tree = folderKey ?: return
-        if (DownloadService.runningFlow.value) {
-            findViewById<TextView>(R.id.statusText).text = "A download is already running."
-            return
-        }
+        val wasRunning = DownloadService.runningFlow.value
         prefs.edit().putString("url", url).apply()
         startForegroundService(
             Intent(this, DownloadService::class.java)
@@ -512,10 +532,8 @@ class NovelListActivity : AppCompatActivity() {
                 .putExtra("translate", prefs.getBoolean("translate", false))
                 .putExtra("apiKey", prefs.getString("apiKey", "") ?: ""),
         )
-        /* REORDER_TO_FRONT, not CLEAR_TOP — don't destroy a reader that's
-           reading aloud deeper in the stack */
-        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
-        finish()
+        findViewById<TextView>(R.id.statusText).text =
+            if (wasRunning) "Queued for download." else "Download started…"
     }
 
     /* Ask each site for its chapter count, finished flag, and author. A row
