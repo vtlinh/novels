@@ -24,7 +24,8 @@ import androidx.appcompat.app.AppCompatActivity
 
 /* Manage the TTS "speech edits" — regex find/replace rules applied before a
    sentence is spoken. A User tab (fully editable, reorderable) and a Default
-   tab (built-in rules, enable/disable only), plus a full-page add/edit form. */
+   tab (built-in rules; editable via per-rule overrides, with ⟲ restoring a
+   rule to its hard-coded form), plus a full-page add/edit form. */
 class SpeechEditsActivity : AppCompatActivity() {
 
     private var tab = 0            // 0 = User, 1 = Default
@@ -40,6 +41,9 @@ class SpeechEditsActivity : AppCompatActivity() {
     private lateinit var userTab: TextView
     private lateinit var defaultTab: TextView
     private lateinit var toolbar: LinearLayout
+    private lateinit var userOnlyBtns: List<View>   // +, ↑, ↓, ✕ (User tab)
+    private lateinit var restoreBtn: View           // ⟲ (Default tab)
+    private var ovrIds: Set<String> = emptySet()    // overridden default ids
 
     /* @Voice-format import/export via the Storage Access Framework */
     private val exportLauncher = registerForActivityResult(
@@ -158,7 +162,9 @@ class SpeechEditsActivity : AppCompatActivity() {
         tabs.addView(defaultTab)
         root.addView(tabs)
 
-        /* toolbar (User tab only): add / edit / up / down / delete */
+        /* toolbar: User tab gets add / edit / up / down / delete; the Default
+           tab gets edit / restore (defaults are editable, ⟲ reverts one back
+           to its built-in form) */
         toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(getColor(R.color.btn_secondary))
@@ -170,7 +176,8 @@ class SpeechEditsActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { onTap() }
         }
-        toolbar.addView(toolBtn("+") { openEditor(null) })
+        val addBtn = toolBtn("+") { openEditor(null) }
+        toolbar.addView(addBtn)
         toolbar.addView(toolBtn("✎") { editSelected() })
         /* short press nudges one step; long press moves all selected to the
            very top (↑) or very bottom (↓) after a confirm dialog */
@@ -180,7 +187,11 @@ class SpeechEditsActivity : AppCompatActivity() {
         val downBtn = toolBtn("↓") { moveSelected(1) }
         downBtn.setOnLongClickListener { confirmMoveToEdge(false); true }
         toolbar.addView(downBtn)
-        toolbar.addView(toolBtn("✕") { deleteSelected() })
+        val delBtn = toolBtn("✕") { deleteSelected() }
+        toolbar.addView(delBtn)
+        restoreBtn = toolBtn("⟲") { confirmRestoreSelected() }
+        toolbar.addView(restoreBtn)
+        userOnlyBtns = listOf(addBtn, upBtn, downBtn, delBtn)
         root.addView(toolbar)
 
         /* scrollable list */
@@ -206,7 +217,7 @@ class SpeechEditsActivity : AppCompatActivity() {
     }
 
     private fun currentList(): List<SpeechEdit> =
-        if (tab == 0) userList else SpeechEdits.defaults
+        if (tab == 0) userList else SpeechEdits.effectiveDefaults(this)
 
     private fun switchTab(t: Int) {
         tab = t
@@ -217,12 +228,14 @@ class SpeechEditsActivity : AppCompatActivity() {
         defaultTab.setTextColor(if (t == 1) on else off)
         userTab.setTypeface(null, if (t == 0) Typeface.BOLD else Typeface.NORMAL)
         defaultTab.setTypeface(null, if (t == 1) Typeface.BOLD else Typeface.NORMAL)
-        toolbar.visibility = if (t == 0) View.VISIBLE else View.GONE
+        userOnlyBtns.forEach { it.visibility = if (t == 0) View.VISIBLE else View.GONE }
+        restoreBtn.visibility = if (t == 1) View.VISIBLE else View.GONE
         refresh()
     }
 
     private fun refresh() {
         listBox.removeAllViews()
+        ovrIds = if (tab == 1) SpeechEdits.overrides(this).keys else emptySet()
         val list = currentList()
         list.forEachIndexed { i, edit -> listBox.addView(rowView(i, edit)) }
         if (list.isEmpty()) {
@@ -250,17 +263,19 @@ class SpeechEditsActivity : AppCompatActivity() {
             )
         }
         val check = CheckBox(this).apply {
-            if (tab == 0) {
-                isChecked = edit.enabled
-                setOnClickListener {
+            isChecked = edit.enabled
+            setOnClickListener {
+                if (tab == 0) {
                     userList[index].enabled = isChecked
                     SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
-                    refresh()
+                } else {
+                    /* a default's on/off state is stored as an override;
+                       ⟲ restore brings back the built-in (enabled) form */
+                    SpeechEdits.saveOverride(
+                        this@SpeechEditsActivity, edit.copy(enabled = isChecked),
+                    )
                 }
-            } else {
-                // defaults are hard-coded and always applied — read-only
-                isChecked = true
-                isEnabled = false
+                refresh()
             }
         }
         row.addView(check)
@@ -286,6 +301,14 @@ class SpeechEditsActivity : AppCompatActivity() {
                 },
             )
         }
+        if (edit.id in ovrIds) {
+            texts.addView(
+                TextView(this).apply {
+                    text = "modified — select and tap ⟲ to restore the built-in"
+                    textSize = 11f; setTextColor(getColor(R.color.accent))
+                },
+            )
+        }
         row.addView(texts)
 
         row.isClickable = true
@@ -294,23 +317,43 @@ class SpeechEditsActivity : AppCompatActivity() {
             if (index in selected) selected.remove(index) else selected.add(index)
             refresh()
         }
-        if (tab == 0) {
-            /* long-press edits just this row */
-            row.setOnLongClickListener {
-                selected = sortedSetOf(index); refresh(); editSelected(); true
-            }
+        /* long-press edits just this row (defaults are editable too) */
+        row.setOnLongClickListener {
+            selected = sortedSetOf(index); refresh(); editSelected(); true
         }
         return row
     }
 
     private fun editSelected() {
-        if (tab != 0) return
         if (selected.size != 1) {
             Toast.makeText(this, "Select a single edit to edit", Toast.LENGTH_SHORT).show()
             return
         }
         val i = selected.first()
-        if (i in userList.indices) openEditor(userList[i])
+        val list = currentList()
+        if (i in list.indices) openEditor(list[i], forDefault = tab == 1)
+    }
+
+    /* ⟲ (Default tab): confirm, then drop the overrides of every selected
+       default, reverting each to its hard-coded built-in form */
+    private fun confirmRestoreSelected() {
+        if (tab != 1) return
+        val list = currentList()
+        val ids = selected.mapNotNull { list.getOrNull(it)?.id }.filter { it in ovrIds }
+        if (ids.isEmpty()) {
+            Toast.makeText(this, "Select modified default edit(s) to restore", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val what = if (ids.size == 1) "this edit" else "these ${ids.size} edits"
+        AlertDialog.Builder(this)
+            .setTitle("Restore default")
+            .setMessage("Restore $what back to the built-in default?")
+            .setPositiveButton("Restore") { _, _ ->
+                ids.forEach { SpeechEdits.clearOverride(this, it) }
+                refresh()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /* single-step nudge — one selected row at a time (the bulk move is the
@@ -376,8 +419,9 @@ class SpeechEditsActivity : AppCompatActivity() {
         refresh()
     }
 
-    /* full-page add/edit form */
-    private fun openEditor(existing: SpeechEdit?) {
+    /* full-page add/edit form; forDefault saves the result as an override of
+       the built-in default instead of into the user list */
+    private fun openEditor(existing: SpeechEdit?, forDefault: Boolean = false) {
         val dialog = Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar)
         val scroll = ScrollView(this).apply { setBackgroundColor(getColor(R.color.bg)) }
         val form = LinearLayout(this).apply {
@@ -506,16 +550,23 @@ class SpeechEditsActivity : AppCompatActivity() {
                 if (edit.compiled() == null) {
                     patternField.error = "Invalid regex"; return@setOnClickListener
                 }
-                if (existing == null) {
+                if (forDefault && existing != null) {
+                    /* an edited default is stored as an override in its slot */
+                    SpeechEdits.saveOverride(
+                        this@SpeechEditsActivity,
+                        edit.copy(id = existing.id, enabled = existing.enabled, isDefault = true),
+                    )
+                } else if (existing == null) {
                     userList.add(
                         edit.copy(id = SpeechEdits.newId()),
                     )
                     selected = sortedSetOf(userList.size - 1)
+                    SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
                 } else {
                     val idx = userList.indexOfFirst { it.id == existing.id }
                     if (idx >= 0) userList[idx] = edit.copy(enabled = userList[idx].enabled)
+                    SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
                 }
-                SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
                 dialog.dismiss()
                 refresh()
             }
