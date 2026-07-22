@@ -259,10 +259,11 @@ class ReaderActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             chapters = withContext(Dispatchers.IO) {
-                val order = intent.getStringExtra("slug")?.let {
+                val slug = intent.getStringExtra("slug")
+                val order = slug?.let {
                     try { store.getChapterOrder(folder, it) } catch (e: Exception) { null }
                 } ?: emptyMap()
-                ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order)
+                ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order, slug)
             }
             val ch = chapters ?: return@launch
             /* inline chapter list in the right drawer, current one highlighted */

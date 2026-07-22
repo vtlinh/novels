@@ -89,6 +89,13 @@ class CompressService : Service() {
                         }
                         if (changed) changedAny = true
                     }
+                    /* refs changed shape (txt <-> gz) → the cached chapter
+                       listings are stale across the library */
+                    if (changedAny) {
+                        try {
+                            DownloadStore(this@CompressService).clearAllChapterLists(treeStr)
+                        } catch (e: Exception) {}
+                    }
                     /* converged: a whole pass changed nothing and the target
                        held steady across it → every novel already matches */
                     if (!changedAny && prefs.getBoolean("compressNovels", true) == target) break

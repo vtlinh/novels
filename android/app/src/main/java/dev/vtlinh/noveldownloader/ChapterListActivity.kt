@@ -28,17 +28,72 @@ class ChapterListActivity : AppCompatActivity() {
             val zip: java.io.File? = null,           // cached chapters.zip, if any
         )
 
+        /* does this docId still resolve? one single-row query — the cheap
+           validity check for the cached listing */
+        private fun docExists(
+            cr: android.content.ContentResolver,
+            treeUri: Uri,
+            docId: String,
+        ): Boolean = try {
+            cr.query(
+                android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
+                arrayOf(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+                null, null, null,
+            )?.use { it.moveToFirst() } == true
+        } catch (e: Exception) {
+            false
+        }
+
+        /* is this cached ref still backed by something on disk? */
+        private fun refUsable(
+            context: android.content.Context,
+            cr: android.content.ContentResolver,
+            treeUri: Uri,
+            ref: String,
+            zipDocId: String?,
+        ): Boolean = when {
+            Zips.isRef(ref) -> zipDocId != null && docExists(cr, treeUri, zipDocId)
+            Zips.isGzRef(ref) -> docExists(cr, treeUri, Zips.gzDocId(ref))
+            else -> docExists(cr, treeUri, ref)
+        }
+
         /* The chapters of one novel dir, with refs for both languages —
            loose .txt files and/or entries of a chapters.zip (loose wins,
            so chapters downloaded after compressing still show up).
-           Ordered by the site's own listing sequence when known. */
+           Ordered by the site's own listing sequence when known.
+
+           When `slug` is given, the resolved listing is CACHED in the DB
+           (chlist) and reused — spot-checked with two single-row queries —
+           so a 7k-chapter novel opens without re-listing its folder. The
+           cache is invalidated whenever chapters/order change or the
+           compress pass rewrites refs. */
         fun chapterNames(
             context: android.content.Context,
             treeUri: Uri,
             dirName: String,
             siteOrder: Map<String, Int> = emptyMap(),
+            slug: String? = null,
         ): Chapters {
             val cr = context.contentResolver
+            val folder = treeUri.toString()
+            val store = if (slug != null) DownloadStore(context) else null
+            if (slug != null && store != null) {
+                val cached = try { store.getChapterList(folder, slug) } catch (e: Exception) { null }
+                if (cached != null) {
+                    val firstRef = cached.source[cached.ordered.first()]
+                    val lastRef = cached.source[cached.ordered.last()]
+                    val ok = firstRef != null && lastRef != null &&
+                        refUsable(context, cr, treeUri, firstRef, cached.zipDocId) &&
+                        refUsable(context, cr, treeUri, lastRef, cached.zipDocId)
+                    if (ok) {
+                        val zipFile = cached.zipDocId?.let {
+                            try { Zips.cached(context, cr, treeUri, it, dirName) } catch (e: Exception) { null }
+                        }
+                        return Chapters(cached.ordered, cached.source, cached.translated, zipFile)
+                    }
+                    try { store.clearChapterList(folder, slug) } catch (e: Exception) {}
+                }
+            }
             val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri))
             val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
                 ?: return Chapters(emptyList(), emptyMap(), emptyMap())
@@ -88,6 +143,15 @@ class ChapterListActivity : AppCompatActivity() {
                     { it },
                 ),
             )
+            /* remember the resolved listing so the next open skips the walk */
+            if (slug != null && store != null && ordered.isNotEmpty()) {
+                try {
+                    store.saveChapterList(
+                        folder, slug,
+                        CachedChapterList(ordered, source, translated, zipDocId),
+                    )
+                } catch (e: Exception) {}
+            }
             return Chapters(ordered, source, translated, zipFile)
         }
     }
@@ -156,7 +220,7 @@ class ChapterListActivity : AppCompatActivity() {
                 val order = slug?.let {
                     try { DownloadStore(this@ChapterListActivity).getChapterOrder(folder, it) } catch (e: Exception) { null }
                 } ?: emptyMap()
-                chapterNames(this@ChapterListActivity, Uri.parse(folder), dirName, order)
+                chapterNames(this@ChapterListActivity, Uri.parse(folder), dirName, order, slug)
             }
             val ordered = chapters.ordered
             if (ordered.isEmpty()) {
