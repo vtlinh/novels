@@ -105,8 +105,11 @@ class ChapterListActivity : AppCompatActivity() {
             drawer.openDrawer(androidx.core.view.GravityCompat.START)
         }
         findViewById<TextView>(R.id.navHome).setOnClickListener {
+            /* REORDER_TO_FRONT, not CLEAR_TOP: clearing would destroy the
+               activities above home — including a reader that's reading
+               aloud. Reordering brings home forward and leaves TTS alive. */
             startActivity(
-                Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
             finish()
         }

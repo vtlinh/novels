@@ -385,7 +385,9 @@ class NovelListActivity : AppCompatActivity() {
                 .putExtra("translate", prefs.getBoolean("translate", false))
                 .putExtra("apiKey", prefs.getString("apiKey", "") ?: ""),
         )
-        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        /* REORDER_TO_FRONT, not CLEAR_TOP — don't destroy a reader that's
+           reading aloud deeper in the stack */
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         finish()
     }
 
