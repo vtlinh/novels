@@ -289,6 +289,26 @@ class MainActivity : AppCompatActivity() {
                 "Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com"
             return
         }
+        /* the user threw this novel away before — confirm before re-downloading */
+        val slugKey = NovelListActivity.slugKeyFromUrl(url)
+        val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()
+        if (slugKey.isNotEmpty() && slugKey in garbage) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Marked as garbage")
+                .setMessage(
+                    "You previously marked this novel as garbage. " +
+                        "Remove that status and download it again?",
+                )
+                .setPositiveButton("Re-download") { _, _ ->
+                    prefs.edit()
+                        .putStringSet(NovelListActivity.GARBAGE_KEY, garbage - slugKey)
+                        .apply()
+                    startDownload()   // re-enter, now past this gate
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
         val tree = prefs.getString("tree", null)
         if (tree == null) { pickFolder.launch(null); return }
         val translate = findViewById<android.widget.CheckBox>(R.id.translateCheck).isChecked
