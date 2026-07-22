@@ -236,7 +236,8 @@ class ReaderActivity : AppCompatActivity() {
         scroll = findViewById(R.id.readerScroll)
         titleBar.text = novelTitle
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
-        text.text = "Loading…"
+        /* no "Loading…" placeholder — the chapter renders almost immediately,
+           and a blank background reads cleaner than a flash of loading text */
 
         /* mark as recently read + load the cover for the media notification */
         intent.getStringExtra("slug")?.let { slug ->
