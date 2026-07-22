@@ -193,12 +193,17 @@ class ChapterListActivity : AppCompatActivity() {
                 }
             }
             listView.setOnItemClickListener { _, _, pos, _ ->
+                /* REORDER_TO_FRONT: if the reader for this novel is still
+                   alive behind us (e.g. reading aloud), bring THAT instance
+                   forward (it gets onNewIntent and jumps to the chapter)
+                   instead of building a new reader over it */
                 startActivity(
                     Intent(this@ChapterListActivity, ReaderActivity::class.java)
                         .putExtra("dir", dirName)
                         .putExtra("title", title)
                         .putExtra("slug", intent.getStringExtra("slug"))
-                        .putExtra("start", ordered[pos]),
+                        .putExtra("start", ordered[pos])
+                        .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
                 )
             }
         }
