@@ -8,9 +8,6 @@ import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 
 /* App settings: the Storage card (download folder + "Compress my novels"),
    the Anthropic API key, and reading options. Toggling compression starts a
@@ -71,14 +68,8 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        /* live compression status (falls back to the descriptive hint) */
-        val zipStatus = findViewById<TextView>(R.id.zipStatus)
-        val defaultStatus = zipStatus.text.toString()
-        lifecycleScope.launch {
-            CompressService.statusFlow.collectLatest { s ->
-                zipStatus.text = if (s.isEmpty()) defaultStatus else s
-            }
-        }
+        /* the compress/uncompress pass runs silently in the background — no
+           live status; zipStatus keeps its descriptive hint */
 
         /* keep the reader's screen on while TTS reads aloud (off by default) */
         val keepAwakeCheck = findViewById<CheckBox>(R.id.keepAwakeCheck)
