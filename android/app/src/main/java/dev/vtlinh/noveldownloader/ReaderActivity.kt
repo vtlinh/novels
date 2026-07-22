@@ -112,6 +112,25 @@ class ReaderActivity : AppCompatActivity() {
         return saved.substringAfter('|').toIntOrNull() ?: 0
     }
 
+    /* Where to land when (re)opening chapter idx from a restart or a chapter
+       pick. If TTS last stopped in THIS chapter, recover the exact spot it
+       stopped at — that's where the user was listening. Otherwise fall back to
+       the last scroll-reading spot (savedParaFor); a chapter that is neither
+       lands at the top. This is what makes "open the chapter TTS stopped at →
+       jump to that line; open any other chapter → stay at the top" work. */
+    private fun restoreParaFor(idx: Int): Int {
+        val slug = intent.getStringExtra("slug")
+        val name = chapters?.ordered?.getOrNull(idx)
+        if (slug != null && name != null) {
+            prefs.getString("ttsPos:$slug", null)?.let { saved ->
+                if (saved.substringBefore('|') == name) {
+                    return saved.substringAfter('|').toIntOrNull() ?: 0
+                }
+            }
+        }
+        return savedParaFor(idx)
+    }
+
     /* remember the chapter being read, per novel — the chapter list reopens
        scrolled to (and highlighting) it */
     private fun saveLastChapter(idx: Int) {
@@ -270,11 +289,12 @@ class ReaderActivity : AppCompatActivity() {
             drawerList.setOnItemClickListener { _, _, pos, _ ->
                 drawer.closeDrawer(GravityCompat.END)
                 /* staggered: waits out any in-flight load, then scrolls within
-                   the buffer if the chapter is loaded, else rebuilds */
-                goTo(pos, savedParaFor(pos))
+                   the buffer if the chapter is loaded, else rebuilds. Picking
+                   the chapter TTS stopped at recovers that exact spot. */
+                goTo(pos, restoreParaFor(pos))
             }
             val startIdx = ch.ordered.indexOf(start).coerceAtLeast(0)
-            goTo(startIdx, savedParaFor(startIdx))
+            goTo(startIdx, restoreParaFor(startIdx))
         }
 
         /* Chapter loading is border-driven: openAt builds the initial window,
@@ -282,6 +302,7 @@ class ReaderActivity : AppCompatActivity() {
            and crossing into the FIRST prepends LOAD_BATCH (loadReady gates
            this until the open placement has landed). */
         scroll.setOnScrollChangeListener { _, _, sy, _, oldY ->
+            noteScrollActivity()   // keep the settle clock running
             if (loading) return@setOnScrollChangeListener
             updateHeader()
             maybeLoadMore(sy, oldY)
@@ -741,13 +762,16 @@ class ReaderActivity : AppCompatActivity() {
             return
         }
         val (s0, s1) = sent
-        /* about to enter the LAST loaded chapter: hold this sentence, append
-           more chapters (appends never move existing text), then resume —
-           reading always keeps a runway of loaded chapters ahead */
+        /* Crossing the border into the LAST loaded chapter (the reader is
+           within one chapter of running out): stop here — this fires BETWEEN
+           sentences, so no audio is cut — load the next batch, then resume.
+           Chapters are only ever loaded in this gap, never while a sentence is
+           being spoken. Appends don't move existing text, so s0/s1 stay valid. */
         val lastLoaded = loadedChapters.lastOrNull()
         if (!loading && lastLoaded != null && s0 >= lastLoaded.start &&
             nextIdx < (chapters?.ordered?.size ?: 0)
         ) {
+            t.stop()   // make sure nothing is mid-utterance while we load
             pendingSpeakContinue = true
             appendChapters(LOAD_BATCH)
             return
@@ -987,6 +1011,7 @@ class ReaderActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (active === this) active = null
         cancelSleepTimer()
+        settleHandler.removeCallbacks(settleRunnable)
         stopShakeDetection()
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
         abandonAudioFocus()
@@ -1653,11 +1678,13 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /* Open a chapter by loading it plus LOAD_BATCH chapters AHEAD (forward
-       only): the opened chapter is the FIRST in the buffer, at offset 0, so the
-       scroll target is just its paragraph — a small offset that needs no
-       placement tricks. Previous chapters load lazily when the reader scrolls
-       up into the top chapter (see maybeLoadMore). */
+    /* Open a chapter. Only the opened chapter is loaded up front — it sits at
+       offset 0, so the scroll target is just its paragraph, a small offset
+       that needs no placement tricks. We scroll to that position FIRST; only
+       once the placement has landed do we load the LOAD_BATCH chapters AHEAD
+       (fillForward), so loading never disturbs the recovery scroll. Previous
+       chapters load lazily when the reader scrolls up into the top chapter
+       (see maybeLoadMore). */
     private fun openAt(pos: Int, targetPara: Int = 0) {
         val ch = chapters ?: return
         if (loading || ch.ordered.isEmpty()) return
@@ -1665,22 +1692,19 @@ class ReaderActivity : AppCompatActivity() {
         resumeCursor = -1
         loading = true
         loadReady = false
+        prependQueued = false
         val p = pos.coerceIn(0, ch.ordered.size - 1)
         lifecycleScope.launch {
-            val lastToLoad = (p + LOAD_BATCH).coerceAtMost(ch.ordered.size - 1)
             loadedChapters.clear()
+            val body = readAt(p)
             val sb = StringBuilder()
-            var targetBodyLen = 0
-            for (i in p..lastToLoad) {
-                val body = readAt(i) ?: continue   // skip a chapter that won't read
-                if (sb.isNotEmpty()) sb.append(SEP)
-                val start = sb.length
+            if (body != null) {
                 sb.append(body)
-                loadedChapters.add(LoadedChapter(i, start, headingOf(body)))
-                if (i == p) targetBodyLen = body.length
+                loadedChapters.add(LoadedChapter(p, 0, headingOf(body)))
             }
+            val targetBodyLen = body?.length ?: 0
             firstIdx = p
-            nextIdx = (loadedChapters.lastOrNull()?.idx ?: (p - 1)) + 1
+            nextIdx = p + 1
             text.setText(sb, TextView.BufferType.EDITABLE)
             clearTextSelection()   // no stray insertion cursor to auto-scroll
             currentChapterIdx = p
@@ -1708,11 +1732,24 @@ class ReaderActivity : AppCompatActivity() {
                 updateHeader()
                 if (pendingSpeakAfterOpen) {
                     pendingSpeakAfterOpen = false
+                    /* TTS extends its own runway from here (speakNext) */
                     startTtsFrom(targetOff)
+                } else {
+                    /* placement is done — NOW pull in the chapters ahead */
+                    scroll.post { fillForward() }
                 }
             }
             scroll.post { place(0) }
         }
+    }
+
+    /* load the LOAD_BATCH chapters ahead of the opened one, after the recovery
+       scroll has settled (used by openAt once placement lands) */
+    private fun fillForward() {
+        if (loading || speaking) return
+        if (nextIdx >= (chapters?.ordered?.size ?: 0)) return
+        if (loadedChapters.size > 1) return   // already filled / user scrolled on
+        appendChapters(LOAD_BATCH)
     }
 
     /* ---- border-driven chapter loading ----
@@ -1727,14 +1764,72 @@ class ReaderActivity : AppCompatActivity() {
        settle scroll would immediately load the previous batch */
     private var prependArmed = false
 
+    /* ---- touch + scroll-settle gating ----
+       Loading previous chapters (a prepend) shifts every offset, so it must
+       never happen mid-gesture: while the finger is on the screen or a fling
+       is still gliding. maybeLoadMore only QUEUES the prepend; it runs from
+       onScrollSettled, which fires once the finger is up AND the scroll has
+       been idle for SETTLE_MS. */
+    private var fingerDown = false
+    private var prependQueued = false
+    private val SETTLE_MS = 140L
+    private val settleHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val settleRunnable = Runnable { onScrollSettled() }
+
+    /* every scroll change (user or programmatic) pushes the settle check out;
+       when they stop arriving for SETTLE_MS the scroll has come to rest */
+    private fun noteScrollActivity() {
+        settleHandler.removeCallbacks(settleRunnable)
+        settleHandler.postDelayed(settleRunnable, SETTLE_MS)
+    }
+
+    /* the finger is up and the scroll has stopped: a good, safe moment to run
+       a queued prepend (offset-shifting load) */
+    private fun onScrollSettled() {
+        if (fingerDown) return   // still touching — wait for the release
+        if (prependQueued) {
+            prependQueued = false
+            if (canPrependNow()) prependChapters(LOAD_BATCH)
+        }
+    }
+
+    /* only prepend when nothing is loading, TTS isn't driving the scroll, the
+       finger is off the screen, and we're still sitting on the top chapter */
+    private fun canPrependNow(): Boolean {
+        if (loading || speaking || fingerDown) return false
+        if (firstIdx <= 0) return false
+        val first = loadedChapters.firstOrNull() ?: return false
+        return currentChapterIdx <= first.idx
+    }
+
+    /* global touch tap so finger down/up is known regardless of which child
+       (the selectable text, the scroll view) actually handles the gesture */
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> fingerDown = true
+            android.view.MotionEvent.ACTION_UP,
+            android.view.MotionEvent.ACTION_CANCEL,
+            -> {
+                fingerDown = false
+                /* the lift may end a fling that keeps scrolling, or may be the
+                   end of a static press — either way, start the settle clock */
+                noteScrollActivity()
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     private fun maybeLoadMore(newY: Int, oldY: Int) {
         if (!loadReady || loading) return
         val ch = chapters ?: return
         val first = loadedChapters.firstOrNull() ?: return
         val last = loadedChapters.lastOrNull() ?: return
         val more = nextIdx < ch.ordered.size
-        /* inside the last loaded chapter, or content too short to scroll */
-        if (more && (currentChapterIdx >= last.idx ||
+        /* Appending forward never shifts existing offsets, so it's safe mid
+           scroll — but NOT while TTS plays: reading extends its own runway in
+           speakNext (stop → load → resume between sentences), so no chapter is
+           ever loaded during active playback. */
+        if (!speaking && more && (currentChapterIdx >= last.idx ||
                 (text.height > 0 && text.height < scroll.height * 3 / 2))
         ) {
             appendChapters(LOAD_BATCH)
@@ -1743,14 +1838,17 @@ class ReaderActivity : AppCompatActivity() {
         /* arm once the viewport is past the first loaded chapter */
         if (currentChapterIdx > first.idx) prependArmed = true
         /* SCROLLING UP back into the top loaded chapter (after having read past
-           it) → load the previous LOAD_BATCH. The armed flag keeps a fresh
-           open/jump — which lands on the first chapter — from triggering it.
-           Prepends shift coordinates, so never while TTS drives the scroll. */
+           it) → QUEUE the previous LOAD_BATCH. A prepend shifts every offset,
+           so it must not fire mid-gesture: onScrollSettled runs it once the
+           finger is off the screen and the fling has come to rest. The armed
+           flag keeps a fresh open/jump — which lands on the first chapter —
+           from queuing it. Never while TTS drives the scroll. */
         if (prependArmed && !speaking && firstIdx > 0 && newY < oldY &&
             currentChapterIdx <= first.idx
         ) {
             prependArmed = false
-            prependChapters(LOAD_BATCH)
+            prependQueued = true
+            noteScrollActivity()
         }
     }
 
