@@ -44,6 +44,8 @@ class SpeechEditsActivity : AppCompatActivity() {
     private lateinit var userOnlyBtns: List<View>   // +, ↑, ↓, ✕ (User tab)
     private lateinit var restoreBtn: View           // ⟲ (Default tab)
     private var ovrIds: Set<String> = emptySet()    // overridden default ids
+    /* ⋮ menu toggle: list only the enabled edits (persisted) */
+    private var hideInactive = false
 
     /* @Voice-format import/export via the Storage Access Framework */
     private val exportLauncher = registerForActivityResult(
@@ -95,6 +97,8 @@ class SpeechEditsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         userList = SpeechEdits.user(this)
+        hideInactive = getSharedPreferences("app", MODE_PRIVATE)
+            .getBoolean("hideInactiveEdits", false)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -133,10 +137,21 @@ class SpeechEditsActivity : AppCompatActivity() {
             val menu = android.widget.PopupMenu(this, menuBtn)
             menu.menu.add("Import…")
             menu.menu.add("Export…")
+            menu.menu.add("Hide inactive").apply {
+                isCheckable = true
+                isChecked = hideInactive
+            }
             menu.setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
                     "Import…" -> importLauncher.launch(arrayOf("*/*"))
                     "Export…" -> exportLauncher.launch("replaceeng.txt")
+                    "Hide inactive" -> {
+                        hideInactive = !hideInactive
+                        getSharedPreferences("app", MODE_PRIVATE).edit()
+                            .putBoolean("hideInactiveEdits", hideInactive).apply()
+                        selected = sortedSetOf()   // hidden rows must not stay selected
+                        refresh()
+                    }
                 }
                 true
             }
@@ -237,12 +252,29 @@ class SpeechEditsActivity : AppCompatActivity() {
         listBox.removeAllViews()
         ovrIds = if (tab == 1) SpeechEdits.overrides(this).keys else emptySet()
         val list = currentList()
-        list.forEachIndexed { i, edit -> listBox.addView(rowView(i, edit)) }
-        if (list.isEmpty()) {
+        /* a row hidden by the filter must not linger in the selection — ✕/⟲
+           would silently act on rows the user can't see */
+        if (hideInactive) {
+            val it = selected.iterator()
+            while (it.hasNext()) {
+                if (list.getOrNull(it.next())?.enabled == false) it.remove()
+            }
+        }
+        var hidden = 0
+        list.forEachIndexed { i, edit ->
+            /* indices stay FULL-list positions, so move/delete/restore keep
+               addressing the right items while the filter is on */
+            if (hideInactive && !edit.enabled) { hidden++; return@forEachIndexed }
+            listBox.addView(rowView(i, edit))
+        }
+        if (list.isEmpty() || listBox.childCount == 0) {
             listBox.addView(
                 TextView(this).apply {
-                    text = if (tab == 0)
-                        "No custom edits yet. Tap + to add one." else "No default edits."
+                    text = when {
+                        list.isNotEmpty() -> "All ${list.size} edits here are inactive (hidden by the ⋮ filter)."
+                        tab == 0 -> "No custom edits yet. Tap + to add one."
+                        else -> "No default edits."
+                    }
                     setTextColor(getColor(R.color.muted)); textSize = 14f
                     setPadding(dp(16), dp(24), dp(16), dp(24)); gravity = Gravity.CENTER
                 },
@@ -250,6 +282,7 @@ class SpeechEditsActivity : AppCompatActivity() {
         }
         val enabled = list.count { it.enabled }
         footer.text = "Enabled $enabled of ${list.size}" +
+            (if (hidden > 0) "  ·  $hidden hidden" else "") +
             if (selected.isNotEmpty()) "  ·  ${selected.size} selected" else ""
     }
 
