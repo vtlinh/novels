@@ -215,6 +215,13 @@ class ChapterListActivity : AppCompatActivity() {
         if (!loadedOnce) status.text = "Loading…"
         loadedOnce = true
         val slug = intent.getStringExtra("slug")
+        /* ⇅ flips between reading order and newest-first (kept per novel) */
+        val prefs = getSharedPreferences("app", MODE_PRIVATE)
+        val descKey = "chSortDesc:${slug ?: dirName}"
+        findViewById<TextView>(R.id.sortBtn).setOnClickListener {
+            prefs.edit().putBoolean(descKey, !prefs.getBoolean(descKey, false)).apply()
+            load()
+        }
         lifecycleScope.launch {
             val chapters = withContext(Dispatchers.IO) {
                 val order = slug?.let {
@@ -222,7 +229,9 @@ class ChapterListActivity : AppCompatActivity() {
                 } ?: emptyMap()
                 chapterNames(this@ChapterListActivity, Uri.parse(folder), dirName, order, slug)
             }
-            val ordered = chapters.ordered
+            val ordered = chapters.ordered.let {
+                if (prefs.getBoolean(descKey, false)) it.reversed() else it
+            }
             if (ordered.isEmpty()) {
                 status.text = "No chapters found in \"$dirName\"."
                 return@launch
