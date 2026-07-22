@@ -29,8 +29,10 @@ class SpeechEditsActivity : AppCompatActivity() {
 
     private var tab = 0            // 0 = User, 1 = Default
     /* selected rows within the current tab (multi-select). Kept ascending so
-       "move to top/bottom" preserves the items' on-screen order. */
-    private var selected = sortedSetOf<Int>()
+       "move to top/bottom" preserves the items' on-screen order. Typed as the
+       SortedSet interface so both sortedSetOf(...) and Range.toSortedSet()
+       assign cleanly. */
+    private var selected: java.util.SortedSet<Int> = sortedSetOf()
     private var userList = mutableListOf<SpeechEdit>()
 
     private lateinit var listBox: LinearLayout
