@@ -28,9 +28,31 @@ import kotlinx.coroutines.withContext
    a Complete tag instead of a Download button and sinks to the bottom. */
 class NovelListActivity : AppCompatActivity() {
 
+    companion object {
+        /* slugs (normalized: letters+digits only) the user marked as garbage.
+           MainActivity checks this before re-downloading such a novel. */
+        const val GARBAGE_KEY = "garbageSlugs"
+
+        /* normalized slug key from a novel URL: last path segment, ".html"
+           stripped, letters+digits only — matches normKey(rec.slug) */
+        fun slugKeyFromUrl(url: String): String =
+            url.trimEnd('/').substringAfterLast('/').removeSuffix(".html")
+                .lowercase().filter { it.isLetterOrDigit() }
+    }
+
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
     private val store by lazy { DownloadStore(this) }
     private var folderKey: String? = null
+
+    /* ---- per-novel user marks (hot / finished / garbage) ---- */
+    private fun isHot(slug: String) = prefs.getBoolean("novelHot:$slug", false)
+    private fun isRead(slug: String) = prefs.getBoolean("novelRead:$slug", false)
+    private fun setHot(slug: String, v: Boolean) =
+        prefs.edit().putBoolean("novelHot:$slug", v).apply()
+    private fun setRead(slug: String, v: Boolean) =
+        prefs.edit().putBoolean("novelRead:$slug", v).apply()
+    private fun garbageSet(): Set<String> =
+        prefs.getStringSet(GARBAGE_KEY, emptySet()) ?: emptySet()
 
     /* one row of the list */
     private data class Row(
@@ -140,7 +162,8 @@ class NovelListActivity : AppCompatActivity() {
         sourceInfo = "registry $registryN · index ${all.size - registryN}" +
             (if (err.isNotEmpty()) " · errors:$err" else "")
 
-        return byNorm.values.map { rec ->
+        val garbage = garbageSet()
+        return byNorm.values.filter { normKey(it.slug) !in garbage }.map { rec ->
             val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
             Row(
                 rec,
@@ -151,9 +174,13 @@ class NovelListActivity : AppCompatActivity() {
                 maxOf(dbCount, rec.diskCount),
             )
         }.sortedWith(
-            /* incomplete first; within each group the most recently
-               DOWNLOADED novel on top (first-download time as legacy fallback) */
-            compareBy<Row> { it.rec.complete }
+            /* finished (user-marked) novels sink to the bottom; hot novels
+               float to the top of their half (so hot+finished sits above
+               plain finished). Then incomplete first, most recently
+               downloaded on top (first-download time as legacy fallback). */
+            compareBy<Row> { isRead(it.rec.slug) }
+                .thenBy { !isHot(it.rec.slug) }
+                .thenBy { it.rec.complete }
                 .thenByDescending { maxOf(it.rec.lastDl, it.rec.started) },
         )
     }
@@ -303,11 +330,14 @@ class NovelListActivity : AppCompatActivity() {
                         .putExtra("slug", row.rec.slug),
                 )
             }
+            /* long-press: hot / finished / garbage marks */
+            setOnLongClickListener { showMarkSheet(row); true }
         }
         /* checked, still-ongoing novel with every site chapter on disk:
            nothing to download until the site adds more */
         val upToDate = !row.rec.complete && row.rec.total > 0 && row.local >= row.rec.total
         val text = buildString {
+            if (isHot(row.rec.slug)) append("★ ")   // hot marker (monochrome)
             append(row.display)
             if (row.rec.author.isNotEmpty()) append("\n${row.rec.author}")
             if (!row.rec.complete) {
@@ -343,7 +373,21 @@ class NovelListActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             },
         )
-        if (row.rec.complete) {
+        if (isRead(row.rec.slug)) {
+            line.addView(
+                TextView(ctx).apply {
+                    this.text = "FINISHED"
+                    textSize = 11f
+                    setTextColor(getColor(R.color.muted))
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setPadding(dp(10), dp(4), dp(10), dp(4))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(6).toFloat()
+                        setColor(getColor(R.color.card))
+                    }
+                },
+            )
+        } else if (row.rec.complete) {
             line.addView(
                 TextView(ctx).apply {
                     this.text = "COMPLETE"
@@ -370,6 +414,89 @@ class NovelListActivity : AppCompatActivity() {
             )
         }
         return line
+    }
+
+    /* long-press menu: hot / finished / garbage */
+    private fun showMarkSheet(row: Row) {
+        val slug = row.rec.slug
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(24))
+            setBackgroundColor(getColor(R.color.card))
+        }
+        root.addView(
+            TextView(this).apply {
+                text = row.display; textSize = 15f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(getColor(R.color.fg)); setPadding(0, 0, 0, dp(8))
+            },
+        )
+        fun item(label: String, onTap: () -> Unit) = root.addView(
+            TextView(this).apply {
+                text = label; textSize = 15f; setTextColor(getColor(R.color.fg))
+                setPadding(0, dp(12), 0, dp(12))
+                isClickable = true; isFocusable = true
+                setOnClickListener { sheet.dismiss(); onTap() }
+            },
+        )
+        item(if (isHot(slug)) "Unmark hot (back to normal)" else "★ Mark as hot") {
+            setHot(slug, !isHot(slug)); render()
+        }
+        item(if (isRead(slug)) "Mark as unread" else "Mark as finished") {
+            setRead(slug, !isRead(slug)); render()
+        }
+        item("Mark as garbage…") { confirmGarbage(row) }
+        sheet.setContentView(root)
+        sheet.show()
+    }
+
+    /* garbage: confirm, then remember the slug, delete the novel's folder and
+       every trace of it — re-downloading later warns first (MainActivity) */
+    private fun confirmGarbage(row: Row) {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Mark as garbage")
+            .setMessage(
+                "\"${row.display}\" will be removed from this list and its downloaded " +
+                    "chapters deleted from your device. Downloading it again will warn you first.",
+            )
+            .setPositiveButton("Mark as garbage") { _, _ -> doGarbage(row) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun doGarbage(row: Row) {
+        val folder = folderKey ?: return
+        val slug = row.rec.slug
+        val status = findViewById<TextView>(R.id.statusText)
+        status.text = "Removing…"
+        /* remember first, so the novel stays gone even if deletion hiccups */
+        prefs.edit()
+            .putStringSet(GARBAGE_KEY, garbageSet() + normKey(slug))
+            .remove("novelHot:$slug").remove("novelRead:$slug")
+            .remove("lastCh:$slug").remove("readPos:$slug").remove("ttsPos:$slug")
+            .apply()
+        lifecycleScope.launch(Dispatchers.IO) {
+            val treeUri = Uri.parse(folder)
+            try {
+                /* the novel's folder: match by registered title, else by slug */
+                val dirName = store.getTitle(folder, slug)
+                    ?: Extractor.sanitize(row.rec.title.ifEmpty { slug })
+                val dir = children(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+                    .firstOrNull { it.third && (it.second == dirName || slugify(it.second) == slug) }
+                if (dir != null) {
+                    DocumentsContract.deleteDocument(
+                        contentResolver,
+                        DocumentsContract.buildDocumentUriUsingTree(treeUri, dir.first),
+                    )
+                }
+            } catch (e: Exception) {}
+            try { store.removeNovel(folder, slug) } catch (e: Exception) {}
+            try { store.clear(folder, slug) } catch (e: Exception) {}
+            try { store.setChapterOrder(folder, slug, emptyList()) } catch (e: Exception) {}
+            try { DownloadEngine.coverFile(this@NovelListActivity, slug).delete() } catch (e: Exception) {}
+            withContext(Dispatchers.Main) { render() }
+        }
     }
 
     private fun startResume(url: String) {
