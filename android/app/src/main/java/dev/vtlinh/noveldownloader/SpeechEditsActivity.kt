@@ -28,7 +28,9 @@ import androidx.appcompat.app.AppCompatActivity
 class SpeechEditsActivity : AppCompatActivity() {
 
     private var tab = 0            // 0 = User, 1 = Default
-    private var selected = -1      // selected row within the current tab
+    /* selected rows within the current tab (multi-select). Kept ascending so
+       "move to top/bottom" preserves the items' on-screen order. */
+    private var selected = sortedSetOf<Int>()
     private var userList = mutableListOf<SpeechEdit>()
 
     private lateinit var listBox: LinearLayout
@@ -76,7 +78,7 @@ class SpeechEditsActivity : AppCompatActivity() {
             .setPositiveButton("Replace") { _, _ ->
                 userList = parsed.toMutableList()
                 SpeechEdits.saveUser(this, userList)
-                selected = -1
+                selected = sortedSetOf()
                 switchTab(0)
                 Toast.makeText(this, "Imported ${parsed.size} edits", Toast.LENGTH_SHORT).show()
             }
@@ -155,8 +157,14 @@ class SpeechEditsActivity : AppCompatActivity() {
         }
         toolbar.addView(toolBtn("+") { openEditor(null) })
         toolbar.addView(toolBtn("✎") { editSelected() })
-        toolbar.addView(toolBtn("↑") { moveSelected(-1) })
-        toolbar.addView(toolBtn("↓") { moveSelected(1) })
+        /* short press nudges one step; long press moves all selected to the
+           very top (↑) or very bottom (↓) after a confirm dialog */
+        val upBtn = toolBtn("↑") { moveSelected(-1) }
+        upBtn.setOnLongClickListener { confirmMoveToEdge(true); true }
+        toolbar.addView(upBtn)
+        val downBtn = toolBtn("↓") { moveSelected(1) }
+        downBtn.setOnLongClickListener { confirmMoveToEdge(false); true }
+        toolbar.addView(downBtn)
         toolbar.addView(toolBtn("✕") { deleteSelected() })
         root.addView(toolbar)
 
@@ -187,7 +195,7 @@ class SpeechEditsActivity : AppCompatActivity() {
 
     private fun switchTab(t: Int) {
         tab = t
-        selected = -1
+        selected = sortedSetOf()
         val on = getColor(R.color.fg)
         val off = getColor(R.color.muted)
         userTab.setTextColor(if (t == 0) on else off)
@@ -214,7 +222,7 @@ class SpeechEditsActivity : AppCompatActivity() {
         }
         val enabled = list.count { it.enabled }
         footer.text = "Enabled $enabled of ${list.size}" +
-            if (selected >= 0) "  ·  selected #${selected + 1}" else ""
+            if (selected.isNotEmpty()) "  ·  ${selected.size} selected" else ""
     }
 
     private fun rowView(index: Int, edit: SpeechEdit): View {
@@ -223,7 +231,7 @@ class SpeechEditsActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6), dp(8), dp(12), dp(8))
             setBackgroundColor(
-                if (index == selected) 0x334F8CFF else 0x00000000,
+                if (index in selected) 0x334F8CFF else 0x00000000,
             )
         }
         val check = CheckBox(this).apply {
@@ -267,35 +275,88 @@ class SpeechEditsActivity : AppCompatActivity() {
 
         row.isClickable = true
         row.setOnClickListener {
-            selected = if (selected == index) -1 else index
+            /* tap toggles this row in/out of the multi-selection */
+            if (index in selected) selected.remove(index) else selected.add(index)
             refresh()
         }
         if (tab == 0) {
-            row.setOnLongClickListener { selected = index; editSelected(); true }
+            /* long-press edits just this row */
+            row.setOnLongClickListener {
+                selected = sortedSetOf(index); refresh(); editSelected(); true
+            }
         }
         return row
     }
 
     private fun editSelected() {
-        if (tab != 0 || selected < 0 || selected >= userList.size) return
-        openEditor(userList[selected])
+        if (tab != 0) return
+        if (selected.size != 1) {
+            Toast.makeText(this, "Select a single edit to edit", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val i = selected.first()
+        if (i in userList.indices) openEditor(userList[i])
     }
 
+    /* single-step nudge — one selected row at a time (the bulk move is the
+       long-press "to top/bottom") */
     private fun moveSelected(delta: Int) {
-        if (tab != 0 || selected < 0) return
-        val to = selected + delta
+        if (tab != 0) return
+        if (selected.size != 1) {
+            Toast.makeText(this, "Long-press ↑/↓ to move to the top/bottom", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val from = selected.first()
+        val to = from + delta
         if (to < 0 || to >= userList.size) return
-        val item = userList.removeAt(selected)
+        val item = userList.removeAt(from)
         userList.add(to, item)
-        selected = to
+        selected = sortedSetOf(to)
+        SpeechEdits.saveUser(this, userList)
+        refresh()
+    }
+
+    /* confirm, then move every selected edit to the top (or bottom), keeping
+       their relative order */
+    private fun confirmMoveToEdge(top: Boolean) {
+        if (tab != 0 || selected.isEmpty()) {
+            Toast.makeText(this, "Select item(s) first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val n = selected.size
+        val where = if (top) "top" else "bottom"
+        val what = if (n == 1) "this edit" else "these $n edits"
+        AlertDialog.Builder(this)
+            .setTitle("Move to $where")
+            .setMessage("Move $what to the $where of the list?")
+            .setPositiveButton("Move") { _, _ -> moveSelectedToEdge(top) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun moveSelectedToEdge(top: Boolean) {
+        if (tab != 0 || selected.isEmpty()) return
+        val idxs = selected.toList()              // ascending → on-screen order
+        val items = idxs.map { userList[it] }
+        for (i in idxs.sortedDescending()) userList.removeAt(i)
+        if (top) {
+            userList.addAll(0, items)
+            selected = (0 until items.size).toSortedSet()
+        } else {
+            val base = userList.size
+            userList.addAll(items)
+            selected = (base until base + items.size).toSortedSet()
+        }
         SpeechEdits.saveUser(this, userList)
         refresh()
     }
 
     private fun deleteSelected() {
-        if (tab != 0 || selected < 0 || selected >= userList.size) return
-        userList.removeAt(selected)
-        selected = -1
+        if (tab != 0 || selected.isEmpty()) return
+        for (i in selected.toList().sortedDescending()) {
+            if (i in userList.indices) userList.removeAt(i)
+        }
+        selected = sortedSetOf()
         SpeechEdits.saveUser(this, userList)
         refresh()
     }
@@ -434,7 +495,7 @@ class SpeechEditsActivity : AppCompatActivity() {
                     userList.add(
                         edit.copy(id = SpeechEdits.newId()),
                     )
-                    selected = userList.size - 1
+                    selected = sortedSetOf(userList.size - 1)
                 } else {
                     val idx = userList.indexOfFirst { it.id == existing.id }
                     if (idx >= 0) userList[idx] = edit.copy(enabled = userList[idx].enabled)
