@@ -128,8 +128,12 @@ class DownloadService : Service() {
         runningFlow.value = true
         logFlow.value = emptyList()
 
+        /* non-null copies for the coroutine — the null-check smart cast on
+           url/tree doesn't carry into the lambda */
+        val firstUrl: String = url
+        val treePath: String = tree
         scope.launch {
-            var curUrl = url
+            var curUrl = firstUrl
             var curTranslate = translate
             var curForce = forceTranslate
             var curKey = apiKey
@@ -146,7 +150,7 @@ class DownloadService : Service() {
                 )
                 engine = eng
                 try {
-                    eng.run(curUrl, Uri.parse(tree), curTranslate, curKey, curForce)
+                    eng.run(curUrl, Uri.parse(treePath), curTranslate, curKey, curForce)
                 } catch (e: Exception) {
                     logFlow.value = logFlow.value + "ERROR: ${e.message}"
                     statusFlow.value = "Error: ${e.message}"
