@@ -276,7 +276,8 @@ class MainActivity : AppCompatActivity() {
         sharedThisLaunch = false
         val url = findViewById<EditText>(R.id.urlInput).text.toString().trim()
         if (Sites.forUrl(url) == null || prefs.getString("tree", null) == null) return
-        if (DownloadService.runningFlow.value) return
+        /* a running download no longer blocks a shared URL — the service
+           queues it to download next */
         startDownload()
     }
 

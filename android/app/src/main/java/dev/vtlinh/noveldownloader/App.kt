@@ -29,6 +29,8 @@ class App : Application() {
                        kill — done on foreground so starting the service is
                        allowed on Android 12+ */
                     try { CompressService.resumeIfNeeded(applicationContext) } catch (e: Exception) {}
+                    /* queued novel downloads survive restarts the same way */
+                    try { DownloadService.resumeQueueIfNeeded(applicationContext) } catch (e: Exception) {}
                 }
             },
         )
