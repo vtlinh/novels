@@ -247,7 +247,10 @@ class MainActivity : AppCompatActivity() {
                 banner.visibility = View.VISIBLE
             }
         }
-        installHandler.postDelayed(installStuckCheck!!, 40_000)
+        /* 4s: a healthy silent install kills the process well within this, and
+           a shown confirmation pauses us (blocking the retry via the RESUMED
+           check) — so still being here after 4s means the commit stalled */
+        installHandler.postDelayed(installStuckCheck!!, 4_000)
     }
 
     override fun onNewIntent(intent: Intent) {
