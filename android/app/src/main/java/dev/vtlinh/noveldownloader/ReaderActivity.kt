@@ -353,6 +353,23 @@ class ReaderActivity : AppCompatActivity() {
             androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
         )
 
+        /* Bluetooth headphones disconnecting (or wired unplugging) fires the
+           system's "audio becoming noisy" broadcast — stop reading right there
+           instead of continuing out loud on the phone speaker. pauseTts keeps
+           the position + notification, so play resumes where it stopped. */
+        noisyReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context?, i: android.content.Intent?) {
+                if (i?.action == android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                    runOnUiThread { if (speaking) pauseTts() }
+                }
+            }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, noisyReceiver,
+            android.content.IntentFilter(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+
         /* Bluetooth headset / media-button play & pause control the TTS.
            MediaSessionCompat wires up the manifest MediaButtonReceiver so
            the buttons reach us even backgrounded / on OEM ROMs. */
@@ -578,6 +595,22 @@ class ReaderActivity : AppCompatActivity() {
         return body.lastIndexOf('\n', (o - 1).coerceAtLeast(0)) + 1
     }
 
+    /* start of the SENTENCE containing `off`: walk the paragraph's sentences
+       until the one that spans the tap. Reading starts exactly at the
+       double-tapped sentence, not at the top of its paragraph. (For an `off`
+       already at a paragraph start this returns that same position, so saved
+       paragraph restores are unaffected.) */
+    private fun sentStartOf(off: Int): Int {
+        val body = text.text.toString()
+        val o = off.coerceIn(0, body.length)
+        var cursor = paraStartOf(o)
+        while (true) {
+            val s = nextSentence(body, cursor) ?: return cursor
+            if (o < s.second || s.second <= cursor) return s.first
+            cursor = s.second
+        }
+    }
+
     /* scroll Y that places the line at `off` a small gap below the top edge,
        so a navigated-to chapter's heading isn't jammed under the header (the
        plain top-of-line position scrolls past the text's top padding) */
@@ -622,6 +655,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private var mediaSession: android.support.v4.media.session.MediaSessionCompat? = null
     private var ttsToggleReceiver: android.content.BroadcastReceiver? = null
+    private var noisyReceiver: android.content.BroadcastReceiver? = null
     private var lastNotifHeading = ""
 
     /* the "Chapter N: Title" line the notification shows */
@@ -732,7 +766,7 @@ class ReaderActivity : AppCompatActivity() {
             initTts()   // engine dropped — rebind Google TTS for the next tap
             return
         }
-        speakCursor = paraStartOf(off)
+        speakCursor = sentStartOf(off)
         speaking = true
         clearTextSelection()  // remove the start-tap cursor so it can't yank later
         requestAudioFocus()   // makes us the media-button session in the background
@@ -1020,6 +1054,8 @@ class ReaderActivity : AppCompatActivity() {
         mediaSession = null
         try { ttsToggleReceiver?.let { unregisterReceiver(it) } } catch (e: Exception) {}
         ttsToggleReceiver = null
+        try { noisyReceiver?.let { unregisterReceiver(it) } } catch (e: Exception) {}
+        noisyReceiver = null
         TtsService.stop(this)
         super.onDestroy()
     }
