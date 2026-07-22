@@ -26,10 +26,11 @@ import kotlinx.coroutines.launch
 class CompressService : Service() {
 
     companion object {
-        private const val CHANNEL = "compress"
+        /* fresh channel id: importance can't be changed on an existing
+           channel, and this one must be MIN so the pass runs invisibly */
+        private const val CHANNEL = "storage_bg"
         private const val NOTIF_ID = 3
 
-        val statusFlow = MutableStateFlow("")
         val runningFlow = MutableStateFlow(false)
 
         fun start(ctx: Context) {
@@ -46,7 +47,6 @@ class CompressService : Service() {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var lastNotify = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -63,7 +63,7 @@ class CompressService : Service() {
         }
 
         createChannel()
-        startForeground(NOTIF_ID, buildNotification("Preparing…"))
+        startForeground(NOTIF_ID, buildNotification())
         runningFlow.value = true
         prefs.edit().putBoolean("compressJobActive", true).apply()
 
@@ -79,12 +79,8 @@ class CompressService : Service() {
                     } catch (e: Exception) {
                         emptyList()
                     }
-                    for ((i, d) in dirs.withIndex()) {
+                    for (d in dirs) {
                         val cur = prefs.getBoolean("compressNovels", true)
-                        setStatus(
-                            (if (cur) "Compressing" else "Uncompressing") +
-                                " ${i + 1}/${dirs.size}: ${d.name}",
-                        )
                         val changed = try {
                             if (cur) Zips.compressDir(this@CompressService, cr, treeUri, d)
                             else Zips.uncompressDir(this@CompressService, cr, treeUri, d)
@@ -98,13 +94,10 @@ class CompressService : Service() {
                     if (!changedAny && prefs.getBoolean("compressNovels", true) == target) break
                 }
                 prefs.edit().putBoolean("compressJobActive", false).apply()
-                setStatus(
-                    if (prefs.getBoolean("compressNovels", true)) "All novels compressed."
-                    else "All novels uncompressed.",
-                )
             } catch (e: Exception) {
+                /* silent by design — an interrupted pass just resumes on the
+                   next app start (resumeIfNeeded) */
                 prefs.edit().putBoolean("compressJobActive", false).apply()
-                setStatus("Error: ${e.message}")
             } finally {
                 runningFlow.value = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -114,22 +107,17 @@ class CompressService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun setStatus(msg: String) {
-        statusFlow.value = msg
-        val now = System.currentTimeMillis()
-        if (now - lastNotify < 500) return
-        lastNotify = now
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIF_ID, buildNotification(msg))
-    }
-
     private fun createChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL, "Compression", NotificationManager.IMPORTANCE_LOW),
+            /* MIN importance: no status-bar icon, silently collapsed at the
+               bottom of the shade — the pass is invisible in normal use */
+            NotificationChannel(CHANNEL, "Storage", NotificationManager.IMPORTANCE_MIN),
         )
     }
 
-    private fun buildNotification(text: String): android.app.Notification {
+    /* one static notification for the whole run (a foreground service must
+       post one) — no per-novel progress, nothing to watch */
+    private fun buildNotification(): android.app.Notification {
         val openIntent = PendingIntent.getActivity(
             this, 4,
             Intent(this, SettingsActivity::class.java),
@@ -137,11 +125,11 @@ class CompressService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_save)
-            .setContentTitle("Storage")
-            .setContentText(text)
+            .setContentTitle("Optimizing storage")
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
     }
 }
