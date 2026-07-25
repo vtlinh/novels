@@ -512,7 +512,8 @@ class NovelListActivity : AppCompatActivity() {
         prefs.edit()
             .putStringSet(GARBAGE_KEY, garbageSet() + normKey(slug))
             .remove("novelHot:$slug").remove("novelRead:$slug")
-            .remove("lastCh:$slug").remove("readPos:$slug").remove("ttsPos:$slug")
+            .remove("lastCh:$slug").remove("readPos:$slug").remove("readParaText:$slug")
+            .remove("ttsPos:$slug").remove("ttsParaText:$slug")
             .apply()
         lifecycleScope.launch(Dispatchers.IO) {
             val treeUri = Uri.parse(folder)

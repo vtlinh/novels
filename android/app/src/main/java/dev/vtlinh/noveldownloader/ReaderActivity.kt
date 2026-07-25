@@ -86,26 +86,31 @@ class ReaderActivity : AppCompatActivity() {
             lastNotifHeading = cur.heading
             TtsService.start(this, cur.heading, true, mediaSession?.sessionToken, intent.getStringExtra("slug"))
         }
-        /* remember the exact paragraph too, so reopening this chapter
-           returns to where we left off (paragraphs map 1:1 across EN/VI) */
-        if (off != lastProbeOff) {
-            lastProbeOff = off
-            intent.getStringExtra("slug")?.let { slug ->
-                chapters?.ordered?.getOrNull(cur.idx)?.let { name ->
-                    val para = text.text.subSequence(cur.start, off.coerceAtLeast(cur.start))
-                        .count { it == '\n' }
-                    /* the paragraph's text anchors this index, exactly like the
-                       TTS one — so reading position restores just as reliably
-                       when TTS was never used */
-                    prefs.edit().putString("readPos:$slug", "$name|$para")
-                        .putString("readParaText:$slug", anchorOf(off))
-                        .apply()
-                }
-            }
-        }
+        /* Scroll position is deliberately NOT tracked: the only position worth
+           returning to is where TTS stopped (saveTtsPos). Scrolling around a
+           chapter no longer leaves a mark that could compete with it. */
     }
 
-    private var lastProbeOff = -1
+    /* Briefly tint the paragraph we just restored to, so the spot TTS stopped
+       at is obvious the moment the chapter opens rather than something to hunt
+       for. Its own span, so it can't disturb the speaking highlight. */
+    private val resumeSpan = android.text.style.BackgroundColorSpan(0x333DDC84)
+    private val resumeFade = Runnable {
+        (text.text as? android.text.Spannable)?.removeSpan(resumeSpan)
+    }
+
+    private fun flashResumeSpot(off: Int) {
+        val sp = text.text as? android.text.Spannable ?: return
+        val body = sp.toString()
+        val s = paraStartOf(off).coerceIn(0, sp.length)
+        val nl = body.indexOf('\n', s)
+        val e = (if (nl == -1) sp.length else nl).coerceIn(s, sp.length)
+        if (e <= s) return
+        sleepHandler.removeCallbacks(resumeFade)
+        try { sp.removeSpan(resumeSpan) } catch (ex: Exception) {}
+        sp.setSpan(resumeSpan, s, e, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sleepHandler.postDelayed(resumeFade, 4000)
+    }
 
     /* the text of the paragraph containing `off`, capped — long enough to
        identify the paragraph, short enough to keep in prefs */
@@ -118,31 +123,17 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* Where to land when (re)opening chapter idx from a restart or a chapter
-       pick. If TTS last stopped in THIS chapter, recover the exact spot it
-       stopped at — that's where the user was listening. Otherwise fall back to
-       the last scroll-reading spot (readPos); a chapter that is neither
-       lands at the top. This is what makes "open the chapter TTS stopped at →
-       jump to that line; open any other chapter → stay at the top" work. */
+       pick: the spot TTS stopped at, if it stopped in THIS chapter. Any other
+       chapter opens at the top — nothing else is tracked. */
     private fun restoreTargetFor(idx: Int): Pair<Int, String?> {
         val slug = intent.getStringExtra("slug")
         val name = chapters?.ordered?.getOrNull(idx)
         if (slug != null && name != null) {
-            /* each index travels WITH its own anchor — pairing a reading index
-               with the TTS paragraph's text would send the restore to the
-               wrong place entirely */
             prefs.getString("ttsPos:$slug", null)?.let { saved ->
                 if (saved.substringBefore('|') == name) {
                     return Pair(
                         saved.substringAfter('|').toIntOrNull() ?: 0,
                         prefs.getString("ttsParaText:$slug", null),
-                    )
-                }
-            }
-            prefs.getString("readPos:$slug", null)?.let { saved ->
-                if (saved.substringBefore('|') == name) {
-                    return Pair(
-                        saved.substringAfter('|').toIntOrNull() ?: 0,
-                        prefs.getString("readParaText:$slug", null),
                     )
                 }
             }
@@ -1238,6 +1229,7 @@ class ReaderActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (active === this) active = null
         cancelSleepTimer()
+        sleepHandler.removeCallbacks(resumeFade)
         settleHandler.removeCallbacks(settleRunnable)
         stopShakeDetection()
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
@@ -1876,6 +1868,7 @@ class ReaderActivity : AppCompatActivity() {
            chapter would otherwise be clamped by the page end and stay there */
         placeAt(off) {
             updateHeader()
+            if (targetPara > 0) flashResumeSpot(off)
             scroll.post { loadReady = true }
         }
         return true
@@ -1965,6 +1958,7 @@ class ReaderActivity : AppCompatActivity() {
                         /* TTS extends its own runway from here (speakNext) */
                         startTtsFrom(targetOff)
                     } else {
+                        if (targetPara > 0) flashResumeSpot(targetOff)
                         /* Placement is done — NOW pull in the chapters ahead.
                            With only this chapter loaded the page is short, so a
                            deep target (e.g. where TTS stopped near the chapter
