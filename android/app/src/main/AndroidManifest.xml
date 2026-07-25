@@ -55,9 +55,14 @@
             android:name=".ChapterListActivity"
             android:exported="false" />
 
+        <!-- Rotating must NOT recreate the reader: a rebuild runs onDestroy,
+             which shuts the TTS engine down and stops the reading service.
+             Handling these config changes in-place keeps playback going (the
+             layout is orientation-agnostic; the text just re-wraps). -->
         <activity
             android:name=".ReaderActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density|fontScale" />
 
         <activity
             android:name=".SettingsActivity"

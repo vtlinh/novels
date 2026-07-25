@@ -532,6 +532,9 @@ class ReaderActivity : AppCompatActivity() {
                 ttsReady = true
                 ttsConnecting = false
                 ttsInitState = "connected to Google TTS"
+                /* speak as MEDIA/SPEECH so the system routes and ducks this
+                   like any other player (and silences it during a call) */
+                try { tts?.setAudioAttributes(ttsAudioAttributes()) } catch (e: Exception) {}
                 curTtsLang = ""   // re-apply the language profile on next speak
                 /* the retry just succeeded — restore the saved voice as soon
                    as its data finishes loading */
@@ -976,26 +979,42 @@ class ReaderActivity : AppCompatActivity() {
 
     /* Hold audio focus while a TTS session is active (kept through pauses so
        the headset PLAY button still routes back to us). Without it, headset
-       media keys go to whatever app last had focus once we're backgrounded. */
+       media keys go to whatever app last had focus once we're backgrounded.
+
+       Losing focus in ANY form stops the read: another app starting playback
+       (AUDIOFOCUS_LOSS), an incoming call or a navigation prompt
+       (LOSS_TRANSIENT), or a duck request — setWillPauseWhenDucked makes the
+       system deliver those as a transient loss too, so we go quiet instead of
+       reading on at low volume under someone else's audio. Nothing
+       auto-resumes: the user presses play when they're ready. */
     private var audioFocusReq: android.media.AudioFocusRequest? = null
 
-    private fun requestAudioFocus() {
-        if (audioFocusReq != null) return
-        val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
-        val req = android.media.AudioFocusRequest.Builder(
-            android.media.AudioManager.AUDIOFOCUS_GAIN,
-        ).setAudioAttributes(
-            android.media.AudioAttributes.Builder()
-                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build(),
-        ).setOnAudioFocusChangeListener {
-            /* another app took over (call, another player) → pause */
-            if (it == android.media.AudioManager.AUDIOFOCUS_LOSS && speaking) {
-                runOnUiThread { pauseTts() }
+    private fun buildFocusRequest(): android.media.AudioFocusRequest =
+        android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(ttsAudioAttributes())
+            .setWillPauseWhenDucked(true)
+            .setOnAudioFocusChangeListener { change ->
+                when (change) {
+                    android.media.AudioManager.AUDIOFOCUS_LOSS,
+                    android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+                    android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK,
+                    -> runOnUiThread { if (speaking) pauseTts() }
+                }
             }
-        }.build()
-        audioFocusReq = req
+            .build()
+
+    private fun ttsAudioAttributes(): android.media.AudioAttributes =
+        android.media.AudioAttributes.Builder()
+            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+
+    /* (Re)acquire focus on every play — after a loss the previous request is
+       no longer held, and the old "already have a request object" short-circuit
+       meant we'd read on without focus for the rest of the session. */
+    private fun requestAudioFocus() {
+        val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+        val req = audioFocusReq ?: buildFocusRequest().also { audioFocusReq = it }
         try { am.requestAudioFocus(req) } catch (e: Exception) {}
     }
 
@@ -1060,6 +1079,37 @@ class ReaderActivity : AppCompatActivity() {
     override fun onPause() {
         if (isFinishing) prefs.edit().remove("lastReading").apply()
         super.onPause()
+    }
+
+    /* Rotation (and the other config changes declared in the manifest) is
+       handled in place — recreating the activity would run onDestroy and kill
+       the TTS engine mid-sentence. The text re-wraps at the new width, so
+       remember WHICH character is at the top (or the line being spoken) and
+       scroll back to it once the new layout lands. */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val anchor = if (speaking && resumeCursor >= 0) resumeCursor else topOffset()
+        val oldWidth = text.width
+        loadReady = false   // the placement scroll must not trigger a load
+        fun restore(attempt: Int) {
+            /* wait for the re-wrap: the old layout stays until the new width
+               is applied, and anchoring against it would land nowhere */
+            if (text.width == oldWidth && attempt < 40) {
+                scroll.postDelayed({ restore(attempt + 1) }, 16)
+                return
+            }
+            if (speaking) scrollToSpoken(anchor) else scroll.scrollTo(0, navScrollY(anchor))
+            updateHeader()
+            scroll.post { loadReady = true }
+        }
+        scroll.postDelayed({ restore(0) }, 16)
+    }
+
+    /* character offset of the line at the top of the viewport */
+    private fun topOffset(): Int {
+        val layout = text.layout ?: return 0
+        val y = (scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)
+        return layout.getLineStart(layout.getLineForVertical(y))
     }
 
     /* Back / ← : while TTS is playing, keep this instance ALIVE (playback
