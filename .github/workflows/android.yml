@@ -2,6 +2,12 @@ name: android
 
 on:
   push:
+    # main only. Feature-branch pushes built too, and since those runs share
+    # the concurrency group with main's, syncing a branch after a merge queued
+    # a second run that superseded — and cancelled — the pending main run
+    # before it could publish. Branch builds never published anyway (the
+    # release step is gated on main), so they were pure waste.
+    branches: [ "main" ]
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
