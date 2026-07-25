@@ -12,11 +12,12 @@ permissions:
 
 # Only one publish at a time: two overlapping runs both clobber the fixed
 # android-latest release, so a slower older run can land its APK on top of a
-# newer one's version.json. Superseded runs are cancelled — the newer build
-# contains their commits anyway.
+# newer one's version.json. Runs QUEUE rather than cancel — every merge here
+# is meant to ship, and cancelling one drops its build on the floor (that's
+# how #258's APK was never published).
 concurrency:
   group: android-latest
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
