@@ -10,6 +10,14 @@ on:
 permissions:
   contents: write
 
+# Only one publish at a time: two overlapping runs both clobber the fixed
+# android-latest release, so a slower older run can land its APK on top of a
+# newer one's version.json. Superseded runs are cancelled — the newer build
+# contains their commits anyway.
+concurrency:
+  group: android-latest
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest

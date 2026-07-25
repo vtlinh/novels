@@ -345,6 +345,21 @@ class NovelListActivity : AppCompatActivity() {
                 val folder = folderKey ?: return@setOnClickListener
                 val dirName = store.getTitle(folder, row.rec.slug)
                     ?: Extractor.sanitize(row.rec.title.ifEmpty { row.rec.slug })
+                /* already listening to this novel? go straight back to where
+                   TTS stopped — the reader restores that chapter's scroll
+                   position too — instead of via the chapter list */
+                val ttsChapter = prefs.getString("ttsPos:${row.rec.slug}", null)
+                    ?.substringBefore('|')?.takeIf { it.isNotEmpty() }
+                if (ttsChapter != null) {
+                    startActivity(
+                        Intent(ctx, ReaderActivity::class.java)
+                            .putExtra("dir", dirName).putExtra("title", row.display)
+                            .putExtra("slug", row.rec.slug)
+                            .putExtra("start", ttsChapter)
+                            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                    )
+                    return@setOnClickListener
+                }
                 startActivity(
                     Intent(ctx, ChapterListActivity::class.java)
                         .putExtra("dir", dirName).putExtra("title", row.display)
