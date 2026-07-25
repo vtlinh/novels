@@ -94,7 +94,12 @@ class ReaderActivity : AppCompatActivity() {
                 chapters?.ordered?.getOrNull(cur.idx)?.let { name ->
                     val para = text.text.subSequence(cur.start, off.coerceAtLeast(cur.start))
                         .count { it == '\n' }
-                    prefs.edit().putString("readPos:$slug", "$name|$para").apply()
+                    /* the paragraph's text anchors this index, exactly like the
+                       TTS one — so reading position restores just as reliably
+                       when TTS was never used */
+                    prefs.edit().putString("readPos:$slug", "$name|$para")
+                        .putString("readParaText:$slug", anchorOf(off))
+                        .apply()
                 }
             }
         }
@@ -102,33 +107,47 @@ class ReaderActivity : AppCompatActivity() {
 
     private var lastProbeOff = -1
 
-    /* the saved paragraph for a chapter — 0 unless it's the chapter we
-       last left off in */
-    private fun savedParaFor(idx: Int): Int {
-        val slug = intent.getStringExtra("slug") ?: return 0
-        val saved = prefs.getString("readPos:$slug", null) ?: return 0
-        val name = chapters?.ordered?.getOrNull(idx) ?: return 0
-        if (saved.substringBefore('|') != name) return 0
-        return saved.substringAfter('|').toIntOrNull() ?: 0
+    /* the text of the paragraph containing `off`, capped — long enough to
+       identify the paragraph, short enough to keep in prefs */
+    private fun anchorOf(off: Int): String {
+        val body = text.text
+        val s = paraStartOf(off)
+        val nl = body.toString().indexOf('\n', s)
+        val e = if (nl == -1) body.length else nl
+        return body.subSequence(s, e).toString().take(160)
     }
 
     /* Where to land when (re)opening chapter idx from a restart or a chapter
        pick. If TTS last stopped in THIS chapter, recover the exact spot it
        stopped at — that's where the user was listening. Otherwise fall back to
-       the last scroll-reading spot (savedParaFor); a chapter that is neither
+       the last scroll-reading spot (readPos); a chapter that is neither
        lands at the top. This is what makes "open the chapter TTS stopped at →
        jump to that line; open any other chapter → stay at the top" work. */
-    private fun restoreParaFor(idx: Int): Int {
+    private fun restoreTargetFor(idx: Int): Pair<Int, String?> {
         val slug = intent.getStringExtra("slug")
         val name = chapters?.ordered?.getOrNull(idx)
         if (slug != null && name != null) {
+            /* each index travels WITH its own anchor — pairing a reading index
+               with the TTS paragraph's text would send the restore to the
+               wrong place entirely */
             prefs.getString("ttsPos:$slug", null)?.let { saved ->
                 if (saved.substringBefore('|') == name) {
-                    return saved.substringAfter('|').toIntOrNull() ?: 0
+                    return Pair(
+                        saved.substringAfter('|').toIntOrNull() ?: 0,
+                        prefs.getString("ttsParaText:$slug", null),
+                    )
+                }
+            }
+            prefs.getString("readPos:$slug", null)?.let { saved ->
+                if (saved.substringBefore('|') == name) {
+                    return Pair(
+                        saved.substringAfter('|').toIntOrNull() ?: 0,
+                        prefs.getString("readParaText:$slug", null),
+                    )
                 }
             }
         }
-        return savedParaFor(idx)
+        return Pair(0, null)
     }
 
     /* remember the chapter being read, per novel — the chapter list reopens
@@ -293,10 +312,12 @@ class ReaderActivity : AppCompatActivity() {
                 /* staggered: waits out any in-flight load, then scrolls within
                    the buffer if the chapter is loaded, else rebuilds. Picking
                    the chapter TTS stopped at recovers that exact spot. */
-                goTo(pos, restoreParaFor(pos))
+                val t = restoreTargetFor(pos)
+                goTo(pos, t.first, t.second)
             }
             val startIdx = ch.ordered.indexOf(start).coerceAtLeast(0)
-            goTo(startIdx, restoreParaFor(startIdx))
+            val t = restoreTargetFor(startIdx)
+            goTo(startIdx, t.first, t.second)
         }
 
         /* Chapter loading is border-driven: openAt builds the initial window,
@@ -449,7 +470,8 @@ class ReaderActivity : AppCompatActivity() {
         }
         setIntent(newIntent)
         if (idx >= 0) {
-            goTo(idx, restoreParaFor(idx))
+            val t = restoreTargetFor(idx)
+            goTo(idx, t.first, t.second)
         } else {
             recreate()
         }
@@ -964,11 +986,14 @@ class ReaderActivity : AppCompatActivity() {
     /* Offset of the saved paragraph inside [chapterStart, chapterEnd): the
        stored index first, corrected by the stored paragraph text when the two
        disagree (the index is only as good as the buffer it was counted in). */
-    private fun restoreOffsetIn(chapterStart: Int, chapterEnd: Int, para: Int): Int {
+    private fun restoreOffsetIn(
+        chapterStart: Int,
+        chapterEnd: Int,
+        para: Int,
+        anchorText: String?,
+    ): Int {
         val byIndex = if (para > 0) offsetOfPara(chapterStart, para) else chapterStart
-        val slug = intent.getStringExtra("slug") ?: return byIndex
-        val anchor = prefs.getString("ttsParaText:$slug", null)
-            ?.takeIf { it.isNotBlank() } ?: return byIndex
+        val anchor = anchorText?.takeIf { it.isNotBlank() } ?: return byIndex
         val body = text.text.toString()
         val end = chapterEnd.coerceIn(chapterStart, body.length)
         if (byIndex in chapterStart until end && body.startsWith(anchor, byIndex)) {
@@ -1826,7 +1851,7 @@ class ReaderActivity : AppCompatActivity() {
     /* Jump within the ALREADY-LOADED buffer: scroll straight to the chapter
        (and its saved paragraph) without reloading anything. Returns false
        when the chapter isn't loaded — caller falls back to openAt. */
-    private fun jumpToLoaded(pos: Int, targetPara: Int): Boolean {
+    private fun jumpToLoaded(pos: Int, targetPara: Int, anchor: String? = null): Boolean {
         if (loading) return false
         val lc = loadedChapters.firstOrNull { it.idx == pos } ?: return false
         val layout = text.layout ?: return false
@@ -1836,7 +1861,8 @@ class ReaderActivity : AppCompatActivity() {
         /* end of this chapter = start of the next, minus the separator */
         val next = loadedChapters.firstOrNull { it.start > lc.start }
         val chEnd = next?.let { it.start - SEP.length } ?: text.length()
-        val off = if (targetPara > 0) restoreOffsetIn(lc.start, chEnd, targetPara) else lc.start
+        val off =
+            if (targetPara > 0) restoreOffsetIn(lc.start, chEnd, targetPara, anchor) else lc.start
         /* this programmatic jump must not itself trigger a prepend — the small
            top gap makes it look like an upward scroll into the first chapter.
            Gate maybeLoadMore off until the placement scroll has settled. */
@@ -1869,7 +1895,7 @@ class ReaderActivity : AppCompatActivity() {
        chapter is already loaded) or rebuild the window. Used for both the
        app-restart restore and chapter-list picks (including re-picking the
        current chapter to return to where we left off). */
-    private fun goTo(pos: Int, targetPara: Int) {
+    private fun goTo(pos: Int, targetPara: Int, anchor: String? = null) {
         /* picking the chapter TTS is already reading → keep reading (nothing new
            to load); just bring the spoken line back into view */
         if (speaking) {
@@ -1884,7 +1910,7 @@ class ReaderActivity : AppCompatActivity() {
         gotoJob = lifecycleScope.launch {
             var waited = 0
             while (loading && waited < 120) { kotlinx.coroutines.delay(50); waited++ }
-            if (!jumpToLoaded(pos, targetPara)) openAt(pos, targetPara)
+            if (!jumpToLoaded(pos, targetPara, anchor)) openAt(pos, targetPara, anchor)
         }
     }
 
@@ -1895,7 +1921,7 @@ class ReaderActivity : AppCompatActivity() {
        (fillForward), so loading never disturbs the recovery scroll. Previous
        chapters load lazily when the reader scrolls up into the top chapter
        (see maybeLoadMore). */
-    private fun openAt(pos: Int, targetPara: Int = 0) {
+    private fun openAt(pos: Int, targetPara: Int = 0, anchor: String? = null) {
         val ch = chapters ?: return
         if (loading || ch.ordered.isEmpty()) return
         stopTts()
@@ -1924,7 +1950,7 @@ class ReaderActivity : AppCompatActivity() {
 
             val targetOff =
                 if (targetPara > 0 && targetBodyLen > 0) {
-                    restoreOffsetIn(0, targetBodyLen, targetPara)
+                    restoreOffsetIn(0, targetBodyLen, targetPara, anchor)
                 } else {
                     0
                 }
