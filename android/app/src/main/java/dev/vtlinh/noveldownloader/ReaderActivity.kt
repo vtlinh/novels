@@ -1002,16 +1002,48 @@ class ReaderActivity : AppCompatActivity() {
     private fun buildFocusRequest(): android.media.AudioFocusRequest =
         android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(ttsAudioAttributes())
+            /* keeps the SYSTEM from quietly ducking us behind a notification
+               chime — with this set, Android never lowers our volume and tells
+               us about the request instead (as a transient loss) */
             .setWillPauseWhenDucked(true)
             .setOnAudioFocusChangeListener { change ->
                 when (change) {
-                    android.media.AudioManager.AUDIOFOCUS_LOSS,
+                    /* someone took over for good (another player) → stop */
+                    android.media.AudioManager.AUDIOFOCUS_LOSS ->
+                        runOnUiThread { if (speaking) pauseTts() }
+                    /* A short interruption. Because willPauseWhenDucked is set,
+                       a notification's duck request arrives here too, looking
+                       exactly like a call — so tell them apart by the audio
+                       mode: a call stops the read, a notification just plays
+                       over it at full volume. */
                     android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
                     android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK,
-                    -> runOnUiThread { if (speaking) pauseTts() }
+                    -> runOnUiThread { pauseIfCall(0) }
                 }
             }
             .build()
+
+    /* The audio mode can lag the focus change by a moment, so re-check a
+       couple of times before concluding it wasn't a call. */
+    private fun pauseIfCall(attempt: Int) {
+        if (!speaking) return
+        if (inPhoneCall()) {
+            pauseTts()
+            return
+        }
+        if (attempt < 3) {
+            android.os.Handler(mainLooper).postDelayed({ pauseIfCall(attempt + 1) }, 250)
+        }
+    }
+
+    private fun inPhoneCall(): Boolean = try {
+        val mode = (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).mode
+        mode == android.media.AudioManager.MODE_IN_CALL ||
+            mode == android.media.AudioManager.MODE_IN_COMMUNICATION ||
+            mode == android.media.AudioManager.MODE_RINGTONE
+    } catch (e: Exception) {
+        false
+    }
 
     private fun ttsAudioAttributes(): android.media.AudioAttributes =
         android.media.AudioAttributes.Builder()
