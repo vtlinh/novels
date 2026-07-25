@@ -82,11 +82,19 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Foreground service: TTS keeps reading with the screen off -->
+        <!-- Foreground service: TTS keeps reading with the screen off.
+             The MEDIA_BUTTON filter is REQUIRED by androidx's
+             MediaButtonReceiver: it forwards the broadcast to a service
+             advertising this action, and throws IllegalStateException when
+             the app has none — which is why headset play/pause did nothing. -->
         <service
             android:name=".TtsService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </service>
 
         <!-- Foreground service: bulk compress/uncompress survives backgrounding -->
         <service
