@@ -79,7 +79,14 @@ class ReaderActivity : AppCompatActivity() {
         titleBar.text = cur.heading
         if (cur.idx != currentChapterIdx) {
             currentChapterIdx = cur.idx
-            saveLastChapter(cur.idx)
+            /* While reading aloud, "the chapter I'm on" is the one being
+               SPOKEN — saveTtsPos owns lastCh then. The viewport top sits a
+               fifth of a page above the spoken line (scrollToSpoken), so it
+               still reports the PREVIOUS chapter for the first screenful of a
+               new one; letting it write lastCh made the app reopen a chapter
+               the TTS position doesn't belong to, and the restore then found
+               no saved spot and stayed at the top. */
+            if (!speaking) saveLastChapter(cur.idx)
         }
         /* keep the reading notification on the current chapter */
         if (speaking && cur.heading.isNotEmpty() && cur.heading != lastNotifHeading) {
@@ -130,7 +137,11 @@ class ReaderActivity : AppCompatActivity() {
         val name = chapters?.ordered?.getOrNull(idx)
         if (slug != null && name != null) {
             prefs.getString("ttsPos:$slug", null)?.let { saved ->
-                if (saved.substringBefore('|') == name) {
+                /* Match on the chapter NUMBER, not the raw filename: the same
+                   chapter can be stored as "Chapter 412.txt" or with a title
+                   suffix, and an exact-string check silently yields "no saved
+                   spot" — which looks identical to landing at the top. */
+                if (sameChapter(saved.substringBefore('|'), name)) {
                     return Pair(
                         saved.substringAfter('|').toIntOrNull() ?: 0,
                         prefs.getString("ttsParaText:$slug", null),
@@ -139,6 +150,16 @@ class ReaderActivity : AppCompatActivity() {
             }
         }
         return Pair(0, null)
+    }
+
+    /* two chapter filenames denote the same chapter when their Chapter
+       numbers agree (names may carry a title suffix) */
+    private fun sameChapter(a: String, b: String): Boolean {
+        if (a == b) return true
+        val re = ChapterListActivity.CHAPTER_RE
+        val na = re.find(a)?.groupValues?.getOrNull(1)
+        val nb = re.find(b)?.groupValues?.getOrNull(1)
+        return na != null && na == nb
     }
 
     /* remember the chapter being read, per novel — the chapter list reopens
@@ -972,6 +993,9 @@ class ReaderActivity : AppCompatActivity() {
             .putString("ttsParaText:$slug", paraText)
             .putString("lastTtsPara", paraText)
             .apply()
+        /* keep "where I left off" pointing at the chapter being spoken, so
+           reopening the novel lands on the chapter this position belongs to */
+        saveLastChapter(ch.idx)
     }
 
     /* Offset of the saved paragraph inside [chapterStart, chapterEnd): the
