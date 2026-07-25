@@ -1,0 +1,74 @@
+name: pages
+
+# Publishes the landing page WITH the current signed APK bundled alongside it,
+# so the download button serves the file straight from the Pages domain instead
+# of bouncing through a github.com release redirect (which some mobile browsers
+# turn into an extra hop, an interstitial, or a failed download).
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "index.html"
+      - "icon-*.png"
+      - ".github/workflows/pages.yml"
+  # Re-publish after every APK build so the bundled file is never stale.
+  workflow_run:
+    workflows: [ "android" ]
+    types: [ completed ]
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a superseded run has nothing unique to publish.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage the site
+        run: |
+          mkdir -p site
+          cp index.html icon-*.png site/
+
+      # The button links to this file; if the release asset can't be fetched we
+      # still publish the page (its link falls back to the release URL).
+      - name: Bundle the latest APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download android-latest --repo "$GITHUB_REPOSITORY" \
+            --pattern app-release.apk --output site/novel-downloader.apk --clobber \
+            && ls -l site/novel-downloader.apk \
+            || echo "::warning::android-latest APK not available yet — page will link to the release instead"
+
+      - name: Also publish version.json next to it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download android-latest --repo "$GITHUB_REPOSITORY" \
+            --pattern version.json --output site/version.json --clobber \
+            || echo "::warning::version.json not available yet"
+
+      - uses: actions/configure-pages@v5
+        with:
+          # flips the repo to the Actions build source on first run
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
