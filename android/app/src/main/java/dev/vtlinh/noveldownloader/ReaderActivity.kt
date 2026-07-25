@@ -114,27 +114,6 @@ class ReaderActivity : AppCompatActivity() {
            chapter no longer leaves a mark that could compete with it. */
     }
 
-    /* Briefly tint the paragraph we just restored to, so the spot TTS stopped
-       at is obvious the moment the chapter opens rather than something to hunt
-       for. Its own span, so it can't disturb the speaking highlight. */
-    private val resumeSpan = android.text.style.BackgroundColorSpan(0x333DDC84)
-    private val resumeFade = Runnable {
-        (text.text as? android.text.Spannable)?.removeSpan(resumeSpan)
-    }
-
-    private fun flashResumeSpot(off: Int) {
-        val sp = text.text as? android.text.Spannable ?: return
-        val body = sp.toString()
-        val s = paraStartOf(off).coerceIn(0, sp.length)
-        val nl = body.indexOf('\n', s)
-        val e = (if (nl == -1) sp.length else nl).coerceIn(s, sp.length)
-        if (e <= s) return
-        sleepHandler.removeCallbacks(resumeFade)
-        try { sp.removeSpan(resumeSpan) } catch (ex: Exception) {}
-        sp.setSpan(resumeSpan, s, e, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        sleepHandler.postDelayed(resumeFade, 4000)
-    }
-
     /* the text of the paragraph containing `off`, capped — long enough to
        identify the paragraph, short enough to keep in prefs */
     private fun anchorOf(off: Int): String {
@@ -707,10 +686,14 @@ class ReaderActivity : AppCompatActivity() {
     /* scroll Y that places the line at `off` a small gap below the top edge,
        so a navigated-to chapter's heading isn't jammed under the header (the
        plain top-of-line position scrolls past the text's top padding) */
-    private fun navScrollY(off: Int): Int {
+    private fun navScrollY(off: Int, fifth: Boolean = false): Int {
         val layout = text.layout ?: return 0
         val line = layout.getLineForOffset(off.coerceIn(0, text.length()))
-        return (layout.getLineTop(line) + text.totalPaddingTop - dp(16)).coerceAtLeast(0)
+        val top = layout.getLineTop(line) + text.totalPaddingTop
+        /* fifth: sit the line ~20% down the viewport, the same framing TTS
+           uses while reading, so a resumed spot has its lead-in visible
+           instead of being pinned under the header */
+        return (if (fifth) top - scroll.height / 5 else top - dp(16)).coerceAtLeast(0)
     }
 
     private fun offsetOfPara(chapterStart: Int, para: Int): Int {
@@ -1269,7 +1252,6 @@ class ReaderActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (active === this) active = null
         cancelSleepTimer()
-        sleepHandler.removeCallbacks(resumeFade)
         settleHandler.removeCallbacks(settleRunnable)
         stopShakeDetection()
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
@@ -1906,14 +1888,9 @@ class ReaderActivity : AppCompatActivity() {
         /* placeAt, not a bare scrollTo: jumping deep into the LAST loaded
            chapter would otherwise be clamped by the page end and stay there */
         setTextFocusable(false)
-        placeAt(off) {
+        placeAt(off, fifth = targetPara > 0) {
             setTextFocusable(true)
-            diag(
-                if (targetPara > 0) "resumed \u00b6$targetPara \u2192 y=${scroll.scrollY}"
-                else "no saved spot for this chapter",
-            )
             updateHeader()
-            if (targetPara > 0) flashResumeSpot(off)
             scroll.post { loadReady = true }
         }
         return true
@@ -2000,12 +1977,8 @@ class ReaderActivity : AppCompatActivity() {
                     0
                 }
             scroll.post {
-                placeAt(targetOff) {
+                placeAt(targetOff, fifth = targetPara > 0) {
                     setTextFocusable(true)
-                    diag(
-                        if (targetPara > 0) "resumed \u00b6$targetPara \u2192 y=${scroll.scrollY}"
-                        else "no saved spot for this chapter",
-                    )
                     loading = false
                     loadReady = true
                     prependArmed = false   // just landed on the first chapter
@@ -2014,8 +1987,6 @@ class ReaderActivity : AppCompatActivity() {
                         pendingSpeakAfterOpen = false
                         /* TTS extends its own runway from here (speakNext) */
                         startTtsFrom(targetOff)
-                    } else if (targetPara > 0) {
-                        flashResumeSpot(targetOff)
                     }
                 }
             }
@@ -2026,13 +1997,13 @@ class ReaderActivity : AppCompatActivity() {
        current text. Retries one FRAME apart (postDelayed, not post) — plain
        post()s drain faster than layout passes run, so they'd exhaust before
        text.layout is ready and we'd land at the top instead of the target. */
-    private fun placeAt(off: Int, attempt: Int = 0, then: () -> Unit) {
+    private fun placeAt(off: Int, fifth: Boolean = false, attempt: Int = 0, then: () -> Unit) {
         val layout = text.layout
         if ((layout == null || layout.text.length != text.text.length) && attempt < 40) {
-            scroll.postDelayed({ placeAt(off, attempt + 1, then) }, 16)
+            scroll.postDelayed({ placeAt(off, fifth, attempt + 1, then) }, 16)
             return
         }
-        val want = navScrollY(off)
+        val want = navScrollY(off, fifth)
         scroll.scrollTo(0, want)
         /* A ScrollView silently CLAMPS to what currently fits, so asking is not
            arriving: on a short page (one chapter, or one still being filled in)
@@ -2040,26 +2011,11 @@ class ReaderActivity : AppCompatActivity() {
            the page grows — this is what makes deep positions, e.g. where TTS
            stopped late in a chapter, actually restore. */
         if (scroll.scrollY != want && attempt < 40) {
-            scroll.postDelayed({ placeAt(off, attempt + 1, then) }, 16)
+            scroll.postDelayed({ placeAt(off, fifth, attempt + 1, then) }, 16)
             return
         }
         then()
         holdAt(want, 0)
-    }
-
-    /* One-line readout of what a restore actually did, so a bad landing can be
-       told apart at a glance: "no saved spot" is a lookup failure, while a
-       paragraph number with the page still at the top is a placement failure. */
-    private val hideDiag = Runnable {
-        findViewById<TextView>(R.id.readerStatus)?.visibility = android.view.View.GONE
-    }
-
-    private fun diag(msg: String) {
-        val v = findViewById<TextView>(R.id.readerStatus) ?: return
-        v.text = msg
-        v.visibility = android.view.View.VISIBLE
-        v.removeCallbacks(hideDiag)
-        v.postDelayed(hideDiag, 5000)
     }
 
     /* Hold the placement briefly against a LATE yank. readerText is
