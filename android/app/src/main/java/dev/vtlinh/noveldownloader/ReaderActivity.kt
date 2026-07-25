@@ -1905,7 +1905,13 @@ class ReaderActivity : AppCompatActivity() {
         saveLastChapter(lc.idx)
         /* placeAt, not a bare scrollTo: jumping deep into the LAST loaded
            chapter would otherwise be clamped by the page end and stay there */
+        setTextFocusable(false)
         placeAt(off) {
+            setTextFocusable(true)
+            diag(
+                if (targetPara > 0) "resumed \u00b6$targetPara \u2192 y=${scroll.scrollY}"
+                else "no saved spot for this chapter",
+            )
             updateHeader()
             if (targetPara > 0) flashResumeSpot(off)
             scroll.post { loadReady = true }
@@ -1980,6 +1986,7 @@ class ReaderActivity : AppCompatActivity() {
             }
             firstIdx = p
             nextIdx = (loadedChapters.lastOrNull()?.idx ?: (p - 1)) + 1
+            setTextFocusable(false)   // nothing may scroll to the text while we place it
             text.setText(sb, TextView.BufferType.EDITABLE)
             clearTextSelection()   // no stray insertion cursor to auto-scroll
             currentChapterIdx = p
@@ -1994,6 +2001,11 @@ class ReaderActivity : AppCompatActivity() {
                 }
             scroll.post {
                 placeAt(targetOff) {
+                    setTextFocusable(true)
+                    diag(
+                        if (targetPara > 0) "resumed \u00b6$targetPara \u2192 y=${scroll.scrollY}"
+                        else "no saved spot for this chapter",
+                    )
                     loading = false
                     loadReady = true
                     prependArmed = false   // just landed on the first chapter
@@ -2032,6 +2044,35 @@ class ReaderActivity : AppCompatActivity() {
             return
         }
         then()
+        holdAt(want, 0)
+    }
+
+    /* One-line readout of what a restore actually did, so a bad landing can be
+       told apart at a glance: "no saved spot" is a lookup failure, while a
+       paragraph number with the page still at the top is a placement failure. */
+    private val hideDiag = Runnable {
+        findViewById<TextView>(R.id.readerStatus)?.visibility = android.view.View.GONE
+    }
+
+    private fun diag(msg: String) {
+        val v = findViewById<TextView>(R.id.readerStatus) ?: return
+        v.text = msg
+        v.visibility = android.view.View.VISIBLE
+        v.removeCallbacks(hideDiag)
+        v.postDelayed(hideDiag, 5000)
+    }
+
+    /* Hold the placement briefly against a LATE yank. readerText is
+       textIsSelectable, so it is focusable in touch mode: setting its text
+       drops a cursor at offset 0 and can bringPointIntoView it, and the
+       ScrollView scrolls to show a child that takes focus — either one lands
+       the page back at the very top a few frames AFTER we placed it. Re-assert
+       until things settle; back off the moment the reader touches the screen so
+       this can never fight a real scroll. */
+    private fun holdAt(want: Int, attempt: Int) {
+        if (attempt >= 8 || fingerDown) return
+        if (scroll.scrollY != want) scroll.scrollTo(0, want)
+        scroll.postDelayed({ holdAt(want, attempt + 1) }, 60)
     }
 
 
@@ -2141,6 +2182,18 @@ class ReaderActivity : AppCompatActivity() {
     private fun clearTextSelection() {
         (text.text as? android.text.Spannable)?.let { android.text.Selection.removeSelection(it) }
         if (text.isFocused) text.clearFocus()
+    }
+
+    /* While the page is being rebuilt and placed, take the selectable
+       TextView out of the focus order entirely: a focusable child is what lets
+       the ScrollView scroll itself to that child's top (and lets a fresh
+       cursor at offset 0 be brought into view), undoing the placement. Focus
+       is handed back once the scroll has landed, so long-press selection keeps
+       working normally. */
+    private fun setTextFocusable(on: Boolean) {
+        if (!on && text.isFocused) text.clearFocus()
+        text.isFocusableInTouchMode = on
+        text.isFocusable = on
     }
 
     private fun appendChapters(n: Int) {
