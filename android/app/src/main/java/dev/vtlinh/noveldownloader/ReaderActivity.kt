@@ -350,7 +350,17 @@ class ReaderActivity : AppCompatActivity() {
         /* the notification's Pause/Play action broadcasts back to us */
         ttsToggleReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context?, i: android.content.Intent?) {
-                runOnUiThread { playButtonAction() }
+                /* the notification button sends no "want" and toggles; a media
+                   key sends what it actually means, so a dedicated PLAY on the
+                   earbuds can't pause a read that's already going */
+                val want = i?.getStringExtra("want")
+                runOnUiThread {
+                    when (want) {
+                        "play" -> if (!speaking) playButtonAction()
+                        "pause" -> if (speaking) pauseTts()
+                        else -> playButtonAction()
+                    }
+                }
             }
         }
         androidx.core.content.ContextCompat.registerReceiver(

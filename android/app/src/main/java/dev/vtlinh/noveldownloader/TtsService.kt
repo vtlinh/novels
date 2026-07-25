@@ -48,6 +48,14 @@ class TtsService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
+    /* the last notification we posted, so a media-button delivery (which
+       carries none of these extras) can re-post the SAME notification instead
+       of clobbering the chapter title and play/pause state */
+    private var lastTitle: String? = null
+    private var lastSpeaking = true
+    private var lastToken: MediaSessionCompat.Token? = null
+    private var lastSlug: String? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -55,10 +63,69 @@ class TtsService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Read aloud", NotificationManager.IMPORTANCE_LOW),
         )
+
+        /* A headset/Bluetooth button arrives here (MediaButtonReceiver forwards
+           it to the service advertising ACTION_MEDIA_BUTTON). We were started
+           with startForegroundService, so we must post a notification right
+           away — re-post the current one — then act on the key. */
+        if (intent?.action == Intent.ACTION_MEDIA_BUTTON) {
+            postNotification(lastTitle, lastSpeaking, lastToken, lastSlug)
+            handleMediaButton(intent)
+            return START_NOT_STICKY
+        }
+
         val speaking = intent?.getBooleanExtra("speaking", true) ?: true
         @Suppress("DEPRECATION")
         val token = intent?.getParcelableExtra<MediaSessionCompat.Token>("token")
 
+        postNotification(intent?.getStringExtra("title"), speaking, token, intent?.getStringExtra("slug"))
+        /* the CPU only needs to stay awake while actually speaking */
+        if (speaking) {
+            if (wakeLock == null) {
+                wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "novels:tts")
+                    .apply { acquire(4 * 60 * 60 * 1000L) }
+            }
+        } else {
+            try { wakeLock?.release() } catch (e: Exception) {}
+            wakeLock = null
+        }
+        return START_NOT_STICKY
+    }
+
+    /* Translate a media key into the reader's toggle broadcast. PLAY and PAUSE
+       are explicit so an earbud's dedicated key can't do the opposite of what
+       it says; PLAY_PAUSE and the single-button HEADSETHOOK toggle. */
+    private fun handleMediaButton(intent: Intent) {
+        @Suppress("DEPRECATION")
+        val ev = intent.getParcelableExtra<android.view.KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return
+        /* one dispatch per press: ignore the UP half and auto-repeats */
+        if (ev.action != android.view.KeyEvent.ACTION_DOWN || ev.repeatCount > 0) return
+        val want = when (ev.keyCode) {
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> "play"
+            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE,
+            android.view.KeyEvent.KEYCODE_MEDIA_STOP,
+            -> "pause"
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            android.view.KeyEvent.KEYCODE_HEADSETHOOK,
+            -> "toggle"
+            else -> return
+        }
+        sendBroadcast(
+            Intent(ACTION_TOGGLE).setPackage(packageName).putExtra("want", want),
+        )
+    }
+
+    private fun postNotification(
+        title: String?,
+        speaking: Boolean,
+        token: MediaSessionCompat.Token?,
+        slug: String?,
+    ) {
+        lastTitle = title
+        lastSpeaking = speaking
+        lastToken = token
+        lastSlug = slug
         /* tapping the notification brings the existing task (the reader) back */
         val openIntent = PendingIntent.getActivity(
             this, 2,
@@ -82,32 +149,20 @@ class TtsService : Service() {
 
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(intent?.getStringExtra("title")?.ifEmpty { null } ?: "Reading aloud")
+            .setContentTitle(title?.ifEmpty { null } ?: "Reading aloud")
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setStyle(mediaStyle)
             .addAction(action)
         /* the novel cover becomes the media artwork — the system renders it
            as the notification's tinted background; softly blurred here */
-        coverBitmap(intent?.getStringExtra("slug"))?.let { builder.setLargeIcon(it) }
+        coverBitmap(slug)?.let { builder.setLargeIcon(it) }
         val notif = builder.build()
 
         androidx.core.app.ServiceCompat.startForeground(
             this, NOTIF_ID, notif,
             android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
         )
-        /* the CPU only needs to stay awake while actually speaking */
-        if (speaking) {
-            if (wakeLock == null) {
-                wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
-                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "novels:tts")
-                    .apply { acquire(4 * 60 * 60 * 1000L) }
-            }
-        } else {
-            try { wakeLock?.release() } catch (e: Exception) {}
-            wakeLock = null
-        }
-        return START_NOT_STICKY
     }
 
     /* decode the novel cover and blur it a little (cheap downscale/upscale) */
