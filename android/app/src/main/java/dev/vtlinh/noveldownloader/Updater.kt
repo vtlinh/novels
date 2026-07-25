@@ -127,16 +127,28 @@ object Updater {
         ) {
             return@withContext f   // already downloaded this version
         }
+        /* download to a .part file and rename on completion, so a kill
+           mid-transfer can never leave a truncated file sitting where a
+           complete APK belongs */
+        val part = File(context.cacheDir, "$APK_NAME.part")
         try {
+            prefs(context).edit().remove(CACHED_VERSION_KEY).apply()
             client.newCall(Request.Builder().url(APK_URL).build()).execute().use { r ->
                 if (!r.isSuccessful) return@withContext null
                 val stream = r.body?.byteStream() ?: return@withContext null
-                stream.use { input -> f.outputStream().use { out -> input.copyTo(out) } }
+                stream.use { input -> part.outputStream().use { out -> input.copyTo(out) } }
+            }
+            if (part.length() <= 0L) return@withContext null
+            try { f.delete() } catch (e: Exception) {}
+            if (!part.renameTo(f)) {
+                part.copyTo(f, overwrite = true)
+                part.delete()
             }
             prefs(context).edit().putLong(CACHED_VERSION_KEY, versionCode).apply()
             f
         } catch (e: Exception) {
             /* a partial download is useless — drop it so we start clean */
+            try { part.delete() } catch (e2: Exception) {}
             try { f.delete() } catch (e2: Exception) {}
             prefs(context).edit().remove(CACHED_VERSION_KEY).apply()
             null

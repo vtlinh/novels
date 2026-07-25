@@ -573,6 +573,15 @@ class DownloadEngine(
         try {
             val allOnDisk = !stopRequested && failed.isEmpty()
             store.updateNovelCheck(folderKey, slug, chapters.size, site.isCompleted(doc) && allOnDisk)
+            /* ...and the authoritative on-disk count. The Library can't derive
+               it for a compressed novel — the chapters index only tracks loose
+               files, and the folder scan is one-time — so without this the row
+               keeps showing a stale count after a download. We know it exactly
+               here: the chapters that were already present plus what we saved. */
+            store.setDiskCount(
+                folderKey, slug,
+                chapters.count { it.filename != null && it.filename in existing } + saved.get(),
+            )
         } catch (e: Exception) {}
 
         if (translate && sourceEnglish && !forceTranslate) {
