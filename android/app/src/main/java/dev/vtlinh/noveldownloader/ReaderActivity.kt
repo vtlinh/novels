@@ -1768,6 +1768,7 @@ class ReaderActivity : AppCompatActivity() {
            Gate maybeLoadMore off until the placement scroll has settled. */
         loadReady = false
         prependArmed = false   // jumped to this chapter; not a scroll-up-to-top
+        pendingPlaceOff = -1   // supersede any re-place still pending
         scroll.scrollTo(0, y.coerceAtLeast(0))
         scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
         currentChapterIdx = lc.idx
@@ -1825,6 +1826,7 @@ class ReaderActivity : AppCompatActivity() {
         loading = true
         loadReady = false
         prependQueued = false
+        pendingPlaceOff = -1   // supersede any re-place still pending
         val p = pos.coerceIn(0, ch.ordered.size - 1)
         lifecycleScope.launch {
             loadedChapters.clear()
@@ -1843,37 +1845,54 @@ class ReaderActivity : AppCompatActivity() {
             titleBar.text = loadedChapters.firstOrNull { it.idx == p }?.heading ?: ""
             saveLastChapter(p)
 
-            /* the opened chapter starts at offset 0, so scroll straight to its
-               paragraph once the text has laid out. Retry one FRAME apart
-               (postDelayed, not post) — plain post()s drain faster than layout
-               passes run, so they'd exhaust before text.layout is ready and we
-               would fall through and land at the chapter top instead of the
-               saved paragraph. */
-            fun place(attempt: Int) {
-                val layout = text.layout
-                if ((layout == null || layout.text.length != text.text.length) && attempt < 40) {
-                    scroll.postDelayed({ place(attempt + 1) }, 16)
-                    return
-                }
-                val targetOff =
-                    if (targetPara > 0 && targetBodyLen > 0) offsetOfPara(0, targetPara) else 0
-                scroll.scrollTo(0, navScrollY(targetOff))
-                loading = false
-                loadReady = true
-                prependArmed = false   // just landed on the first chapter
-                updateHeader()
-                if (pendingSpeakAfterOpen) {
-                    pendingSpeakAfterOpen = false
-                    /* TTS extends its own runway from here (speakNext) */
-                    startTtsFrom(targetOff)
-                } else {
-                    /* placement is done — NOW pull in the chapters ahead */
-                    scroll.post { fillForward() }
+            val targetOff =
+                if (targetPara > 0 && targetBodyLen > 0) offsetOfPara(0, targetPara) else 0
+            scroll.post {
+                placeAt(targetOff) {
+                    loading = false
+                    loadReady = true
+                    prependArmed = false   // just landed on the first chapter
+                    updateHeader()
+                    if (pendingSpeakAfterOpen) {
+                        pendingSpeakAfterOpen = false
+                        /* TTS extends its own runway from here (speakNext) */
+                        startTtsFrom(targetOff)
+                    } else {
+                        /* Placement is done — NOW pull in the chapters ahead.
+                           With only this chapter loaded the page is short, so a
+                           deep target (e.g. where TTS stopped near the chapter
+                           end) may have been CLAMPED to the bottom of a
+                           one-chapter page. Appending makes the page taller, so
+                           re-apply the same offset afterwards; appends never
+                           shift existing offsets, so it stays valid. */
+                        pendingPlaceOff = targetOff
+                        pendingPlaceY = scroll.scrollY
+                        scroll.post { fillForward() }
+                    }
                 }
             }
-            scroll.post { place(0) }
         }
     }
+
+    /* scroll so `off` sits just under the header, once the layout reflects the
+       current text. Retries one FRAME apart (postDelayed, not post) — plain
+       post()s drain faster than layout passes run, so they'd exhaust before
+       text.layout is ready and we'd land at the top instead of the target. */
+    private fun placeAt(off: Int, attempt: Int = 0, then: () -> Unit) {
+        val layout = text.layout
+        if ((layout == null || layout.text.length != text.text.length) && attempt < 40) {
+            scroll.postDelayed({ placeAt(off, attempt + 1, then) }, 16)
+            return
+        }
+        scroll.scrollTo(0, navScrollY(off))
+        then()
+    }
+
+    /* set by openAt: re-apply this offset once the forward fill has landed.
+       pendingPlaceY is the scroll we left behind — if it has moved, the user
+       scrolled during the load and we must not yank them back. */
+    private var pendingPlaceOff = -1
+    private var pendingPlaceY = -1
 
     /* load the LOAD_BATCH chapters ahead of the opened one, after the recovery
        scroll has settled (used by openAt once placement lands) */
@@ -2016,7 +2035,19 @@ class ReaderActivity : AppCompatActivity() {
                 pendingSpeakContinue = false
                 if (speaking) speakNext()
             }
-            scroll.post { updateHeader() }
+            /* the open placement was clamped by a one-chapter page — now that
+               there's more below it, land on the target for real */
+            val reOff = pendingPlaceOff
+            pendingPlaceOff = -1
+            if (reOff >= 0 && scroll.scrollY == pendingPlaceY) {
+                loadReady = false
+                placeAt(reOff) {
+                    loadReady = true
+                    updateHeader()
+                }
+            } else {
+                scroll.post { updateHeader() }
+            }
         }
     }
 
