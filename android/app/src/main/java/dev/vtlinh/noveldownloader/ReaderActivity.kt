@@ -950,9 +950,39 @@ class ReaderActivity : AppCompatActivity() {
         val pStart = paraStartOf(off)
         val nl = body.toString().indexOf('\n', pStart)
         val pEnd = if (nl == -1) body.length else nl
+        /* The paragraph INDEX alone is positional and can't detect that it
+           landed on the wrong line, so keep the paragraph's TEXT as an anchor
+           too: the restore verifies against it and re-finds the paragraph if
+           the index doesn't line up. */
+        val paraText = body.subSequence(pStart, pEnd).toString()
         prefs.edit().putString("ttsPos:$slug", "$name|$para")
-            .putString("lastTtsPara", body.subSequence(pStart, pEnd).toString())
+            .putString("ttsParaText:$slug", paraText)
+            .putString("lastTtsPara", paraText)
             .apply()
+    }
+
+    /* Offset of the saved paragraph inside [chapterStart, chapterEnd): the
+       stored index first, corrected by the stored paragraph text when the two
+       disagree (the index is only as good as the buffer it was counted in). */
+    private fun restoreOffsetIn(chapterStart: Int, chapterEnd: Int, para: Int): Int {
+        val byIndex = if (para > 0) offsetOfPara(chapterStart, para) else chapterStart
+        val slug = intent.getStringExtra("slug") ?: return byIndex
+        val anchor = prefs.getString("ttsParaText:$slug", null)
+            ?.takeIf { it.isNotBlank() } ?: return byIndex
+        val body = text.text.toString()
+        val end = chapterEnd.coerceIn(chapterStart, body.length)
+        if (byIndex in chapterStart until end && body.startsWith(anchor, byIndex)) {
+            return byIndex   // index agrees with the anchor
+        }
+        /* index drifted — find the paragraph itself, preferring the occurrence
+           nearest where the index pointed */
+        var best = -1
+        var i = body.indexOf(anchor, chapterStart)
+        while (i >= 0 && i < end) {
+            if (best < 0 || Math.abs(i - byIndex) < Math.abs(best - byIndex)) best = i
+            i = body.indexOf(anchor, i + 1)
+        }
+        return if (best >= 0) best else byIndex
     }
 
     /* pause replays the interrupted sentence on resume */
@@ -1803,20 +1833,25 @@ class ReaderActivity : AppCompatActivity() {
         stopTts()
         resumeCursor = -1
         clearTextSelection()
-        val off = if (targetPara > 0) offsetOfPara(lc.start, targetPara) else lc.start
-        val y = navScrollY(off)
+        /* end of this chapter = start of the next, minus the separator */
+        val next = loadedChapters.firstOrNull { it.start > lc.start }
+        val chEnd = next?.let { it.start - SEP.length } ?: text.length()
+        val off = if (targetPara > 0) restoreOffsetIn(lc.start, chEnd, targetPara) else lc.start
         /* this programmatic jump must not itself trigger a prepend — the small
            top gap makes it look like an upward scroll into the first chapter.
            Gate maybeLoadMore off until the placement scroll has settled. */
         loadReady = false
         prependArmed = false   // jumped to this chapter; not a scroll-up-to-top
         pendingPlaceOff = -1   // supersede any re-place still pending
-        scroll.scrollTo(0, y.coerceAtLeast(0))
         scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
         currentChapterIdx = lc.idx
         saveLastChapter(lc.idx)
-        updateHeader()
-        scroll.post { loadReady = true }
+        /* placeAt, not a bare scrollTo: jumping deep into the LAST loaded
+           chapter would otherwise be clamped by the page end and stay there */
+        placeAt(off) {
+            updateHeader()
+            scroll.post { loadReady = true }
+        }
         return true
     }
 
@@ -1888,7 +1923,11 @@ class ReaderActivity : AppCompatActivity() {
             saveLastChapter(p)
 
             val targetOff =
-                if (targetPara > 0 && targetBodyLen > 0) offsetOfPara(0, targetPara) else 0
+                if (targetPara > 0 && targetBodyLen > 0) {
+                    restoreOffsetIn(0, targetBodyLen, targetPara)
+                } else {
+                    0
+                }
             scroll.post {
                 placeAt(targetOff) {
                     loading = false
@@ -1926,7 +1965,17 @@ class ReaderActivity : AppCompatActivity() {
             scroll.postDelayed({ placeAt(off, attempt + 1, then) }, 16)
             return
         }
-        scroll.scrollTo(0, navScrollY(off))
+        val want = navScrollY(off)
+        scroll.scrollTo(0, want)
+        /* A ScrollView silently CLAMPS to what currently fits, so asking is not
+           arriving: on a short page (one chapter, or one still being filled in)
+           we land above the target and never hear about it. Keep retrying while
+           the page grows — this is what makes deep positions, e.g. where TTS
+           stopped late in a chapter, actually restore. */
+        if (scroll.scrollY != want && attempt < 40) {
+            scroll.postDelayed({ placeAt(off, attempt + 1, then) }, 16)
+            return
+        }
         then()
     }
 
