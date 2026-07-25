@@ -1860,7 +1860,6 @@ class ReaderActivity : AppCompatActivity() {
            Gate maybeLoadMore off until the placement scroll has settled. */
         loadReady = false
         prependArmed = false   // jumped to this chapter; not a scroll-up-to-top
-        pendingPlaceOff = -1   // supersede any re-place still pending
         scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
         currentChapterIdx = lc.idx
         saveLastChapter(lc.idx)
@@ -1907,11 +1906,10 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /* Open a chapter. Only the opened chapter is loaded up front — it sits at
-       offset 0, so the scroll target is just its paragraph, a small offset
-       that needs no placement tricks. We scroll to that position FIRST; only
-       once the placement has landed do we load the LOAD_BATCH chapters AHEAD
-       (fillForward), so loading never disturbs the recovery scroll. Previous
+    /* Open a chapter: the chapter plus LOAD_BATCH ahead are loaded, and only
+       THEN is the scroll placed — so the page is always tall enough to reach
+       the target and nothing loads afterwards to disturb it. The opened
+       chapter sits at offset 0, so the target is just its paragraph. Previous
        chapters load lazily when the reader scrolls up into the top chapter
        (see maybeLoadMore). */
     private fun openAt(pos: Int, targetPara: Int = 0, anchor: String? = null) {
@@ -1922,19 +1920,26 @@ class ReaderActivity : AppCompatActivity() {
         loading = true
         loadReady = false
         prependQueued = false
-        pendingPlaceOff = -1   // supersede any re-place still pending
         val p = pos.coerceIn(0, ch.ordered.size - 1)
         lifecycleScope.launch {
             loadedChapters.clear()
-            val body = readAt(p)
+            /* Load the opened chapter AND the batch ahead BEFORE placing. A
+               one-chapter page is shorter than the target needs: a ScrollView
+               clamps to what fits, so a mid-chapter spot could never be
+               reached, and the page could only grow after the placement had
+               already given up. Placing last means nothing can disturb it. */
+            val last = (p + LOAD_BATCH).coerceAtMost(ch.ordered.size - 1)
             val sb = StringBuilder()
-            if (body != null) {
-                sb.append(body)
-                loadedChapters.add(LoadedChapter(p, 0, headingOf(body)))
+            var targetBodyLen = 0
+            for (i in p..last) {
+                val b = readAt(i) ?: continue
+                if (sb.isNotEmpty()) sb.append(SEP)
+                loadedChapters.add(LoadedChapter(i, sb.length, headingOf(b)))
+                sb.append(b)
+                if (i == p) targetBodyLen = b.length
             }
-            val targetBodyLen = body?.length ?: 0
             firstIdx = p
-            nextIdx = p + 1
+            nextIdx = (loadedChapters.lastOrNull()?.idx ?: (p - 1)) + 1
             text.setText(sb, TextView.BufferType.EDITABLE)
             clearTextSelection()   // no stray insertion cursor to auto-scroll
             currentChapterIdx = p
@@ -1957,18 +1962,8 @@ class ReaderActivity : AppCompatActivity() {
                         pendingSpeakAfterOpen = false
                         /* TTS extends its own runway from here (speakNext) */
                         startTtsFrom(targetOff)
-                    } else {
-                        if (targetPara > 0) flashResumeSpot(targetOff)
-                        /* Placement is done — NOW pull in the chapters ahead.
-                           With only this chapter loaded the page is short, so a
-                           deep target (e.g. where TTS stopped near the chapter
-                           end) may have been CLAMPED to the bottom of a
-                           one-chapter page. Appending makes the page taller, so
-                           re-apply the same offset afterwards; appends never
-                           shift existing offsets, so it stays valid. */
-                        pendingPlaceOff = targetOff
-                        pendingPlaceY = scroll.scrollY
-                        scroll.post { fillForward() }
+                    } else if (targetPara > 0) {
+                        flashResumeSpot(targetOff)
                     }
                 }
             }
@@ -1999,20 +1994,6 @@ class ReaderActivity : AppCompatActivity() {
         then()
     }
 
-    /* set by openAt: re-apply this offset once the forward fill has landed.
-       pendingPlaceY is the scroll we left behind — if it has moved, the user
-       scrolled during the load and we must not yank them back. */
-    private var pendingPlaceOff = -1
-    private var pendingPlaceY = -1
-
-    /* load the LOAD_BATCH chapters ahead of the opened one, after the recovery
-       scroll has settled (used by openAt once placement lands) */
-    private fun fillForward() {
-        if (loading || speaking) return
-        if (nextIdx >= (chapters?.ordered?.size ?: 0)) return
-        if (loadedChapters.size > 1) return   // already filled / user scrolled on
-        appendChapters(LOAD_BATCH)
-    }
 
     /* ---- border-driven chapter loading ----
        openAt loads the opened chapter + LOAD_BATCH ahead; from there scrolling
@@ -2146,19 +2127,7 @@ class ReaderActivity : AppCompatActivity() {
                 pendingSpeakContinue = false
                 if (speaking) speakNext()
             }
-            /* the open placement was clamped by a one-chapter page — now that
-               there's more below it, land on the target for real */
-            val reOff = pendingPlaceOff
-            pendingPlaceOff = -1
-            if (reOff >= 0 && scroll.scrollY == pendingPlaceY) {
-                loadReady = false
-                placeAt(reOff) {
-                    loadReady = true
-                    updateHeader()
-                }
-            } else {
-                scroll.post { updateHeader() }
-            }
+            scroll.post { updateHeader() }
         }
     }
 
