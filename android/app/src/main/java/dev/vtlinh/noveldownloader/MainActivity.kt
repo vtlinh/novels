@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val o = org.json.JSONObject(saved)
                     val slug = o.getString("slug")
-                    val startCh = prefs.getString("lastCh:$slug", null)
+                    val startCh = ReaderActivity.resumeChapter(this, slug)
                     if (startCh != null) {
                         startActivity(
                             Intent(this, ReaderActivity::class.java)
