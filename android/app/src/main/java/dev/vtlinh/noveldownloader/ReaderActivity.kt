@@ -36,6 +36,22 @@ class ReaderActivity : AppCompatActivity() {
            merely leaving to the chapter list (see leaveReader) keeps the
            instance alive so playback continues. */
         @Volatile private var active: ReaderActivity? = null
+
+        /* Which chapter to reopen for this novel: the one TTS stopped in when
+           there is one, else the last chapter the reader showed.
+
+           lastCh alone is not trustworthy for this. It is written from the
+           chapter at the TOP OF THE VIEWPORT, and TTS parks the spoken line a
+           fifth of a page below that — so pausing early in a chapter rewrites
+           lastCh to the PREVIOUS one. Reopening then landed on a chapter the
+           saved position doesn't belong to, and the restore found nothing. */
+        fun resumeChapter(ctx: android.content.Context, slug: String): String? {
+            val p = ctx.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
+            p.getString("ttsPos:$slug", null)
+                ?.substringBefore('|')?.takeIf { it.isNotEmpty() }
+                ?.let { return it }
+            return p.getString("lastCh:$slug", null)
+        }
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }

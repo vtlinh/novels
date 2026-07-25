@@ -241,7 +241,7 @@ class ChapterListActivity : AppCompatActivity() {
             /* the chapter currently being read: highlighted and scrolled into
                view (at ~20% of the list height) */
             val lastName = slug?.let {
-                getSharedPreferences("app", MODE_PRIVATE).getString("lastCh:$it", null)
+                ReaderActivity.resumeChapter(this@ChapterListActivity, it)
             }
             val currentPos = lastName?.let { ordered.indexOf(it) } ?: -1
             listView.adapter = object : ArrayAdapter<String>(
