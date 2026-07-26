@@ -130,6 +130,19 @@ class NovelListActivity : AppCompatActivity() {
        chapter we just came back from (onResume also follows onCreate) */
     override fun onResume() {
         super.onResume()
+        /* Settings is one tap away in this screen's own drawer and can change
+           the download folder. Reading it once in onCreate meant coming back
+           still listed the OLD folder's novels and, worse, handed the old tree
+           to the service — so chapters downloaded into the folder the user had
+           just stopped using. */
+        val tree = prefs.getString("tree", null)
+        if (tree != folderKey) {
+            folderKey = tree
+            if (tree == null) {
+                findViewById<TextView>(R.id.statusText).text = "Pick a download folder first."
+                return
+            }
+        }
         render()
     }
 
@@ -309,6 +322,15 @@ class NovelListActivity : AppCompatActivity() {
     private fun render() {
         val list = findViewById<LinearLayout>(R.id.novelList)
         val status = findViewById<TextView>(R.id.statusText)
+        /* onResume always follows onCreate, so the instruction set there was
+           overwritten before it could be read — a first-time user got
+           "No novels found. ()", empty parens and all, instead of being told
+           a folder is needed. */
+        if (folderKey == null) {
+            list.removeAllViews()
+            status.text = "Pick a download folder first."
+            return
+        }
         status.text = "Loading…"
         lifecycleScope.launch {
             val rs = try {
@@ -659,6 +681,16 @@ class NovelListActivity : AppCompatActivity() {
                                         "https://novelfull.com/${row.rec.slug}.html",
                                         "https://truyenfull.live/${row.rec.slug}/",
                                     )
+                                /* The busy test at snapshot time is not enough:
+                                   this sweep runs three wide for minutes, and
+                                   a download started after it began gets its
+                                   files renamed and deduped out from under the
+                                   write. Ask again when this novel's turn
+                                   actually comes. */
+                                if (DownloadService.isBusy(normKey(row.rec.slug))) {
+                                    done.incrementAndGet()
+                                    return@withPermit
+                                }
                                 for (u in urls) {
                                     val res = try { engine.checkStatus(u, folder) } catch (e: Exception) { null } ?: continue
                                     /* A locked or full database throws, and

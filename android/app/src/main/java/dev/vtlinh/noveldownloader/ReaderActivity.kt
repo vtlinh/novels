@@ -152,14 +152,39 @@ class ReaderActivity : AppCompatActivity() {
     private fun sameChapter(a: String, b: String): Boolean {
         if (a == b) return true
         val re = ChapterListActivity.CHAPTER_RE
-        val na = re.find(a)?.groupValues?.getOrNull(1)
-        val nb = re.find(b)?.groupValues?.getOrNull(1)
-        return na != null && na == nb
+        val ma = re.find(a) ?: return false
+        val mb = re.find(b) ?: return false
+        val na = ma.groupValues.getOrNull(1) ?: return false
+        if (na != mb.groupValues.getOrNull(1)) return false
+        /* Number alone was too loose. The rename pass parks a chapter the site
+           dropped as "Chapter 70 (unlisted).txt" right beside the listed
+           "Chapter 70.txt", and merged files are "Chapter 70-71.txt" — all
+           three share the number while being different text, so the saved spot
+           matched a chapter it never belonged to and restored to a paragraph
+           index in the wrong one. The range and any suffix have to agree too;
+           only a legacy title suffix is allowed to differ. */
+        if (ma.groupValues.getOrNull(2) != mb.groupValues.getOrNull(2)) return false
+        fun marked(s: String) = s.contains("(unlisted")
+        return marked(a) == marked(b)
     }
+
+    /* The chapter list is read once and never reloaded, so two things can make
+       the name at an index no longer the chapter it was. A rename pass moves
+       every file after an inserted or dropped chapter — and it has already
+       corrected the saved spot, so writing this snapshot's name back would
+       undo that correction and resume in the wrong chapter. And a spot we
+       couldn't find on open must not be replaced by wherever we landed
+       instead; that turns "can't restore" into "lost for good". */
+    private var chaptersEpoch = 0L
+    private var spotLost = false
+
+    private fun spotWritable(): Boolean =
+        !spotLost && DownloadEngine.renameEpoch.get() == chaptersEpoch
 
     /* remember the chapter being read, per novel — the chapter list reopens
        scrolled to (and highlighting) it */
     private fun saveLastChapter(idx: Int) {
+        if (!spotWritable()) return
         intent.getStringExtra("slug")?.let { slug ->
             chapters?.ordered?.getOrNull(idx)?.let { name ->
                 prefs.edit().putString("lastCh:$slug", name).apply()
@@ -284,6 +309,10 @@ class ReaderActivity : AppCompatActivity() {
         val drawerList = findViewById<ListView>(R.id.chapterDrawerList)
 
         lifecycleScope.launch {
+            /* taken BEFORE the read: a rename landing during it leaves us with
+               a list that is already behind, and the mismatch is what tells
+               the save path to keep its hands off the corrected spot */
+            chaptersEpoch = DownloadEngine.renameEpoch.get()
             chapters = withContext(Dispatchers.IO) {
                 val slug = intent.getStringExtra("slug")
                 val order = slug?.let {
@@ -316,13 +345,34 @@ class ReaderActivity : AppCompatActivity() {
             drawerList.adapter = drawerAdapter
             drawerList.setOnItemClickListener { _, _, pos, _ ->
                 drawer.closeDrawer(GravityCompat.END)
+                /* an explicit pick IS a new place, so start recording again */
+                spotLost = false
                 /* staggered: waits out any in-flight load, then scrolls within
                    the buffer if the chapter is loaded, else rebuilds. Picking
                    the chapter TTS stopped at recovers that exact spot. */
                 val t = restoreTargetFor(pos)
                 goTo(pos, t.first, t.second)
             }
-            val startIdx = ch.ordered.indexOf(start).coerceAtLeast(0)
+            /* Not found means the saved chapter is gone — a dedupe removed it,
+               or it was deleted outside the app. Coercing -1 to 0 opened
+               chapter 1 of a 3000-chapter novel with no explanation, and then
+               saved THAT as the new place, so the real one was unrecoverable.
+               Try the chapter number first, and if it truly isn't here, land
+               at the top without overwriting what we couldn't honour. */
+            var startIdx = if (start != null) ch.ordered.indexOf(start) else 0
+            if (startIdx < 0 && start != null) {
+                startIdx = ch.ordered.indexOfFirst { sameChapter(start, it) }
+            }
+            if (startIdx < 0) {
+                startIdx = 0
+                spotLost = true
+                android.widget.Toast.makeText(
+                    this@ReaderActivity,
+                    "The chapter you left off at is no longer here — opened at the start. " +
+                        "Pick a chapter to set a new place.",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
             val t = restoreTargetFor(startIdx)
             goTo(startIdx, t.first, t.second)
         }
@@ -976,6 +1026,7 @@ class ReaderActivity : AppCompatActivity() {
        offer "test against the paragraph TTS stopped at". */
     private fun saveTtsPos(off: Int) {
         val slug = intent.getStringExtra("slug") ?: return
+        if (!spotWritable()) return
         val ch = loadedChapters.lastOrNull { it.start <= off } ?: return
         val name = chapters?.ordered?.getOrNull(ch.idx) ?: return
         val para = text.text.subSequence(ch.start, off.coerceAtLeast(ch.start)).count { it == '\n' }

@@ -54,6 +54,10 @@ class DownloadStore(context: Context) :
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
+        /* process-wide, because every screen builds its own helper over the
+           same database — a per-instance counter would miss the clear that
+           the download service just did */
+        private val chlistEpochValue = java.util.concurrent.atomic.AtomicLong(0)
         private const val NOVELS_TABLE =
             "CREATE TABLE IF NOT EXISTS novels (" +
                 "folder TEXT, slug TEXT, url TEXT, title TEXT, " +
@@ -196,11 +200,23 @@ class DownloadStore(context: Context) :
 
     /* ---- cached resolved chapter listing (chlist) ---- */
 
+    /* Bumped by every clearChapterList. Walking a 7k-file folder over SAF
+       takes seconds, and a chapter saved during the walk clears the cache
+       BEFORE the walk finishes — so the listing written afterwards is missing
+       it, and nothing clears it again once the download ends. The walker
+       records this before it starts and hands it back here. */
+    private fun chlistEpoch() = chlistEpochValue.get()
+
+    fun chapterListEpoch(): Long = chlistEpochValue.get()
+
     fun saveChapterList(
         folder: String,
         slug: String,
         list: CachedChapterList,
+        seenEpoch: Long = -1L,
     ) {
+        /* -1 means the caller isn't tracking it (nothing changed under them) */
+        if (seenEpoch >= 0 && seenEpoch != chlistEpoch()) return
         val db = writableDatabase
         db.beginTransaction()
         try {
@@ -260,11 +276,13 @@ class DownloadStore(context: Context) :
 
     fun clearChapterList(folder: String, slug: String) {
         writableDatabase.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))
+        chlistEpochValue.incrementAndGet()
     }
 
     /* the compress pass rewrites refs across the whole library */
     fun clearAllChapterLists(folder: String) {
         writableDatabase.delete("chlist", "folder=?", arrayOf(folder))
+        chlistEpochValue.incrementAndGet()
     }
 
     fun getChapterOrder(folder: String, slug: String): Map<String, Int> {

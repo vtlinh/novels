@@ -51,6 +51,13 @@ class DownloadEngine(
            housekeeping, above it only a proportional check will do */
         private const val MAX_QUIET_DROPS = 10
 
+        /* Bumped whenever a rename pass actually moves a file. A reader that
+           is open on that novel is holding a list of names that just stopped
+           being true, and it saves the reading spot BY NAME — so it needs to
+           know its copy is stale rather than writing it back over the remap
+           the rename just did. */
+        val renameEpoch = java.util.concurrent.atomic.AtomicLong(0)
+
         /* app-private cover thumbnail for a novel */
         fun coverFile(context: Context, slug: String): java.io.File =
             java.io.File(context.filesDir, "covers/$slug.jpg")
@@ -352,6 +359,7 @@ class DownloadEngine(
             claimedUrl[orig]?.let { store.linkUrl(folderKey, slug, finalName, it) }
         }
         remapSavedSpot(slug, applied)
+        if (applied.isNotEmpty()) renameEpoch.incrementAndGet()
         if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
         if (evicted > 0) log("$evicted file(s) the site no longer lists moved out of the numbering")
     }
