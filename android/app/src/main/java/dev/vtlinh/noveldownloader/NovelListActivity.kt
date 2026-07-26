@@ -592,7 +592,16 @@ class NovelListActivity : AppCompatActivity() {
         val btn = findViewById<Button>(R.id.checkBtn)
         val status = findViewById<TextView>(R.id.statusText)
         btn.isEnabled = false
-        val engine = DownloadEngine(this, {}, {}, { _, _ -> })
+        /* Check status discarded everything the engine had to say. Its notes
+           — which listed links carry no chapter number, and so can never be
+           downloaded — go to the same log the home screen prints, otherwise
+           the only way to see them is to run a full download. */
+        val engine = DownloadEngine(
+            this,
+            { line -> DownloadService.logFlow.value = (DownloadService.logFlow.value + line).takeLast(400) },
+            {},
+            { _, _ -> },
+        )
         lifecycleScope.launch {
             /* A complete novel (site finished + everything on disk) can never
                regress — no need to recheck it — EXCEPT when its site chapter
