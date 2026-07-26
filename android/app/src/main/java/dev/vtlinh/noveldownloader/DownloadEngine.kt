@@ -173,6 +173,24 @@ class DownloadEngine(
        non-chapter link that happens to sit inside the listing container.
        The first tells us the numbering needs to cope with it; the second
        tells us the link test is too generous. */
+    /* A link the site lists but doesn't number — its own typo ("Chpater
+       3848" sitting between C3847 and C3849), or a genuinely unnumbered
+       extra like an interlude or a side story — still has a place on the
+       page: the one it sits in. Give it the number of the last numbered
+       chapter before it and let the duplicate suffix drop it in right
+       there. Position in the listing is what the site is actually telling
+       us; the name is a label, and a site is free to get it wrong.
+
+       A listing that opens with unnumbered links leaves those unnamed —
+       there's nothing ahead of them to anchor to — and reportUnnamed says
+       so rather than inventing a position. */
+    private fun numberByPosition(inSiteOrder: List<Chapter>) {
+        var last: Int? = null
+        for (ch in inSiteOrder) {
+            if (ch.num != null) last = ch.num else ch.num = last
+        }
+    }
+
     private fun reportUnnamed(all: List<Chapter>) {
         val unnamed = all.filter { it.filename == null }
         if (unnamed.isEmpty()) return
@@ -278,6 +296,7 @@ class DownloadEngine(
            duplicate suffixes, site order is what we report */
         val siteOrdered = seen.values.toList()
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
+        numberByPosition(siteOrdered)
         val sorted = siteOrdered.sortedBy { it.num ?: Int.MAX_VALUE }
         val counts = HashMap<Int, Int>()
         for (ch in sorted) {
@@ -406,6 +425,7 @@ class DownloadEngine(
            numeric sort so the reader can present chapters as the site does */
         val siteOrdered = chapters.toList()
         for (ch in chapters) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
+        numberByPosition(siteOrdered)
         chapters.sortBy { it.num ?: Int.MAX_VALUE }
         val counts = HashMap<Int, Int>()
         for (ch in chapters) {
