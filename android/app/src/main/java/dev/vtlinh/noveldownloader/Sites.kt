@@ -21,8 +21,19 @@ class Site(
     /* container of the REAL chapter list — pages also carry a "latest
        chapters" widget whose links must not pollute the chapter order */
     val listScope: String = "#list-chapter",
+    /* Test for links found INSIDE listScope. Sitting in the site's own
+       chapter list is the evidence that a link IS a chapter, so this only
+       has to keep the listing's own pagination out — it must NOT insist on
+       a "chapter-N" URL, because a site is free to name chapters after
+       their titles and most of the novel would then be invisible.
+       isChapterPath stays strict for the whole-document fallback, where
+       position vouches for nothing. */
+    private val listedChapterPath: ((String, String) -> Boolean)? = null,
 ) {
     fun matches(url: String) = urlRe.containsMatchIn(url.trim())
+
+    fun isChapterInList(path: String, slug: String) =
+        (listedChapterPath ?: isChapterPath)(path, slug)
 }
 
 object Sites {
@@ -59,6 +70,11 @@ object Sites {
                     t.equals("Full", true) || t.contains("Hoàn", true)
                 }
             },
+            /* in the chapter list, anything under the novel is a chapter
+               except the listing's own page links */
+            listedChapterPath = { path, slug ->
+                path.contains("/$slug/") && !Regex("/trang-\\d+").containsMatchIn(path)
+            },
         ),
         Site(
             name = "novelfull",
@@ -71,12 +87,17 @@ object Sites {
                 Pair("https://${u.host}/$slug.html", slug)
             },
             listPageUrl = { base, _, p -> "$base?page=$p" },
-            /* Chapters live under /<slug>/ and are named after their title,
-               not numbered: "/1-ren.html", "/2-going-to-zone-a.html". Only
-               some carry a "chapter-N" slug, so requiring that pattern hid
-               most of the novel — the listing found a few hundred of a few
-               thousand chapters and called the download complete. */
+            /* fallback only — outside the chapter list the "latest chapters"
+               widget has this same URL shape, so insist on a numbered slug */
             isChapterPath = { path, slug ->
+                path.contains("/$slug/") && Regex("chapter-\\d+", RegexOption.IGNORE_CASE).containsMatchIn(path)
+            },
+            /* Chapters are named after their title, not numbered:
+               "/1-ren.html", "/2-going-to-zone-a.html". Only a minority carry
+               a "chapter-N" slug, so demanding that pattern hid most of the
+               novel — a 19-page listing came back as a few hundred chapters
+               and the download then called itself finished. */
+            listedChapterPath = { path, slug ->
                 path.contains("/$slug/") && path.endsWith(".html", ignoreCase = true)
             },
             maxPage = { doc, _ ->
