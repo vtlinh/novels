@@ -218,6 +218,13 @@ class DownloadEngine(
         }
         if (pending.isEmpty()) return
 
+        /* Where the reader and the read-aloud left off is remembered by
+           FILENAME. Renaming underneath them would leave that name pointing
+           at whatever chapter now holds it — resuming somewhere else in the
+           book without anything looking wrong. Move those marks with the
+           files. */
+        remapSavedSpot(slug, pending)
+
         val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return }
         val files = HashMap<String, String>()                // name -> docId
         var translatedId: String? = null
@@ -313,6 +320,29 @@ class DownloadEngine(
         DocumentFile.fromTreeUri(context, treeUri)?.findFile(name)?.takeIf { it.isDirectory }
     } catch (e: Exception) {
         null
+    }
+
+    /* The saved reading spot and read-aloud spot both name their chapter by
+       filename, so a rename has to carry them across. Done from the same
+       from->to map the renames use, before anything moves — the marks are a
+       pointer, not a file, and nothing reads them mid-pass. */
+    private fun remapSavedSpot(slug: String, moves: Map<String, String>) {
+        try {
+            val p = context.getSharedPreferences("app", Context.MODE_PRIVATE)
+            val e = p.edit()
+            var any = false
+            p.getString("lastCh:$slug", null)?.let { cur ->
+                moves[cur]?.let { e.putString("lastCh:$slug", it); any = true }
+            }
+            p.getString("ttsPos:$slug", null)?.let { cur ->
+                val name = cur.substringBefore('|')
+                moves[name]?.let {
+                    e.putString("ttsPos:$slug", it + "|" + cur.substringAfter('|', ""))
+                    any = true
+                }
+            }
+            if (any) e.apply()
+        } catch (ex: Exception) {}
     }
 
     /* Chapter files nothing in the listing points at — left behind when an
