@@ -54,9 +54,28 @@ class RealPageTest {
         override fun toString() = file
     }
 
+    /* The pages live in one zip rather than as loose files: they are whole
+       third-party pages, and an archive keeps them out of repository search
+       and off every clone's disk at a fifth of the size. Read once into
+       memory — a few MB, and every test here walks the whole set anyway. */
+    private val archive: Map<String, ByteArray> by lazy {
+        val out = HashMap<String, ByteArray>()
+        val ins = javaClass.getResourceAsStream("/pages.zip")
+            ?: throw AssertionError("missing test resource: pages.zip")
+        ins.use { raw ->
+            java.util.zip.ZipInputStream(raw).use { zip ->
+                while (true) {
+                    val e = zip.nextEntry ?: break
+                    if (!e.isDirectory) out[e.name] = zip.readBytes()
+                }
+            }
+        }
+        out
+    }
+
     private fun read(path: String): String =
-        javaClass.getResourceAsStream("/pages/$path")?.use { it.readBytes().toString(Charsets.UTF_8) }
-            ?: throw AssertionError("missing test resource: pages/$path")
+        archive[path]?.toString(Charsets.UTF_8)
+            ?: throw AssertionError("missing page in pages.zip: $path (have ${archive.size} entries)")
 
     private val fixtures: List<Fixture> by lazy {
         read("manifest.tsv").lineSequence()

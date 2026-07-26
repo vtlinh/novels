@@ -4,7 +4,7 @@
 novel sites. **The app does not use it and must not** — it fetches sites
 directly, which is the point of it being a native app. This exists so work on
 the app can read a real page: capturing the test fixtures in
-`android/app/src/test/resources/pages`, checking what a site's HTML actually
+`android/app/src/test/resources/pages.zip`, checking what a site's HTML actually
 contains before a selector changes, settling a question about a site instead
 of guessing at it.
 
@@ -57,23 +57,29 @@ useful for reading, wrong for capturing a fixture, which has to be the page as
 served. `&fresh=1` skips the five-minute edge cache. `POST /fetch-many` takes
 up to 50 URLs in one call.
 
-## What it will not do
+## Challenges
 
-**A plain Worker cannot pass a JS challenge.** novelfull.com sits behind
-Cloudflare's interstitial: a Worker's `fetch()` runs no JavaScript and carries
-no browser fingerprint, so the site answers it with the interstitial. No
-combination of headers changes that.
+novelfull.com answers a direct `curl` with Cloudflare's JS interstitial, and
+the expectation when this was written was that the Worker would get the same —
+its `fetch()` runs no JavaScript and carries no browser fingerprint. **It does
+not: the deployed Worker reaches novelfull.com normally.** Measured, not
+assumed; `?head=1` returns `"challenge": false` and the page parses.
 
-The Worker refuses to pretend otherwise. When the reply is a challenge it comes
+What *is* challenge-protected is individual novels. Several truyenfull titles
+(the `-free` suffixed ones) return a 403 interstitial to every client,
+including the app — so those novels cannot be downloaded at all, and the
+capture scripts record which ones rather than retrying them.
+
+Either way the Worker refuses to pass an interstitial off as a page: it comes
 back as **409** with `x-challenge: 1` and an empty body rather than 200 with an
-error page — because a challenge page has a length and the shape of a real
-document, and a caller that doesn't look inside will happily save it as a novel
-page. That is exactly how a "downloaded" chapter turns out to be an error page.
+error page. A challenge page has a length and the shape of a real document, and
+a caller that doesn't look inside will happily save it as a novel page — which
+is exactly how a "downloaded" chapter turns out to be an error page.
 
-If you hit that, `worker-render.js` is the way through: same proxy, but
-`&render=1` runs real Chromium on Cloudflare's edge (Browser Rendering), so the
-page's own scripts run and the challenge clears as it would in a browser. It
-needs the Workers Paid plan and one package:
+If a site does start challenging the Worker, `worker-render.js` is the way
+through: same proxy, but `&render=1` runs real Chromium on Cloudflare's edge
+(Browser Rendering), so the page's own scripts run and the challenge clears as
+it would in a browser. It needs the Workers Paid plan and one package:
 
 ```sh
 npm i @cloudflare/puppeteer

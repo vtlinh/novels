@@ -7,12 +7,15 @@
 - `worker.js` + `wrangler.toml` are that Worker brought back for DEVELOPMENT
   ONLY — an authenticated, host-restricted fetch proxy so a session with no
   browser can read a real page (capturing the fixtures under
-  `android/app/src/test/resources/pages`, checking a selector against what a
+  `android/app/src/test/resources/pages.zip`, checking a selector against what a
   site actually serves). The app must never call it. `tools/README.md` covers
-  deploy and use; `node worker.test.mjs` checks its guards offline. A plain
-  Worker cannot pass novelfull.com's JS challenge — it reports that as a 409
-  rather than returning the interstitial as if it were the page, and
-  `worker-render.js` (Browser Rendering, paid plan) is the way through.
+  deploy and use; `node worker.test.mjs` checks its guards offline. It DOES
+  reach novelfull.com, which answers a direct curl with a JS interstitial —
+  measured, after an earlier note here predicted the opposite. What is
+  challenge-protected is individual novels (truyenfull's `-free` titles), and
+  those are unavailable to the app too. A challenge is reported as a 409 rather
+  than returned as if it were the page; `worker-render.js` (Browser Rendering,
+  paid plan) is the fallback if a whole site ever starts refusing.
 - The app fetches novel sites directly (no proxy/CORS). The
   `.github/workflows/android.yml` action builds a signed release APK on every
   push touching `android/` and, on `main`, publishes it (plus `version.json`)
