@@ -107,6 +107,38 @@ class ListingTest {
         assertTrue("page 89/88 unaccounted for breaks the tail", forgivable.isEmpty())
     }
 
+    /* A page that answers 200 with no chapters on it — a soft 404, a WAF
+       interstitial, a layout change — is put back with the pages that didn't
+       load and judged by this same rule. The two cases it has to separate:
+       a blank page in the MIDDLE takes its chapters into the dedupe as ones
+       the site no longer lists... */
+    @Test
+    fun `a blank page inside the book is a hole`() {
+        val forgivable = Listing.forgivableTailPages(
+            missed = setOf(45),
+            gone = setOf(45),            // blank pages are recorded as "not there"
+            loaded = (2..90).toSet() - 45,
+            lastPage = 90,
+        )
+        assertTrue(forgivable.isEmpty())
+    }
+
+    /* ...while a blank page past the last real one is the page count
+       over-reading, and blocking on it would leave the novel permanently
+       un-renamed and un-deduped. Note `loaded` must EXCLUDE the blank page:
+       counting it as loaded is what made the old check skip the last page
+       entirely, which is exactly where a soft 404 lands. */
+    @Test
+    fun `a blank page past the end is an over-read`() {
+        val forgivable = Listing.forgivableTailPages(
+            missed = setOf(90),
+            gone = setOf(90),
+            loaded = (2..89).toSet(),
+            lastPage = 90,
+        )
+        assertEquals(listOf(90), forgivable)
+    }
+
     @Test
     fun `first gap is where collecting stops`() {
         assertEquals(11, Listing.firstGap(setOf(11, 40), lastPage = 90))

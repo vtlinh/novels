@@ -131,6 +131,26 @@ class ChapterNameTest {
         assertFalse(Zips.isPartName("Chapter 5.txt.gz"))
     }
 
+    /* An UNCOMPRESSED chapter can't carry the mark as a suffix: SAF forces
+       the extension to match the mime type, so "Chapter 5.txt.part" written
+       as text/plain lands as "Chapter 5.txt.part.txt" — which this pattern
+       matches, so a half-written file would read as a finished chapter, be
+       indexed, and never be fetched again. */
+    @Test
+    fun `a half written plain chapter is invisible to the chapter pattern`() {
+        val tmp = Zips.partName("Chapter 5.txt")
+        assertFalse("a temporary name must not read as a chapter", re.matches(tmp))
+        assertFalse(re.matches("$tmp.txt"))
+        assertTrue("...and the sweep must still recognise it", Zips.isPartName(tmp))
+        assertTrue(Zips.isPartName("$tmp.txt"))
+    }
+
+    @Test
+    fun `the finished name is unchanged by the temporary one`() {
+        assertTrue(re.matches("Chapter 5.txt"))
+        assertFalse(Zips.isPartName("Chapter 5.txt"))
+    }
+
     @Test
     fun `a compressed chapter is not matched under its raw name`() {
         assertFalse(re.matches("Chapter 5.txt.gz"))

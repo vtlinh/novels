@@ -453,10 +453,23 @@ class DownloadEngine(
         class OnDisk(val name: String, val base: String, val docId: String, val size: Long)
         val chapterFiles = ArrayList<OnDisk>()
         var translatedId: String? = null
+        /* Half-written files from a run the system killed. They are invisible
+           to everything else by design, and the compress pass — the only other
+           thing that clears them — never runs at all with compression off, so
+           they piled up in the folder for good. We are listing it anyway. */
+        val halfWritten = ArrayList<String>()
         for (e in Saf.children(cr, treeUri, dirId)) {
             if (e.isDir) { if (e.name == "translated") translatedId = e.docId; continue }
+            if (Zips.isPartName(e.name)) { halfWritten.add(e.docId); continue }
             val base = e.name.removeSuffix(".gz")
             if (re.matches(base)) chapterFiles.add(OnDisk(e.name, base, e.docId, e.size))
+        }
+        for (docId in halfWritten) {
+            try {
+                DocumentsContract.deleteDocument(
+                    cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
+                )
+            } catch (e: Exception) {}
         }
         val extras = chapterFiles.filter { it.base !in assigned }
         if (extras.isEmpty()) return 0
@@ -685,12 +698,17 @@ class DownloadEngine(
         val doc = Jsoup.parse(first.html, base)
         saveCover(slug, doc)
         val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
-        var listingComplete = true
         /* Collect chapter links from the REAL chapter list only — pages also
            carry a "latest chapters" widget whose links come first in the HTML
            and would corrupt the site order. Whole-document fallback when the
            scoped container is missing or yields nothing new. */
-        fun addLinks(d: org.jsoup.nodes.Document) {
+        /* Returns how many chapter links the page held. A status check renames
+           files and deletes them, so it needs the same answer a download does:
+           a page that came back 200 with no chapters on it — a soft 404, a WAF
+           interstitial, a layout change — is a hole, not an empty page, and
+           acting on a listing with a hole in it renumbers the library against
+           a short list and deletes the chapters the hole hid. */
+        fun addLinks(d: org.jsoup.nodes.Document): Int {
             /* Returns how many chapter links the container HOLDS, not how many
                were new. A listing page whose chapters were all seen already is
                still a real chapter list — counting only new ones made it look
@@ -717,35 +735,66 @@ class DownloadEngine(
                 return found
             }
             val scope = d.selectFirst(site.listScope)
-            if (scope == null || collect(scope, inList = true) == 0) collect(d, inList = false)
+            val inScope = if (scope == null) 0 else collect(scope, inList = true)
+            return if (inScope == 0) collect(d, inList = false) else inScope
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
+        /* Held by page number and parsed in page order, exactly as the
+           download does it: discovery order is the site's order, and the
+           site's order is what names every file. */
+        val pageHtml = HashMap<Int, String>()
+        val missed = LinkedHashSet<Int>()
+        val gone = HashSet<Int>()
         var fetched = 1
         while (fetched < last) {
             val batch = ((fetched + 1)..last).toList()
             val htmls = arrayOfNulls<String>(batch.size)
+            val codes = IntArray(batch.size)
             coroutineScope {
                 val sem = Semaphore(10)
                 for ((i, p) in batch.withIndex()) {
-                    launch { sem.withPermit { htmls[i] = fetch(site.listPageUrl(base, slug, p)).html } }
+                    launch {
+                        sem.withPermit {
+                            val r = fetch(site.listPageUrl(base, slug, p))
+                            htmls[i] = r.html
+                            codes[i] = r.status
+                        }
+                    }
                 }
             }
-            for (html in htmls) {
-                if (html == null) { listingComplete = false; continue }
-                val d = Jsoup.parse(html, base)
-                addLinks(d)
-                last = maxOf(last, site.maxPage(d, slug))
+            for ((i, html) in htmls.withIndex()) {
+                val p = batch[i]
+                if (html == null) {
+                    missed.add(p)
+                    if (codes[i] == 404 || codes[i] == 410) gone.add(p)
+                    continue
+                }
+                pageHtml[p] = html
+                last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
             }
             fetched = batch.last()
         }
+        for (p in 2..last) {
+            val html = pageHtml[p] ?: continue
+            if (addLinks(Jsoup.parse(html, base)) > 0) continue
+            /* no chapters on it: not read, whatever it answered */
+            pageHtml.remove(p)
+            missed.add(p)
+            gone.add(p)
+            break
+        }
+        /* A tail of pages that report missing is the page count over-reading
+           the pagination — the one gap that is safe to write off, and only
+           under the conditions in Listing.forgivableTailPages. */
+        missed.removeAll(Listing.forgivableTailPages(missed, gone, pageHtml.keys, last).toSet())
         if (seen.isEmpty()) return@withContext null
         /* A status check renames and deletes but never downloads, so nothing
            here self-corrects. Acting on a listing with a page missing would
            renumber the library against a short list and delete the chapters
            the gap hid. Report nothing rather than something wrong. */
-        if (!listingComplete) {
-            log("! ${'$'}slug: a listing page failed to load — skipping this novel rather than acting on a partial list")
+        if (missed.isNotEmpty()) {
+            log("! $slug: listing page ${missed.first()} would not load — skipping this novel rather than acting on a partial list")
             return@withContext null
         }
         val siteOrdered = seen.values.toList()
@@ -1025,9 +1074,6 @@ class DownloadEngine(
         if (stopRequested) { status("Stopped."); return@withContext }
         forgiveOverRead()
         var listingComplete = missed.isEmpty()
-        /* the highest page that actually came back, so "no chapters on it" can
-           be told apart from "there is simply nothing after here" */
-        val lastLoaded = pageHtml.keys.maxOrNull() ?: 1
         /* A hole doesn't invalidate the whole listing — only what comes AFTER
            it. Chapters discovered before the first missing page are still at
            the positions they belong to, so take that prefix and leave the rest
@@ -1041,17 +1087,33 @@ class DownloadEngine(
            body, a WAF interstitial, or a layout the selectors no longer match.
            Those never reached `missed`, so the listing read as COMPLETE while
            a page of chapters was simply absent — and the dedupe then deleted
-           those chapters' files as ones the site no longer lists. A real
-           listing page holds chapter links; one that holds none, with real
-           pages after it, is a hole whatever status it returned. */
+           those chapters' files as ones the site no longer lists.
+
+           A page holding no chapter links was not really read, whatever it
+           answered, so it goes back with the pages that didn't load and the
+           SAME rule judges it: a hole inside the book stops the run, a blank
+           page past the last real one is the page count over-reading and is
+           forgiven. That rule is the fix for what was here before, which
+           excused a blank page whenever no later page had loaded — i.e. it
+           never examined the LAST page at all. A blank last page is exactly
+           where a soft 404 lands, and its fifty chapters went into the dedupe
+           as ones the site no longer lists. */
+        var blank = 0
         for (p in 2 until firstGap) {
             val html = pageHtml[p] ?: continue
-            if (addLinks(Jsoup.parse(html, base)) == 0 && p < lastLoaded) {
-                log("! listing page $p came back with no chapters on it — treating it as a gap")
-                missed.add(p)
-                listingComplete = false
-                firstGap = p
-                break
+            if (addLinks(Jsoup.parse(html, base)) > 0) continue
+            pageHtml.remove(p)
+            missed.add(p)
+            gone.add(p)
+            blank = p
+            break
+        }
+        if (blank > 0) {
+            forgiveOverRead()
+            listingComplete = missed.isEmpty()
+            firstGap = Listing.firstGap(missed, last)
+            if (!listingComplete) {
+                log("! listing page $blank came back with no chapters on it — treating it as a gap")
             }
         }
         if (!listingComplete) {
@@ -1517,18 +1579,47 @@ class DownloadEngine(
            there. (Only then: findFile is a query per call, and the normal
            path never collides.) */
         if (replace) {
-            try { dir.findFile(name)?.delete() } catch (e: Exception) {}
-            try { dir.findFile("$name.gz")?.delete() } catch (e: Exception) {}
+            /* A provider reports a refusal by RETURNING false; only a missing
+               file throws. Ignoring the result meant going on to create a name
+               that is still taken — which is the very thing this block exists
+               to prevent, and it left "Chapter 5 (1).txt" behind: invisible to
+               the reader, and deleted by the next sweep as surplus. Stop
+               instead; the chapter stays as it was and the next run retries. */
+            fun clear(n: String) {
+                val f = try { dir.findFile(n) } catch (e: Exception) { null } ?: return
+                val ok = try { f.delete() } catch (e: Exception) { false }
+                if (ok) return
+                /* delete() also returns false for a file that was already gone
+                   by the time we asked, so confirm before giving up */
+                if (try { f.exists() } catch (e: Exception) { true }) {
+                    throw RuntimeException("could not replace $n")
+                }
+            }
+            clear(name)
+            clear("$name.gz")
         }
         if (compress) {
             Zips.writeGzDoc(context.contentResolver, dir.uri, "$name.gz", text)
                 ?.let { return it.toString() }
         }
-        val f = dir.createFile("text/plain", name)
+        /* Write under a name nothing adopts and rename it into place once the
+           bytes are down — the same protection the compressed path has had.
+           Without it a process killed mid-write leaves a short file that has a
+           length and no recorded page, so the index counts it as the finished
+           chapter and never fetches it again: truncated for good. */
+        val tmp = Zips.partName(name)
+        val f = dir.createFile("text/plain", tmp)
             ?: throw RuntimeException("could not create $name")
-        val out = context.contentResolver.openOutputStream(f.uri)
-            ?: throw RuntimeException("could not open $name")
-        out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
-        return f.uri.toString()
+        try {
+            val out = context.contentResolver.openOutputStream(f.uri)
+                ?: throw RuntimeException("could not open $name")
+            out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+            val done = DocumentsContract.renameDocument(context.contentResolver, f.uri, name)
+                ?: throw RuntimeException("could not name $name")
+            return done.toString()
+        } catch (e: Exception) {
+            try { f.delete() } catch (e2: Exception) {}
+            throw e
+        }
     }
 }
