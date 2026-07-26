@@ -38,9 +38,23 @@ object Zips {
        in a novel folder with ".part" anywhere in its name — the tree can be a
        shared folder the user also keeps other things in, and a
        "Chapter 12.part2.txt" or someone else's "movie.mp4.part" was removed
-       silently and unrecoverably. We only ever create these two shapes. */
-    fun isPartName(name: String) =
-        name.endsWith(PART) || name.endsWith("$PART.gz") || name.startsWith(PART_HEAD)
+       silently and unrecoverably.
+
+       Anchoring was not enough either: ".part" IS the common convention for a
+       partial download, so `endsWith` still matched that same
+       "movie.mp4.part" — the file the comment above was written about — and
+       the sweep still deleted it. What identifies one of ours is not the mark
+       alone but what the mark is attached to, so strip it and require a
+       chapter name underneath. Nothing else is ours to remove. */
+    fun isPartName(name: String): Boolean {
+        val base = when {
+            name.startsWith(PART_HEAD) -> name.removePrefix(PART_HEAD)
+            name.endsWith("$PART.gz") -> name.removeSuffix("$PART.gz")
+            name.endsWith(PART) -> name.removeSuffix(PART)
+            else -> return false
+        }
+        return ChapterName.RE.matches(base.removeSuffix(".gz"))
+    }
 
     private const val GZREF = "gz::"
     fun gzRef(docId: String) = GZREF + docId
@@ -279,6 +293,23 @@ object Zips {
                    about to write, exactly as the compress direction verifies
                    its .gz before dropping the original. */
                 val existing = kids.firstOrNull { !it.isDir && it.name == target }
+                /* Which copy is newer, not which is bigger. A loose chapter
+                   beside a .gz is the shape the download itself leaves when
+                   the .gz name could not be cleared: the loose file is the one
+                   just written, and the compress direction says so in as many
+                   words. Rewriting it from the .gz — on a SIZE test, so any
+                   two chapters of equal length swapped silently — replaced
+                   fresh text with stale and then deleted the .gz, losing both
+                   copies of the new chapter. The index counts the file as
+                   present, so nothing re-fetches it. Keep the loose one and
+                   drop the archive. */
+                if (existing != null && existing.size > 0L) {
+                    val onDisk = Saf.readBytes(cr, treeUri, existing.docId)
+                    if (onDisk != null && !onDisk.contentEquals(bytes)) {
+                        if (deleteDoc(cr, docUri(treeUri, f.docId))) changed = true
+                        continue
+                    }
+                }
                 if (existing == null || existing.size != bytes.size.toLong()) {
                     /* a refused delete is reported, not thrown — going ahead
                        would create a second file under a minted name and then
