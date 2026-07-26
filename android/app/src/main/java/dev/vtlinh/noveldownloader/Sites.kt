@@ -126,8 +126,19 @@ object Sites {
             chapterNumFromUrl = { url ->
                 val seg = url.substringBefore('?').trimEnd('/')
                     .substringAfterLast('/').removeSuffix(".html")
+                /* The FIRST one. novelfull's slug embeds the chapter title,
+                   and the title itself frequently contains "Chapter N" —
+                   ".../chapter-20-chapter-20-chapter-19-mirror2.html" is a
+                   real one, printed as chapter 20. Across the captured
+                   listings 79 novelfull links carry more than one match and
+                   32 of those disagree; in all 32 the first is the site's
+                   printed number and the last is part of the title. (On
+                   truyenfull none of 3841 links has a second match, so this
+                   changes nothing there.) A wrong number here is written into
+                   the saved file's heading and is the sole input to
+                   legacyNames, which is what turns it into a rename. */
                 Regex("chapter-(\\d+)", RegexOption.IGNORE_CASE)
-                    .findAll(url).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
+                    .findAll(url).firstOrNull()?.groupValues?.get(1)?.toIntOrNull()
                     ?: Regex("^(\\d+)").find(seg)?.groupValues?.get(1)?.toIntOrNull()
             },
             /* novel page: <h3>Status:</h3><a href=".../status/Completed">Completed</a> */

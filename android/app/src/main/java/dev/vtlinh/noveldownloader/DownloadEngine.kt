@@ -821,12 +821,37 @@ class DownloadEngine(
        same way run() would and return the site chapter count, finished flag,
        author, and the chapters' filenames in the SITE's order — or null if
        the URL doesn't load as a novel page. */
-    suspend fun checkStatus(novelUrl: String, folderKey: String): SiteStatus? = withContext(Dispatchers.IO) {
+    /* `expectTitle` is the novel we believe we are asking about, and is set
+       whenever the URL is a GUESS rather than the one on record. Everything
+       below renames files by listing position, deletes what the listing does
+       not name, and overwrites the novel's URL, chapter order and totals — so
+       a page that turns out to be a different book must not get that far. */
+    suspend fun checkStatus(
+        novelUrl: String,
+        folderKey: String,
+        expectTitle: String? = null,
+    ): SiteStatus? = withContext(Dispatchers.IO) {
         val site = Sites.forUrl(novelUrl) ?: return@withContext null
         val (base, slug) = site.normalize(novelUrl)
         val first = fetch(base)
         if (first.html == null) return@withContext null
         val doc = Jsoup.parse(first.html, base)
+        if (expectTitle != null && expectTitle.isNotBlank()) {
+            val pageTitle = Extractor.stripAuthor(
+                doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
+                    ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
+                    ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
+                    ?: "",
+                Sites.author(doc),
+            )
+            if (!Extractor.sameNovelTitle(pageTitle, expectTitle)) {
+                log("! $slug: $base is \"$pageTitle\", not \"$expectTitle\" — not acting on it")
+                return@withContext null
+            }
+        }
+        /* after the identity check, not before: a guess that lands on a soft
+           404 or another book used to replace the novel's cover on its way to
+           being rejected */
         saveCover(slug, doc)
         val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
         /* Set when a page had no usable chapter-list container and the links
@@ -1216,7 +1241,16 @@ class DownloadEngine(
             }
             for ((i, html) in htmls.withIndex()) {
                 if (html == null) {
+                    /* `gone` is what forgiveness is granted on, so it has to
+                       say what the LAST attempt found, not what any attempt
+                       ever found. Only adding to it meant a page that 404'd
+                       once and then timed out stayed "definitely not there"
+                       for the rest of the run — a timeout is no evidence at
+                       all, and the forgiveness rule's own promise, that a
+                       page which did not report missing is never forgiven,
+                       quietly stopped holding. */
                     if (codes[i] == 404 || codes[i] == 410) gone.add(retry[i])
+                    else gone.remove(retry[i])
                     continue
                 }
                 pageHtml[retry[i]] = html

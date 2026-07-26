@@ -331,6 +331,44 @@ class RealChapterTest {
         }
     }
 
+    /* ...and the test above cannot show that on its own. `heading_number` is
+       BY DEFINITION the number printed on the page, so passing it as `num`
+       makes "the number we asked for" and "the number the page prints" the
+       same value — an extractor that ignored its argument and echoed the page
+       passes every case. Ask for a number the page does not print.
+
+       That is not a hypothetical input: a file is named by its POSITION in the
+       listing, so on any novel where the site's numbering and the listing
+       order have drifted — a listing that opens with an unnumbered extra, a
+       block of numbers the site skips — every chapter is written with a number
+       the page never printed.
+
+       The second half is the part that was silently broken. The page's own
+       heading is stripped from the body, and the strip used to be conditional
+       on the numbers agreeing — so exactly when they don't, the file went out
+       with two heading lines contradicting each other about which chapter it
+       is, and the second one is what a reader sees under the first. */
+    @Test
+    fun `a chapter asked for by position does not keep the page's own heading`() {
+        for (c in chapters) {
+            val n = (c.headingNumber ?: 1) + 500          // deliberately not the printed number
+            val out = Extractor.parseChapter(
+                Jsoup.parse(read(c.file), c.url), "", n, c.site.headingWord,
+            )
+            val first = out.lineSequence().first()
+            assertTrue(
+                "${c.file}: heading is \"$first\", expected to start \"${c.site.headingWord} $n\"",
+                first.startsWith("${c.site.headingWord} $n"),
+            )
+            val bodyFirst = out.substringAfter('\n', "").lineSequence().first()
+            assertFalse(
+                "${c.file}: the page's own heading survived into the body — \"$bodyFirst\"",
+                bodyFirst.startsWith("${c.site.headingWord} ${c.headingNumber}:") ||
+                    bodyFirst == "${c.site.headingWord} ${c.headingNumber}",
+            )
+        }
+    }
+
     /* The body has to be the chapter, not a fragment of it and not the whole
        page. Measured against the site's own container: well under it means
        the extractor is dropping the chapter, well over means it is keeping

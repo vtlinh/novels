@@ -107,6 +107,50 @@ class RenumberTest {
         assertEquals(listOf("Chapter 39.txt" to "uB"), plan.linkNow)
     }
 
+    /* THE WHOLE-LIBRARY SHIFT. A library adopted by the folder scan, or
+       rebuilt after a reinstall, is indexed by NAME with no page against any
+       row — so `byUrl` is empty, `spokenFor` with it, and the legacy guess is
+       the only thing matching anything. Where the site's own numbering runs
+       one behind the listing position (a listing whose first entry is an
+       unnumbered extra — a character page, a prologue the site doesn't
+       number) that guess lands on the previous chapter's file for EVERY
+       chapter, and the plan is a clean one-slot shift of the entire novel.
+
+       Nothing then reports it: each file is written back with its
+       neighbour's page, so the next run agrees with the corrupted mapping and
+       no chapter is ever re-fetched. A file sitting at another chapter's
+       position name is evidence of the position scheme, not the legacy one. */
+    @Test
+    fun `a legacy guess does not shift a library that is already named by position`() {
+        /* four listed chapters; the site numbers them 1..3 from position 2 on */
+        val plan = Renumber.plan(
+            slots(
+                "u0" to "Chapter 1.txt", "u1" to "Chapter 2.txt",
+                "u2" to "Chapter 3.txt", "u3" to "Chapter 4.txt",
+            ),
+            byUrl = emptyMap(),
+            onRecord = setOf("Chapter 1.txt", "Chapter 2.txt", "Chapter 3.txt", "Chapter 4.txt"),
+            legacy = mapOf("u1" to "Chapter 1.txt", "u2" to "Chapter 2.txt", "u3" to "Chapter 3.txt"),
+        )
+        assertTrue("the whole novel must not slide one slot: ${plan.pending}", plan.pending.isEmpty())
+        assertTrue("...and no file may be stamped with a neighbour's page", plan.claimedUrl.isEmpty())
+    }
+
+    /* ...without disarming the fallback where it belongs: a legacy name
+       outside the position scheme's namespace is still the only evidence a
+       pre-identity library offers. */
+    @Test
+    fun `a legacy guess outside the listing's own names still works`() {
+        val plan = Renumber.plan(
+            slots("uA" to "Chapter 1.txt", "uB" to "Chapter 2.txt"),
+            byUrl = emptyMap(),
+            onRecord = setOf("Chapter 900.txt", "Chapter 901.txt"),
+            legacy = mapOf("uA" to "Chapter 900.txt", "uB" to "Chapter 901.txt"),
+        )
+        assertEquals("Chapter 1.txt", plan.pending["Chapter 900.txt"])
+        assertEquals("Chapter 2.txt", plan.pending["Chapter 901.txt"])
+    }
+
     /* a legacy name the index has never heard of is not evidence of anything */
     @Test
     fun `a legacy guess at a file that is not on record is ignored`() {

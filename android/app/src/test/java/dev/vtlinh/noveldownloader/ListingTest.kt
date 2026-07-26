@@ -81,8 +81,7 @@ class ListingTest {
         assertTrue("only a page that says 'not there' can be an over-read", forgivable.isEmpty())
     }
 
-    /* a small novel must not be refused its one over-read page just because
-       lastPage/20 rounds to zero */
+    /* a small novel must not be refused its one over-read page */
     @Test
     fun `one page is always forgivable however small the novel`() {
         val forgivable = Listing.forgivableTailPages(
@@ -92,6 +91,24 @@ class ListingTest {
             lastPage = 3,
         )
         assertEquals(listOf(3), forgivable)
+    }
+
+    /* ...and a BIG novel gets exactly the same one page. The allowance used
+       to scale with the book — lastPage/20 — which contradicts the reason it
+       exists: an over-read is the pagination reporting one page too many, and
+       that is one page whether the novel has ten pages or a hundred and forty.
+       Scaled, it wrote off seven pages of a 140-page novel, and "Check status"
+       — which renames and deletes but never downloads — then deleted those
+       326 chapters and their paid translations with nothing to restore them. */
+    @Test
+    fun `the allowance does not grow with the novel`() {
+        val forgivable = Listing.forgivableTailPages(
+            missed = setOf(134, 135, 136, 137, 138, 139, 140),
+            gone = setOf(134, 135, 136, 137, 138, 139, 140),
+            loaded = setOf(133),
+            lastPage = 140,
+        )
+        assertEquals(emptyList<Int>(), forgivable)
     }
 
     /* the tail must be contiguous back to the last real page: a gap with a
