@@ -1,0 +1,24 @@
+# Cloudflare Worker config — the same shape as before the web app was retired
+# (#102), so a git-connected Workers Build deploys worker.js on every push to
+# main. The name is kept so the deploy lands on the existing worker and its
+# truyenfull.vtlinh87.workers.dev URL rather than minting a new one.
+#
+# One-time setup, from this directory:
+#   npx wrangler deploy                 # if the git-connected build isn't on
+#   npx wrangler secret put FETCH_TOKEN # paste a long random string
+#
+# Generate one with: openssl rand -hex 24
+# Never put the token in this file — it is committed. `secret put` stores it
+# on the worker, where the code reads it as env.FETCH_TOKEN.
+#
+# Note there is an unmerged branch (cloudflare/workers-autoconfig) carrying a
+# wrangler.jsonc with `assets.directory = "."`. Do not merge it as-is: with no
+# `main` it publishes the repository itself as static files — including the
+# Android sources and the ~2 MB of test fixtures — instead of running the
+# worker.
+name = "truyenfull"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+[observability]
+enabled = true
