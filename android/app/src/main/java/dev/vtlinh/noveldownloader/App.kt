@@ -25,12 +25,15 @@ class App : Application() {
             object : DefaultLifecycleObserver {
                 override fun onStart(owner: LifecycleOwner) {
                     Updater.autoCheck(applicationContext, scope)
+                    /* Downloads first. The compress pass stands aside for a
+                       running download, and starting it first meant it read
+                       runningFlow before the resumed queue had set it — so on
+                       every resume the two ran over the same folders anyway. */
+                    try { DownloadService.resumeQueueIfNeeded(applicationContext) } catch (e: Exception) {}
                     /* resume a compress/uncompress pass interrupted by an app
                        kill — done on foreground so starting the service is
                        allowed on Android 12+ */
                     try { CompressService.resumeIfNeeded(applicationContext) } catch (e: Exception) {}
-                    /* queued novel downloads survive restarts the same way */
-                    try { DownloadService.resumeQueueIfNeeded(applicationContext) } catch (e: Exception) {}
                 }
             },
         )

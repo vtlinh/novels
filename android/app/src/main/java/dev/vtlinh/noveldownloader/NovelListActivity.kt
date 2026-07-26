@@ -735,9 +735,7 @@ class NovelListActivity : AppCompatActivity() {
                                         val complete = res.completed && row.local >= res.total
                                         store.updateNovelCheck(folder, row.rec.slug, res.total, complete)
                                     } catch (e: Exception) {
-                                        DownloadService.logFlow.value =
-                                            (DownloadService.logFlow.value + "Could not save the check for ${row.display} — ${e.message}")
-                                                .takeLast(400)
+                                        DownloadService.appendLog("Could not save the check for ${row.display} — ${e.message}")
                                     }
                                     break
                                 }

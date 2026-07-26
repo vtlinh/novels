@@ -103,7 +103,7 @@ class ChapterListActivity : AppCompatActivity() {
                we finish — so writing our result afterwards would put back a
                listing that never had that chapter, and nothing clears it
                again once the download ends. */
-            val epoch = store?.chapterListEpoch() ?: -1L
+            val epoch = if (store != null && slug != null) store.chapterListEpoch(folder, slug) else -1L
             val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri))
             val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
                 ?: return Chapters(emptyList(), emptyMap(), emptyMap())

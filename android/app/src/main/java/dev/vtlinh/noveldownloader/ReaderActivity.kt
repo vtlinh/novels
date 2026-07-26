@@ -179,7 +179,8 @@ class ReaderActivity : AppCompatActivity() {
     private var spotLost = false
 
     private fun spotWritable(): Boolean =
-        !spotLost && DownloadEngine.renameEpoch.get() == chaptersEpoch
+        !spotLost &&
+            DownloadEngine.renameEpochOf(intent.getStringExtra("slug") ?: "") == chaptersEpoch
 
     /* remember the chapter being read, per novel — the chapter list reopens
        scrolled to (and highlighting) it */
@@ -312,7 +313,7 @@ class ReaderActivity : AppCompatActivity() {
             /* taken BEFORE the read: a rename landing during it leaves us with
                a list that is already behind, and the mismatch is what tells
                the save path to keep its hands off the corrected spot */
-            chaptersEpoch = DownloadEngine.renameEpoch.get()
+            chaptersEpoch = DownloadEngine.renameEpochOf(intent.getStringExtra("slug") ?: "")
             chapters = withContext(Dispatchers.IO) {
                 val slug = intent.getStringExtra("slug")
                 val order = slug?.let {
@@ -359,10 +360,8 @@ class ReaderActivity : AppCompatActivity() {
                saved THAT as the new place, so the real one was unrecoverable.
                Try the chapter number first, and if it truly isn't here, land
                at the top without overwriting what we couldn't honour. */
-            var startIdx = if (start != null) ch.ordered.indexOf(start) else 0
-            if (startIdx < 0 && start != null) {
-                startIdx = ch.ordered.indexOfFirst { sameChapter(start, it) }
-            }
+            var startIdx = ch.ordered.indexOf(start)
+            if (startIdx < 0) startIdx = ch.ordered.indexOfFirst { sameChapter(start, it) }
             if (startIdx < 0) {
                 startIdx = 0
                 spotLost = true

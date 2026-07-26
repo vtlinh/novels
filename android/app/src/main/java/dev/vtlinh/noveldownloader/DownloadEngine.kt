@@ -50,13 +50,24 @@ class DownloadEngine(
            listing instead of the files: below this it reads as ordinary site
            housekeeping, above it only a proportional check will do */
         private const val MAX_QUIET_DROPS = 10
+        /* a listing page that wouldn't load is usually throttling, so give it
+           room rather than spending all three retries inside one busy second */
+        private const val LIST_RETRY_MS = 7_000
 
         /* Bumped whenever a rename pass actually moves a file. A reader that
            is open on that novel is holding a list of names that just stopped
            being true, and it saves the reading spot BY NAME — so it needs to
            know its copy is stale rather than writing it back over the remap
-           the rename just did. */
-        val renameEpoch = java.util.concurrent.atomic.AtomicLong(0)
+           the rename just did. Keyed by novel: one counter for the library
+           meant a rename of ANY novel — a queued download, a status sweep —
+           silently stopped recording the place in the one being read. */
+        private val renameEpochs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+        fun renameEpochOf(slug: String): Long = renameEpochs[slug] ?: 0L
+
+        fun bumpRenameEpoch(slug: String) {
+            renameEpochs[slug] = renameEpochOf(slug) + 1
+        }
 
         /* app-private cover thumbnail for a novel */
         fun coverFile(context: Context, slug: String): java.io.File =
@@ -359,7 +370,7 @@ class DownloadEngine(
             claimedUrl[orig]?.let { store.linkUrl(folderKey, slug, finalName, it) }
         }
         remapSavedSpot(slug, applied)
-        if (applied.isNotEmpty()) renameEpoch.incrementAndGet()
+        if (applied.isNotEmpty()) bumpRenameEpoch(slug)
         if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
         if (evicted > 0) log("$evicted file(s) the site no longer lists moved out of the numbering")
     }
@@ -520,7 +531,14 @@ class DownloadEngine(
            about the LISTING, not about the files, so say so and keep them. */
         val unlisted = extras.count { val u = fileUrl[it.base]; u != null && u !in listedUrls }
         val identified = fileUrl.size
-        val trustDrops = unlisted <= MAX_QUIET_DROPS || unlisted * 5 <= identified
+        /* Half, not a fifth. A listing that is actually broken loses nearly
+           everything — the widget-only fallback finds ten links out of seven
+           thousand — while a site genuinely purging chapters takes a slice. At
+           a fifth, a real purge of 15 from a 60-chapter novel tripped the
+           guard, and the arithmetic is identical on every later run, so those
+           files were parked as "(unlisted)" for good while the log promised to
+           reconsider "until it reads correctly". */
+        val trustDrops = unlisted <= MAX_QUIET_DROPS || unlisted * 2 <= identified
         if (!trustDrops) {
             log("! the site's list is missing $unlisted of the $identified chapters we have on record")
             log("! that is too much to be chapters the site removed — keeping them all until it reads correctly")
@@ -883,37 +901,63 @@ class DownloadEngine(
         var listPass = 0
         while (missed.isNotEmpty() && listPass < 3 && !stopRequested) {
             listPass++
+            /* Wait between passes. Most of what lands here is throttling, and
+               three immediate re-fetches are three more refusals — the whole
+               novel then failed over one busy moment. */
+            var waited = 0
+            while (waited < LIST_RETRY_MS && !stopRequested) {
+                status("Listing incomplete — retrying ${missed.size} page(s) in ${(LIST_RETRY_MS - waited) / 1000}s…")
+                kotlinx.coroutines.delay(500)
+                waited += 500
+            }
+            if (stopRequested) break
             status("Re-fetching ${missed.size} listing page(s) — pass $listPass/3…")
             val retry = missed.toList()
             val htmls = arrayOfNulls<String>(retry.size)
+            val codes = IntArray(retry.size)
             coroutineScope {
                 val sem = Semaphore(conc)
                 for ((i, p) in retry.withIndex()) {
                     launch {
                         sem.withPermit {
-                            if (!stopRequested) htmls[i] = fetch(site.listPageUrl(base, slug, p)).html
+                            if (!stopRequested) {
+                                val r = fetch(site.listPageUrl(base, slug, p))
+                                htmls[i] = r.html
+                                codes[i] = r.status
+                            }
                         }
                     }
                 }
             }
             for ((i, html) in htmls.withIndex()) {
-                if (html == null) continue
+                if (html == null) {
+                    /* it answered "not there" this time — the page count simply
+                       over-read the pagination, so it was never a hole */
+                    if (codes[i] == 404 || codes[i] == 410) missed.remove(retry[i])
+                    continue
+                }
                 pageHtml[retry[i]] = html
                 missed.remove(retry[i])
             }
         }
         if (stopRequested) { status("Stopped."); return@withContext }
         val listingComplete = missed.isEmpty()
-        for (p in 2..last) pageHtml[p]?.let { addLinks(Jsoup.parse(it, base)) }
-        /* Downloading from a partial listing is not a smaller download — it is
-           a WRONG one. Every chapter after the hole is one position early, so
-           each would be written over the file belonging to the chapter before
-           it, taking that chapter's recorded page with it. Stop instead. */
+        /* A hole doesn't invalidate the whole listing — only what comes AFTER
+           it. Chapters discovered before the first missing page are still at
+           the positions they belong to, so take that prefix and leave the rest
+           for a run that can read the whole thing. Refusing outright meant one
+           throttled page out of ninety downloaded nothing at all; naming from
+           the full set would have written every later chapter over its
+           neighbour. Everything destructive is already gated on
+           listingComplete, so a prefix run only ever adds. */
+        val firstGap = missed.minOrNull() ?: (last + 1)
+        for (p in 2 until firstGap) pageHtml[p]?.let { addLinks(Jsoup.parse(it, base)) }
         if (!listingComplete) {
-            log("! ${missed.size} listing page(s) would not load after 3 retries — the chapter list is incomplete")
-            log("Not downloading: positions taken from a partial list would name files after the wrong chapters.")
-            status("Error: could not read the whole chapter list — try again later")
-            return@withContext
+            log("! ${missed.size} listing page(s) would not load — the chapter list is incomplete")
+            log(
+                "Downloading only the ${seen.size} chapter(s) listed before page $firstGap: " +
+                    "past the gap every position would be wrong. Re-run later for the rest.",
+            )
         }
 
         val store = DownloadStore(context)
