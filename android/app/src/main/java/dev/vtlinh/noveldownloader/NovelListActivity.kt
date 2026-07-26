@@ -709,12 +709,21 @@ class NovelListActivity : AppCompatActivity() {
                     for (row in targets) {
                         launch {
                             sem.withPermit {
-                                val urls = row.rec.url.ifEmpty { null }?.let { listOf(it) }
-                                    ?: listOf(
-                                        "https://truyenfull.today/${row.rec.slug}/",
-                                        "https://novelfull.com/${row.rec.slug}.html",
-                                        "https://truyenfull.live/${row.rec.slug}/",
-                                    )
+                                /* Recorded URL first, then the other hosts —
+                                   not INSTEAD of them. A novel whose recorded
+                                   host stops serving it (these sites move
+                                   between .today and .live) returned null for
+                                   its one URL and was simply never checked
+                                   again, on this sweep or any future one,
+                                   with nothing said about why. */
+                                val urls = (
+                                    row.rec.url.ifEmpty { null }?.let { listOf(it) }.orEmpty() +
+                                        listOf(
+                                            "https://truyenfull.today/${row.rec.slug}/",
+                                            "https://novelfull.com/${row.rec.slug}.html",
+                                            "https://truyenfull.live/${row.rec.slug}/",
+                                        )
+                                    ).distinct()
                                 /* The busy test at snapshot time is not enough:
                                    this sweep runs three wide for minutes, and
                                    a download started after it began gets its
@@ -734,7 +743,11 @@ class NovelListActivity : AppCompatActivity() {
                                        instead of costing one novel its
                                        update. */
                                     try {
-                                        if (row.rec.url.isEmpty()) {
+                                        /* ...and record the URL that answered,
+                                           so the next sweep doesn't start by
+                                           asking the host that no longer has
+                                           it. */
+                                        if (u != row.rec.url) {
                                             store.registerNovel(folder, row.rec.slug, u, row.display, 0L)
                                         }
                                         res.author?.let { store.setAuthor(folder, row.rec.slug, it) }

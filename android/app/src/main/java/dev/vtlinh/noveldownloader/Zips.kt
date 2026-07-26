@@ -17,6 +17,16 @@ object Zips {
        else in the app matches a name ending in it, which is the point */
     const val PART = ".part"
 
+    /* For a PLAIN chapter the mark has to go in FRONT of the name. SAF forces
+       the extension to match the mime type, so "Chapter 5.txt.part" written as
+       text/plain comes back as "Chapter 5.txt.part.txt" — which the chapter
+       pattern happily matches (it ends in ".txt"), making the half-written
+       file visible as a chapter: exactly what the temporary name exists to
+       prevent. Nothing matches a name that doesn't begin with "Chapter". */
+    const val PART_HEAD = "part~"
+
+    fun partName(name: String) = "$PART_HEAD$name"
+
     /* Both tails, because SAF does not take a display name literally:
        ExternalStorageProvider runs it through buildUniqueFile, which forces
        the extension to match the mime type — ask for "Chapter 5.txt.gz.part"
@@ -29,7 +39,8 @@ object Zips {
        shared folder the user also keeps other things in, and a
        "Chapter 12.part2.txt" or someone else's "movie.mp4.part" was removed
        silently and unrecoverably. We only ever create these two shapes. */
-    fun isPartName(name: String) = name.endsWith(PART) || name.endsWith("$PART.gz")
+    fun isPartName(name: String) =
+        name.endsWith(PART) || name.endsWith("$PART.gz") || name.startsWith(PART_HEAD)
 
     private const val GZREF = "gz::"
     fun gzRef(docId: String) = GZREF + docId
