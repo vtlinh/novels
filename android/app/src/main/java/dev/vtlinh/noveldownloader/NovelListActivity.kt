@@ -334,7 +334,14 @@ class NovelListActivity : AppCompatActivity() {
                    matching by slug, where two folders that slugify alike are
                    told apart by nothing but enumeration order. */
                 try { store.setDirName(folder, slug, name) } catch (e: Exception) {}
-                try { store.claimFolderName(folder, name, slug) } catch (e: Exception) {}
+                /* NOT claimFolderName. The slug here is invented from the
+                   directory name, and the claim is an INSERT OR REPLACE keyed
+                   on the name — so adopting a folder whose real novel the scan
+                   didn't recognise (one living under a collision suffix, say)
+                   took the claim away from it, and its next download stepped
+                   aside into a fresh folder and re-downloaded and re-translated
+                   the whole book. Recording which directory this row uses is
+                   safe; claiming the name against a made-up slug is not. */
             }
             store.markScanned(folder, System.currentTimeMillis())
         } catch (e: Exception) {
@@ -660,6 +667,15 @@ class NovelListActivity : AppCompatActivity() {
                         contentResolver,
                         DocumentsContract.buildDocumentUriUsingTree(treeUri, dir.first),
                     )
+                } else if (row.local > 0) {
+                    /* Not found, but the index says this novel has chapters —
+                       so the folder is out there under a name we don't know
+                       (renamed in a file manager, recreated by a restore).
+                       Wiping the record anyway left a directory of chapters
+                       nothing in the app could name, list or remove, with the
+                       novel hidden from the Library for good. Only a novel
+                       with nothing on disk is safe to forget this way. */
+                    deleted = false
                 }
             } catch (e: Exception) { deleted = false }
             if (!deleted) {

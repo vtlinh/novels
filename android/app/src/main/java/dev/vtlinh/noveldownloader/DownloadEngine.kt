@@ -704,21 +704,34 @@ class DownloadEngine(
         return gone
     }
 
-    /* Is the chapter already at this name byte-identical to what we just
-       fetched? Answers "did this name change hands", which is the question
-       the translation beside it turns on. False when nothing is there — then
-       there is no translation to worry about either. */
-    private fun sameOnDisk(dir: DocumentFile, name: String, body: String): Boolean {
+    /* Is the chapter already at this name the SAME CHAPTER we just fetched?
+
+       By its heading, not by its bytes. Byte-identity looked stricter and was
+       useless: the files this matters for were written by an older build, and
+       any change to the extractor — an ad pattern, a whitespace rule, the
+       heading format itself — shifts a byte. Every chapter then read as
+       "different" and its translation was dropped, which is the whole novel
+       re-bought at the API's price on the first run after an update. The
+       heading carries the chapter's number and title and is stable across all
+       of that; when a name changes hands, it is the first thing that changes.
+
+       False when nothing is there — then there is no translation to worry
+       about either. */
+    private fun sameOnDisk(look: (String) -> DocumentFile?, name: String, body: String): Boolean {
+        val want = body.lineSequence().firstOrNull()?.trim() ?: return false
         val cr = context.contentResolver
-        for (n in listOf(name, "$name.gz")) {
-            val f = try { dir.findFile(n) } catch (e: Exception) { null } ?: continue
+        for (n in listOf("$name.gz", name)) {
+            val f = try { look(n) } catch (e: Exception) { null } ?: continue
             val text = try {
                 cr.openInputStream(f.uri)?.use { ins ->
                     if (n.endsWith(".gz")) java.util.zip.GZIPInputStream(ins).use { it.readBytes() }
                     else ins.readBytes()
                 }?.toString(Charsets.UTF_8)
             } catch (e: Exception) { null } ?: continue
-            return text == body
+            /* an empty stub says nothing — try the other form before giving up */
+            val head = text.lineSequence().firstOrNull()?.trim().orEmpty()
+            if (head.isEmpty()) continue
+            return head == want
         }
         return false
     }
@@ -739,6 +752,10 @@ class DownloadEngine(
        have that chapter" apart from "this listing is a different site" */
     private fun hostOf(url: String): String? =
         try { java.net.URI(url).host?.lowercase() } catch (e: Exception) { null }
+
+    /* the part that says WHICH chapter, independent of which host served it */
+    private fun pathOf(url: String): String? =
+        try { java.net.URI(url).path?.trimEnd('/')?.lowercase()?.ifEmpty { null } } catch (e: Exception) { null }
 
     /* How chapters were named before the URL map existed: the site's own
        number, plus a suffix for a repeat. Only used to recognise files
@@ -801,6 +818,10 @@ class DownloadEngine(
         val doc = Jsoup.parse(first.html, base)
         saveCover(slug, doc)
         val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
+        /* Set when a page had no usable chapter-list container and we had to
+           read the whole document instead. Everything destructive is off in
+           that case: the links we get are a widget, not the listing. */
+        var fellBack = false
         /* Collect chapter links from the REAL chapter list only — pages also
            carry a "latest chapters" widget whose links come first in the HTML
            and would corrupt the site order. Whole-document fallback when the
@@ -839,7 +860,15 @@ class DownloadEngine(
             }
             val scope = d.selectFirst(site.listScope)
             val inScope = if (scope == null) 0 else collect(scope, inList = true)
-            return if (inScope == 0) collect(d, inList = false) else inScope
+            if (inScope > 0) return inScope
+            /* The site's own chapter-list container is what identifies a
+               chapter and fixes its ORDER. Without it we are reading the
+               whole page, where the only chapter links are the "latest
+               chapters" widget — a handful, in the wrong order. That is not a
+               short listing, it is a different document, and treating it as
+               the truth deleted the rest of the novel. */
+            fellBack = true
+            return collect(d, inList = false)
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
@@ -945,6 +974,10 @@ class DownloadEngine(
             log("! $slug: listing page ${missed.first()} would not load — skipping this novel rather than acting on a partial list")
             throw PartialListing()
         }
+        if (fellBack) {
+            log("! $slug: the site's chapter list wasn't there — not acting on what's left of the page")
+            throw PartialListing()
+        }
         if (seen.isEmpty()) return@withContext null
         val siteOrdered = seen.values.toList()
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
@@ -1022,6 +1055,8 @@ class DownloadEngine(
         )
 
         val seen = LinkedHashMap<String, Chapter>()
+        /* see checkStatus */
+        var fellBack = false
         /* Collect chapter links from the REAL chapter list only — pages also
            carry a "latest chapters" widget whose links come first in the HTML
            and would corrupt the site order. Whole-document fallback when the
@@ -1060,7 +1095,11 @@ class DownloadEngine(
             }
             val scope = d.selectFirst(site.listScope)
             val inScope = if (scope == null) 0 else collect(scope, inList = true)
-            return if (inScope == 0) collect(d, inList = false) else inScope
+            if (inScope > 0) return inScope
+            /* see checkStatus: a whole-document fallback is the "latest
+               chapters" widget, not the chapter list */
+            fellBack = true
+            return collect(d, inList = false)
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
@@ -1290,6 +1329,10 @@ class DownloadEngine(
                collecting there and stays additive. */
             blank = p
             break
+        }
+        if (fellBack) {
+            listingComplete = false
+            log("! the site's chapter list wasn't where it should be — downloading only what the page shows")
         }
         if (blank > 0) {
             forgiveOverRead()
@@ -1576,16 +1619,27 @@ class DownloadEngine(
             if (!listingComplete) return true
             val owner = ownerOf[name] ?: return true   // unclaimed — a legacy save
             if (owner == ch.url) return true
-            /* A page from a different HOST — these novels are served from
-               several, and the status sweep records whichever answered — is
-               not evidence either way. Calling it settled looked cheap, but
-               it is a claim that the file is CORRECT, and nothing else in the
-               app would ever revisit it: the rename pass can't place a
-               cross-host page and the dedupe won't compare one, so a file
-               holding its neighbour's text stayed wrong for good. Re-fetch
-               it. That is free, it records the new host so the next run is
-               settled, and the translation beside it is judged on whether the
-               text actually changed rather than on this guess. */
+            /* A page from a different HOST. These novels are served from
+               several — the status sweep records whichever answered — and the
+               two answers are almost always the same book: the path carries
+               the slug and the chapter, so `/tu-tien/chuong-100/` on .today
+               and on .live is one chapter with two addresses. Migrate the
+               identity to the address this run is using and the file is
+               settled, with nothing re-downloaded and nothing re-translated.
+               Only a genuinely different path is a different chapter.
+
+               Calling every mismatch settled (which is what this did) left
+               files holding their neighbours' text with nothing in the app
+               able to notice; calling every mismatch stale re-downloaded whole
+               novels on a host blip. */
+            if (hostOf(owner) != hostOf(ch.url)) {
+                if (pathOf(owner) != null && pathOf(owner) == pathOf(ch.url)) {
+                    try { store.linkUrl(folderKey, slug, name, ch.url) } catch (e: Exception) {}
+                    return true
+                }
+                stale.add(name)
+                return false
+            }
             stale.add(name)
             return false
         }
@@ -1596,6 +1650,20 @@ class DownloadEngine(
         if (stale.isNotEmpty()) log("${stale.size} chapter file(s) hold the wrong page — re-fetching those")
         val skipped = chapters.size - toFetch.size
         if (skipped > 0) log("skip $skipped already-downloaded chapter(s)")
+
+        /* One listing of the folder, shared. `findFile` is a full
+           listFiles()+getName() sweep per call, so the replace path — which
+           looks a name up to clear it, and again to read what is there —
+           turned a re-fetch of an N-chapter novel into O(N^2) binder queries.
+           Only built when something is actually going to be replaced. */
+        val diskIndex: Map<String, DocumentFile>? =
+            if (refetchAll || stale.isNotEmpty()) {
+                try { dir.listFiles().mapNotNull { f -> f.name?.let { it to f } }.toMap() }
+                catch (e: Exception) { null }
+            } else null
+        val look: (String) -> DocumentFile? = { n ->
+            diskIndex?.get(n) ?: try { dir.findFile(n) } catch (e: Exception) { null }
+        }
 
         val done = AtomicInteger(0)
         val saved = AtomicInteger(0)
@@ -1648,10 +1716,10 @@ class DownloadEngine(
                                    `stale` for none, so a rule keyed on `stale`
                                    fires exactly nowhere on the one path that
                                    overwrites blindly. */
-                                val sameText = replacing && sameOnDisk(dir, ch.filename!!, body)
+                                val sameText = replacing && sameOnDisk(look, ch.filename!!, body)
                                 val uri = writeFile(
                                     dir, ch.filename!!, body, compressOn,
-                                    replace = replacing,
+                                    replace = replacing, look = look,
                                 )
                                 /* The translation under that name belongs to
                                    the chapter we just overwrote, not to this
@@ -1812,7 +1880,14 @@ class DownloadEngine(
        rewrite and delete — three times the I/O for the same file. Falls
        back to a plain write if the provider won't take the .gz, and that
        pass still catches anything left loose. */
-    private fun writeFile(dir: DocumentFile, name: String, text: String, compress: Boolean, replace: Boolean = false): String {
+    private fun writeFile(
+        dir: DocumentFile,
+        name: String,
+        text: String,
+        compress: Boolean,
+        replace: Boolean = false,
+        look: ((String) -> DocumentFile?)? = null,
+    ): String {
         /* SAF does not overwrite: creating a name that already exists yields
            "Chapter 5 (1).txt", which matches no pattern the app knows — the
            reader can't see it and the surplus sweep would delete the copy we
@@ -1826,7 +1901,7 @@ class DownloadEngine(
            the reader, and deleted by the next sweep as surplus. Stop
            instead; the chapter stays as it was and the next run retries. */
         fun clear(n: String) {
-            val f = try { dir.findFile(n) } catch (e: Exception) { null } ?: return
+            val f = try { look?.invoke(n) ?: dir.findFile(n) } catch (e: Exception) { null } ?: return
             val ok = try { f.delete() } catch (e: Exception) { false }
             if (ok) return
             /* delete() also returns false for a file that was already gone
@@ -1860,7 +1935,7 @@ class DownloadEngine(
                that would delete a perfectly good chapter — the very thing this
                narrowing exists to prevent. */
             val squatterEmpty = !replace && listOf(name, "$name.gz").any { n ->
-                val f = try { dir.findFile(n) } catch (e: Exception) { null }
+                val f = try { look?.invoke(n) ?: dir.findFile(n) } catch (e: Exception) { null }
                 if (f == null || !f.isFile) return@any false
                 val bytes = try {
                     context.contentResolver.openInputStream(f.uri)?.use { it.readBytes() }
