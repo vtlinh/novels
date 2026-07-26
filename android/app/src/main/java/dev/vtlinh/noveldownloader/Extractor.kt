@@ -19,7 +19,14 @@ object Extractor {
         RegexOption.IGNORE_CASE,
     )
     private val JUNK_CLASS_RE = Regex("(^|[^a-z])(ads?|banner|notice|lock(ed)?|unlock)([^a-z]|$)", RegexOption.IGNORE_CASE)
-    private val HEADING_RE = Regex("(?:Ch[ưu]ơ?ng|Chapter)\\s*(\\d+)\\s*[:\\-–]?\\s*(.*)", RegexOption.IGNORE_CASE)
+    /* The fractional part is consumed but not captured. Without it "(\d+)"
+       stopped at the decimal point and the separator is optional, so the rest
+       of the number fell into the TITLE: "Chapter 1.5: Side Story" parsed as
+       number 1 titled ".5: Side Story", and the rewritten heading then read
+       "Chapter 1: .5: Side Story" — with the real one already stripped from
+       the body, so the original was gone rather than merely duplicated. */
+    private val HEADING_RE =
+        Regex("(?:Ch[ưu]ơ?ng|Chapter)\\s*(\\d+)(?:\\.\\d+)?\\s*[:\\-–]?\\s*(.*)", RegexOption.IGNORE_CASE)
     private val HEADING_ONLY_RE = Regex("^(?:Ch[ưu]ơ?ng|Chapter)\\s*\\d+$", RegexOption.IGNORE_CASE)
     private val HEADING_START_RE = Regex("^(?:Ch[ưu]ơ?ng|Chapter)\\s*\\d+", RegexOption.IGNORE_CASE)
 
@@ -164,6 +171,19 @@ object Extractor {
             .replace("\"", "'").replace("<", "(").replace(">", ")")
             .replace(Regex("[?*]"), "")
             .replace(Regex("[^\\x20-\\x7E]"), " ")
-            .replace(Regex("\\s+"), " ").trim().trimEnd('.', ' ')
-            .take(180)
+            .replace(Regex("\\s+"), " ").trim()
+            /* Truncate BEFORE trimming the tail, not after: cutting at 180
+               could put a '.' or ' ' back on the end, and a FAT/exFAT provider
+               silently drops those when creating the directory — so the name
+               we looked for never matched the one on disk and every run made
+               a fresh "(1)" folder and re-downloaded the whole novel. */
+            .take(180).trimEnd('.', ' ')
+
+    /* The folder to save a novel in. sanitize() can legitimately return "" —
+       a title that is all CJK, or literally "...", reduces to nothing — and
+       an empty name is one the provider refuses, so the download died with
+       "could not create folder" and no way for the user to intervene, since
+       the name is derived rather than entered. */
+    fun folderName(title: String, slug: String): String =
+        sanitize(title).ifEmpty { sanitize(slug) }.ifEmpty { "novel" }
 }

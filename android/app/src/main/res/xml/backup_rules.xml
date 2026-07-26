@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup everything EXCEPT the "app" preferences file.
+
+  It holds the Anthropic API key in cleartext, and with the default
+  allowBackup="true" and no rules at all, shared_prefs/app.xml went into the
+  user's Google Drive backup and into any device-to-device transfer — so
+  restoring the app on any device signed into that account replayed the key
+  onto it. The same file also carries the persisted SAF tree URI, which would
+  restore as a grant the new device does not actually hold.
+
+  Used for API 30 and below (android:fullBackupContent).
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="app.xml" />
+</full-backup-content>

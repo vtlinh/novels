@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 31+ equivalent of backup_rules.xml. Both destinations have to be listed
+  separately here: cloud-backup covers Google Drive backup, device-transfer
+  covers a direct phone-to-phone move. The "app" preferences file is excluded
+  from both because it stores the Anthropic API key in cleartext, plus the
+  persisted SAF tree URI, which is meaningless on another device.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="app.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="app.xml" />
+    </device-transfer>
+</data-extraction-rules>
