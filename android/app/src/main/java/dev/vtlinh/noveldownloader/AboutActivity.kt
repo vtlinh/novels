@@ -3,16 +3,20 @@ package dev.vtlinh.noveldownloader
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
-/* About: app description, author, source, and a manual "Check for updates"
-   button that downloads and installs a newer published build if one exists. */
+/* About: app description, author, source, and the update control. Nothing
+   here installs on its own — the button downloads a newer build and then
+   turns into "Install", which is the only thing that commits it. That
+   mirrors the notification the background check posts. */
 class AboutActivity : AppCompatActivity() {
+
+    private val btn by lazy { findViewById<Button>(R.id.checkUpdateBtn) }
+    private val status by lazy { findViewById<TextView>(R.id.updateStatus) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,12 +36,25 @@ class AboutActivity : AppCompatActivity() {
             } catch (e: Exception) {}
         }
 
-        findViewById<Button>(R.id.checkUpdateBtn).setOnClickListener { checkForUpdate() }
+        btn.setOnClickListener {
+            /* an already-downloaded build turns this into the Install tap */
+            val pending = Updater.pendingUpdateName(this)
+            if (pending != null) installPending(pending) else checkForUpdate()
+        }
+    }
+
+    /* reflect whatever the background check left on disk */
+    private fun showPendingIfAny(): Boolean {
+        val pending = Updater.pendingUpdateName(this) ?: run {
+            btn.text = "Check for updates"
+            return false
+        }
+        btn.text = "Install v$pending"
+        status.text = "v$pending is downloaded and ready to install."
+        return true
     }
 
     private fun checkForUpdate() {
-        val btn = findViewById<Button>(R.id.checkUpdateBtn)
-        val status = findViewById<TextView>(R.id.updateStatus)
         btn.isEnabled = false
         status.text = "Checking…"
         lifecycleScope.launch {
@@ -47,46 +64,42 @@ class AboutActivity : AppCompatActivity() {
                 btn.isEnabled = true
                 return@launch
             }
-            val current = Updater.currentVersionCode(this@AboutActivity)
-            if (latest.first <= current) {
+            if (latest.first <= Updater.currentVersionCode(this@AboutActivity)) {
                 status.text = "You're on the latest version (v${latest.second})."
                 btn.isEnabled = true
                 return@launch
             }
-            /* the OS blocks installs unless "Install unknown apps" is granted
-               to this app — send the user to the toggle */
-            if (!Updater.canInstall(this@AboutActivity)) {
-                status.text = "Allow Novels to install updates in the screen that opens, " +
-                    "then tap Check for updates again."
-                Updater.openInstallPermission(this@AboutActivity)
-                btn.isEnabled = true
-                return@launch
-            }
-            /* newer build available → download (once per version) and install */
             status.text = "Downloading v${latest.second}…"
             val apk = Updater.ensureApk(this@AboutActivity, latest.first)
+            btn.isEnabled = true
             if (apk == null) {
                 status.text = "Update download failed — try again."
-                btn.isEnabled = true
                 return@launch
             }
-            status.text = "Installing v${latest.second}…"
-            try {
-                Updater.abandonSessions(this@AboutActivity)   // clear any stuck session
-                Updater.install(this@AboutActivity, apk)
-                /* returning here (via onResume) means the install prompt was
-                   dismissed — offer a retry */
-                installInFlight = true
-                /* keep the button tappable: a healthy silent install kills the
-                   process within seconds, so still sitting here means the
-                   session stalled — another tap abandons it and re-commits
-                   the cached APK (no re-download) */
-                status.text = "Installing v${latest.second}… — tap Check for updates again if nothing happens."
-                btn.isEnabled = true
-            } catch (e: Exception) {
-                status.text = "Install failed — ${e.message}"
-                btn.isEnabled = true
-            }
+            /* downloaded, not installed: the button becomes Install */
+            Updater.rememberPendingName(this@AboutActivity, latest.second)
+            if (!showPendingIfAny()) status.text = "Update download failed — try again."
+        }
+    }
+
+    private fun installPending(versionName: String) {
+        /* the OS blocks installs unless "Install unknown apps" is granted to
+           this app — send the user to the toggle */
+        if (!Updater.canInstall(this)) {
+            status.text = "Allow Novels to install updates in the screen that opens, " +
+                "then tap Install again."
+            Updater.openInstallPermission(this)
+            return
+        }
+        Updater.cancelUpdateNotification(this)
+        /* a healthy install kills this process within seconds, so still being
+           here afterwards means the session stalled — another tap abandons it
+           and re-commits the cached APK (no re-download) */
+        status.text = "Installing v$versionName… — tap again if nothing happens."
+        installInFlight = true
+        if (!Updater.installPending(this)) {
+            installInFlight = false
+            status.text = "Install failed — try again."
         }
     }
 
@@ -94,11 +107,15 @@ class AboutActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (installInFlight) {
-            installInFlight = false
-            findViewById<Button>(R.id.checkUpdateBtn).isEnabled = true
-            findViewById<TextView>(R.id.updateStatus).text =
-                "Install was cancelled — tap Check for updates to retry."
+        val wasInstalling = installInFlight
+        installInFlight = false
+        val pending = showPendingIfAny()
+        /* back here while an install was in flight means the confirmation
+           was dismissed — say so, after the label refresh so it isn't
+           immediately overwritten */
+        if (wasInstalling && pending) {
+            btn.isEnabled = true
+            status.text = "Install was cancelled — tap Install to retry."
         }
     }
 }

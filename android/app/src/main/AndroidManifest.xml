@@ -107,6 +107,11 @@
             android:name=".InstallReceiver"
             android:exported="false" />
 
+        <!-- "Install" on the update-ready notification -->
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="false" />
+
         <!-- routes Bluetooth / wired media-button events to the TTS session -->
         <receiver
             android:name="androidx.media.session.MediaButtonReceiver"

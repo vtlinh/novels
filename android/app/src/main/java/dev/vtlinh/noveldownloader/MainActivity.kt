@@ -163,23 +163,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     /* Check for a newer published version whenever the app returns to the
-       foreground, at most once a minute. When one is found, always surface
-       the sticky banner on the home screen — tapping it downloads and
-       installs. (We don't auto-install from here so the update is always
-       visible and user-initiated.) */
+       foreground, at most once a minute. When one is found the APK is pulled
+       down immediately, so it's already on disk by the time the user decides
+       — but it is never installed for them: the sticky banner waits for a
+       tap, since installing restarts the app. */
     private fun checkForUpdate() {
         if (updateFound) return
         val now = System.currentTimeMillis()
         if (now - lastUpdateCheck < 60_000) return
         lastUpdateCheck = now
         lifecycleScope.launch {
-            val latest = Updater.latestVersion()
-            if (latest != null && latest.first > Updater.currentVersionCode(this@MainActivity)) {
-                updateFound = true
-                latestVersionCode = latest.first
-                val banner = findViewById<TextView>(R.id.updateBanner)
-                banner.text = "Update available (v${latest.second}) — tap to install"
-                banner.visibility = View.VISIBLE
+            val latest = Updater.latestVersion() ?: return@launch
+            if (latest.first <= Updater.currentVersionCode(this@MainActivity)) return@launch
+            updateFound = true
+            latestVersionCode = latest.first
+            val banner = findViewById<TextView>(R.id.updateBanner)
+            banner.text = "Downloading update (v${latest.second})…"
+            banner.visibility = View.VISIBLE
+            /* fetch now so the tap only has to install; a tap arriving
+               mid-download waits on the same lock and then installs */
+            val apk = Updater.ensureApk(this@MainActivity, latest.first)
+            banner.text = if (apk != null) {
+                Updater.rememberPendingName(this@MainActivity, latest.second)
+                "Update ready (v${latest.second}) — tap to install"
+            } else {
+                "Update available (v${latest.second}) — tap to retry"
             }
         }
     }
