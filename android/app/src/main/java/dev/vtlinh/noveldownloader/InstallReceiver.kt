@@ -27,7 +27,15 @@ class InstallReceiver : BroadcastReceiver() {
                a real failure — and saying "the install was cancelled" while
                the replacement session is committing normally is just noise.
                A genuine user cancellation comes back around as a retry. */
-            PackageInstaller.STATUS_FAILURE_ABORTED -> return
+            PackageInstaller.STATUS_FAILURE_ABORTED ->
+                /* Not silent — just not called a failure. This also arrives
+                   when we abandon a stalled session to make room for a fresh
+                   commit, and "the install was cancelled" while the
+                   replacement is committing is a lie. Put the offer back
+                   instead: if the user really did dismiss the dialog, the
+                   update is still there to install; if we abandoned it
+                   ourselves, the commit in flight supersedes this. */
+                Updater.reofferPendingUpdate(context)
             /* Everything else is a failure, and every one of them used to
                land here and stop. The tap that started the install is long
                gone by now, so nothing was left saying the update didn't

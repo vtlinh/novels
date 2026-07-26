@@ -100,6 +100,10 @@ class CompressService : Service() {
                         emptyList()
                     }
                     for (d in dirs) {
+                        /* Per folder, not just per pass: a pass is a walk of
+                           the whole library over SAF, so a download starting
+                           part-way through wasn't stood aside for at all. */
+                        if (DownloadService.runningFlow.value) break
                         val cur = prefs.getBoolean("compressNovels", true)
                         val changed = try {
                             if (cur) Zips.compressDir(this@CompressService, cr, treeUri, d)

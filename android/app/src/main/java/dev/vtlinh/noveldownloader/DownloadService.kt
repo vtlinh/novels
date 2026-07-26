@@ -239,7 +239,14 @@ class DownloadService : Service() {
        leave a download running with nothing tracking it */
     override fun onDestroy() {
         super.onDestroy()
-        if (!runningFlow.value) scope.coroutineContext[kotlinx.coroutines.Job]?.cancelChildren()
+        /* Unconditional. Guarding on !runningFlow.value cancelled only when
+           the loop had already finished and there was nothing left to cancel,
+           skipping the exact case worth handling: destroyed while a download
+           is live, which leaves it fetching with no foreground protection and
+           no way for the user to stop it. On a normal finish the children are
+           already done, so this is a no-op there. */
+        scope.coroutineContext[kotlinx.coroutines.Job]?.cancelChildren()
+        runningFlow.value = false
     }
 
     private fun createChannel() {

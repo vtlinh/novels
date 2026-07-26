@@ -173,6 +173,16 @@ object Updater {
         } catch (e: Exception) {}
     }
 
+    /* The install didn't happen but the build is fine — a dismissed
+       confirmation, or a session we abandoned ourselves. Put the "ready to
+       install" notification back so the tap is still there to make; without
+       it the notification was already cancelled and nothing said anything,
+       leaving the update to reappear only on some later foreground check. */
+    fun reofferPendingUpdate(context: Context) {
+        val name = pendingUpdateName(context) ?: return
+        notifyUpdateReady(context, name)
+    }
+
     /* The OS rejected this exact build — a signing mismatch, an incompatible
        or malformed package. Re-committing the same bytes will be refused
        again just as flatly, so drop them and stop offering it. A later
