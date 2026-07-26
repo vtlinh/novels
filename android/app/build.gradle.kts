@@ -69,4 +69,10 @@ dependencies {
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.media:media:1.7.0")
     implementation("androidx.lifecycle:lifecycle-process:2.8.4")
+
+    /* Plain JVM unit tests over the pure decision logic — no emulator, no
+       Robolectric. See Renumber.kt for why that logic was pulled out of the
+       engine: reasoning about it in place kept getting it wrong in ways that
+       deleted or misfiled chapters. */
+    testImplementation("junit:junit:4.13.2")
 }

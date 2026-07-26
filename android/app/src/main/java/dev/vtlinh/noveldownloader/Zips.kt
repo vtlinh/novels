@@ -17,13 +17,19 @@ object Zips {
        else in the app matches a name ending in it, which is the point */
     const val PART = ".part"
 
-    /* `contains`, not `endsWith`. SAF does not take a display name literally:
+    /* Both tails, because SAF does not take a display name literally:
        ExternalStorageProvider runs it through buildUniqueFile, which forces
-       the extension to match the mime type — ask for
-       "Chapter 5.txt.gz.part" as application/gzip and the document created is
-       "Chapter 5.txt.gz.part.gz". Matching only the tail meant the sweep,
-       which is the one thing that ever removes these, matched nothing. */
-    fun isPartName(name: String) = name.contains(PART)
+       the extension to match the mime type — ask for "Chapter 5.txt.gz.part"
+       as application/gzip and the document created is
+       "Chapter 5.txt.gz.part.gz". Matching only ".part" meant the sweep, the
+       one thing that ever removes these, matched nothing.
+
+       Anchored at the END, though. `contains` fixed that but deleted any file
+       in a novel folder with ".part" anywhere in its name — the tree can be a
+       shared folder the user also keeps other things in, and a
+       "Chapter 12.part2.txt" or someone else's "movie.mp4.part" was removed
+       silently and unrecoverably. We only ever create these two shapes. */
+    fun isPartName(name: String) = name.endsWith(PART) || name.endsWith("$PART.gz")
 
     private const val GZREF = "gz::"
     fun gzRef(docId: String) = GZREF + docId

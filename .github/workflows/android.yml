@@ -68,6 +68,13 @@ jobs:
           echo "APP_VERSION_NAME=${YEAR}.${WEEK}.${PATCH}" >> "$GITHUB_ENV"
           echo "Computed version name: ${YEAR}.${WEEK}.${PATCH}"
 
+      # Runs before the build so a broken invariant fails the run rather than
+      # publishing an APK. These are plain JVM tests over the pure decision
+      # logic (chapter renumbering, listing gaps, folder naming) — seconds,
+      # no emulator.
+      - name: Unit tests
+        run: gradle -p android testReleaseUnitTest
+
       - name: Build release APK
         run: gradle -p android assembleRelease
 
