@@ -12,13 +12,40 @@ import android.content.pm.PackageInstaller
    never hit that branch. */
 class InstallReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -1)) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, NO_STATUS)
+        when (status) {
+            NO_STATUS -> return                       // not a session result at all
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
                 val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 try { context.startActivity(confirm) } catch (e: Exception) {}
             }
+            PackageInstaller.STATUS_SUCCESS -> Updater.cancelUpdateNotification(context)
+            /* Everything else is a failure, and every one of them used to
+               land here and stop. The tap that started the install is long
+               gone by now, so nothing was left saying the update didn't
+               happen — the app just carried on as the old version. */
+            else -> Updater.notifyInstallFailed(
+                context,
+                describe(status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)),
+            )
         }
     }
+
+    private fun describe(status: Int, msg: String?): String {
+        val what = when (status) {
+            PackageInstaller.STATUS_FAILURE_ABORTED -> "The install was cancelled."
+            PackageInstaller.STATUS_FAILURE_BLOCKED -> "The system blocked the install."
+            PackageInstaller.STATUS_FAILURE_CONFLICT ->
+                "It conflicts with the copy already installed — the signing key may differ."
+            PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> "This build isn't compatible with the device."
+            PackageInstaller.STATUS_FAILURE_INVALID -> "The downloaded APK was not valid."
+            PackageInstaller.STATUS_FAILURE_STORAGE -> "There wasn't enough free storage."
+            else -> "The install failed."
+        }
+        return if (msg.isNullOrBlank()) what else "$what ($msg)"
+    }
+
+    private companion object { const val NO_STATUS = Int.MIN_VALUE }
 }

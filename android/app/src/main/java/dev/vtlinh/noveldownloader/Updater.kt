@@ -124,6 +124,38 @@ object Updater {
         } catch (e: Exception) {}
     }
 
+    /* An install session reports its outcome asynchronously, long after the
+       tap that started it. A failure that goes nowhere leaves the button
+       reading "Installing…" for good and the user with no idea why nothing
+       happened — so put the reason in the shade, reusing the slot the
+       "update ready" notification has already vacated by this point. */
+    fun notifyInstallFailed(context: Context, reason: String) {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        try {
+            nm.createNotificationChannel(
+                NotificationChannel(UPDATE_CHANNEL, "Updates", NotificationManager.IMPORTANCE_LOW),
+            )
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
+            val open = PendingIntent.getActivity(
+                context, 2,
+                Intent(context, AboutActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                flags,
+            )
+            nm.notify(
+                UPDATE_NOTIF_ID,
+                NotificationCompat.Builder(context, UPDATE_CHANNEL)
+                    .setSmallIcon(android.R.drawable.stat_notify_error)
+                    .setContentTitle("Update could not be installed")
+                    .setContentText(reason)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(reason))
+                    .setContentIntent(open)
+                    .setAutoCancel(true)
+                    .build(),
+            )
+        } catch (e: Exception) {}
+    }
+
     fun cancelUpdateNotification(context: Context) {
         try {
             context.getSystemService(NotificationManager::class.java)?.cancel(UPDATE_NOTIF_ID)

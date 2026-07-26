@@ -7,7 +7,9 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /* About: app description, author, source, and the update control. Nothing
    here installs on its own — the button downloads a newer build and then
@@ -97,9 +99,16 @@ class AboutActivity : AppCompatActivity() {
            and re-commits the cached APK (no re-download) */
         status.text = "Installing v$versionName… — tap again if nothing happens."
         installInFlight = true
-        if (!Updater.installPending(this)) {
-            installInFlight = false
-            status.text = "Install failed — try again."
+        /* committing streams the whole APK into the install session — tens of
+           megabytes of copying that froze the screen on the tap, long enough
+           on a slow device to earn an ANR. The receiver does it off-thread
+           for the same reason; this path never did. */
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) { Updater.installPending(applicationContext) }
+            if (!ok) {
+                installInFlight = false
+                status.text = "Install failed — try again."
+            }
         }
     }
 

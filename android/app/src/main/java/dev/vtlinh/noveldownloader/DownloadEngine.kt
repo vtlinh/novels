@@ -281,18 +281,34 @@ class DownloadEngine(
         status("Renumbering chapters to match the site…")
         var renamed = 0
         var parked = 0
+        var evicted = 0
         while (pending.isNotEmpty() && !stopRequested) {
             var progress = false
             val walk = pending.entries.iterator()
             while (walk.hasNext()) {
                 val e = walk.next()
                 if (occupied(e.value)) {
-                    /* Held by a file no pending rename will ever move — a
-                       chapter the site dropped, say. Waiting or parking would
-                       only shuffle files under temp names, so leave this one
-                       where it is; the listing still orders it correctly. */
-                    if (!pending.containsKey(e.value)) { walk.remove(); progress = true }
-                    continue                          // otherwise its turn comes
+                    if (pending.containsKey(e.value)) continue    // its turn comes
+                    /* Held by a file no rename will move — a chapter the site
+                       dropped, which has no place in the numbering at all.
+                       Giving up on this one used to be contagious: the rename
+                       below it then saw an occupant that was no longer pending
+                       either, so a single squatter unravelled the whole shift
+                       one chapter per pass, and the files stopped matching the
+                       order the reader sorts by. Move the squatter aside under
+                       a name that says what it is; the dedupe pass that runs
+                       next accounts for it. */
+                    val stem = e.value.removeSuffix(".txt")
+                    var aside = "$stem (unlisted).txt"
+                    var n = 2
+                    while (occupied(aside) && n < 100) { aside = "$stem (unlisted $n).txt"; n++ }
+                    move(e.value, aside)
+                    if (occupied(e.value)) {          // the provider refused — leave this one
+                        walk.remove()
+                        progress = true
+                        continue
+                    }
+                    evicted++
                 }
                 if (move(e.key, e.value)) renamed++
                 walk.remove()
@@ -311,6 +327,7 @@ class DownloadEngine(
         }
         remapSavedSpot(slug, applied)
         if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
+        if (evicted > 0) log("$evicted file(s) the site no longer lists moved out of the numbering")
     }
 
     /* The novel's folder, as the download names it: the stored English
