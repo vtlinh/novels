@@ -71,8 +71,13 @@ object Sites {
                 Pair("https://${u.host}/$slug.html", slug)
             },
             listPageUrl = { base, _, p -> "$base?page=$p" },
+            /* Chapters live under /<slug>/ and are named after their title,
+               not numbered: "/1-ren.html", "/2-going-to-zone-a.html". Only
+               some carry a "chapter-N" slug, so requiring that pattern hid
+               most of the novel — the listing found a few hundred of a few
+               thousand chapters and called the download complete. */
             isChapterPath = { path, slug ->
-                path.contains("/$slug/") && Regex("chapter-\\d+", RegexOption.IGNORE_CASE).containsMatchIn(path)
+                path.contains("/$slug/") && path.endsWith(".html", ignoreCase = true)
             },
             maxPage = { doc, _ ->
                 var max = 1
@@ -83,9 +88,14 @@ object Sites {
                 }
                 max
             },
+            /* "chapter-601-..." where the site numbers it, otherwise the
+               leading number of the title slug ("/10-foraging....html" -> 10) */
             chapterNumFromUrl = { url ->
+                val seg = url.substringBefore('?').trimEnd('/')
+                    .substringAfterLast('/').removeSuffix(".html")
                 Regex("chapter-(\\d+)", RegexOption.IGNORE_CASE)
                     .findAll(url).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
+                    ?: Regex("^(\\d+)").find(seg)?.groupValues?.get(1)?.toIntOrNull()
             },
             /* novel page: <h3>Status:</h3><a href=".../status/Completed">Completed</a> */
             isCompleted = { doc ->
