@@ -956,9 +956,29 @@ class DownloadEngine(
         val compressOn = context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
             .let { it.getBoolean("compressNovels", it.getBoolean("zipDownloads", true)) }
 
+        /* Sitting at a chapter's number is not the same as being that chapter.
+           When a rename couldn't be applied — its target held by a file
+           nothing would move — the old occupant is still at that number, and
+           skipping the fetch because the name looks taken would serve its
+           text as this chapter for good. Go by the page each file was
+           downloaded from; fall back to the name only for files saved before
+           pages were recorded. */
+        val ownerOf = HashMap<String, String>()        // filename -> the page it holds
+        for ((u, f) in store.urlMap(folderKey, slug)) ownerOf[f] = u
+        val stale = HashSet<String>()                  // names held by the wrong page
+        fun settled(ch: Chapter): Boolean {
+            val name = ch.filename ?: return false
+            if (name !in existing) return false
+            val owner = ownerOf[name] ?: return true   // unclaimed — a legacy save
+            if (owner == ch.url) return true
+            stale.add(name)
+            return false
+        }
+
         val toFetch =
             if (refetchAll) chapters.filter { it.filename != null }
-            else chapters.filter { it.filename != null && it.filename !in existing }
+            else chapters.filter { it.filename != null && !settled(it) }
+        if (stale.isNotEmpty()) log("${stale.size} chapter file(s) hold the wrong page — re-fetching those")
         val skipped = chapters.size - toFetch.size
         if (skipped > 0) log("skip $skipped already-downloaded chapter(s)")
 
@@ -1001,7 +1021,10 @@ class DownloadEngine(
                                 val body = Extractor.parseChapter(
                                     Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
                                 )
-                                val uri = writeFile(dir, ch.filename!!, body, compressOn, replace = refetchAll)
+                                val uri = writeFile(
+                                    dir, ch.filename!!, body, compressOn,
+                                    replace = refetchAll || ch.filename in stale,
+                                )
                                 /* record the page it came from: that mapping is
                                    what keeps this file's name stable if the site
                                    later relabels or renumbers the chapter */

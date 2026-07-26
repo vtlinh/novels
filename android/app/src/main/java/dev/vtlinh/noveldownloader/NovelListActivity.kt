@@ -207,7 +207,12 @@ class NovelListActivity : AppCompatActivity() {
                     store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
                     rec.author,
                 ),
-                maxOf(dbCount, rec.diskCount, listCount),
+                /* Take the resolved listing when there is one — it's a real
+                   directory read. maxOf across all three could only ever go
+                   up, so a chapter dedup removed stayed in the count and the
+                   novel read as further along than it was. The other two are
+                   the fallback for a novel that has never been listed. */
+                if (listCount > 0) listCount else maxOf(dbCount, rec.diskCount),
             )
         }.sortedWith(
             /* finished (user-marked) novels sink to the bottom; hot novels
@@ -625,7 +630,15 @@ class NovelListActivity : AppCompatActivity() {
             val targets = withContext(Dispatchers.IO) {
                 rows().filter {
                     val done = it.rec.complete && it.rec.total > 0 && it.local == it.rec.total
-                    !done || store.chapterOrderCount(folder, it.rec.slug) == 0
+                    /* A check renames and dedupes. Running that over a novel
+                       the service is downloading right now means two passes
+                       moving the same files: the download writes a chapter,
+                       the check renames it out from under the write, and the
+                       counts they each save contradict each other. Leave a
+                       busy novel to its download — it renames on the way out
+                       anyway. */
+                    !DownloadService.isBusy(normKey(it.rec.slug)) &&
+                        (!done || store.chapterOrderCount(folder, it.rec.slug) == 0)
                 }
             }
             if (targets.isEmpty()) {
@@ -648,17 +661,29 @@ class NovelListActivity : AppCompatActivity() {
                                     )
                                 for (u in urls) {
                                     val res = try { engine.checkStatus(u, folder) } catch (e: Exception) { null } ?: continue
-                                    if (row.rec.url.isEmpty()) {
-                                        store.registerNovel(folder, row.rec.slug, u, row.display, 0L)
+                                    /* A locked or full database throws, and
+                                       these run off the main thread inside a
+                                       sweep with no handler — one bad write
+                                       took the whole app down mid-check
+                                       instead of costing one novel its
+                                       update. */
+                                    try {
+                                        if (row.rec.url.isEmpty()) {
+                                            store.registerNovel(folder, row.rec.slug, u, row.display, 0L)
+                                        }
+                                        res.author?.let { store.setAuthor(folder, row.rec.slug, it) }
+                                        /* index the site's chapter order for the reader —
+                                           skipped when already indexed and unchanged */
+                                        if (store.chapterOrderCount(folder, row.rec.slug) != res.orderedFilenames.size) {
+                                            store.setChapterOrder(folder, row.rec.slug, res.orderedFilenames)
+                                        }
+                                        val complete = res.completed && row.local >= res.total
+                                        store.updateNovelCheck(folder, row.rec.slug, res.total, complete)
+                                    } catch (e: Exception) {
+                                        DownloadService.logFlow.value =
+                                            (DownloadService.logFlow.value + "Could not save the check for ${row.display} — ${e.message}")
+                                                .takeLast(400)
                                     }
-                                    res.author?.let { store.setAuthor(folder, row.rec.slug, it) }
-                                    /* index the site's chapter order for the reader —
-                                       skipped when already indexed and unchanged */
-                                    if (store.chapterOrderCount(folder, row.rec.slug) != res.orderedFilenames.size) {
-                                        store.setChapterOrder(folder, row.rec.slug, res.orderedFilenames)
-                                    }
-                                    val complete = res.completed && row.local >= res.total
-                                    store.updateNovelCheck(folder, row.rec.slug, res.total, complete)
                                     break
                                 }
                                 val n = done.incrementAndGet()
