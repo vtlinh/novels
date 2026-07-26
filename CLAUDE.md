@@ -46,6 +46,28 @@
   (committed, personal-app trade-off) signs every build so updates install
   over existing installs.
 
+## Adding a supported site
+
+- A new site in `Sites.kt` is not done until it has fixtures: **100 novel
+  pages and 30 chapter pages** captured from it, spanning finished and
+  ongoing novels and books from a handful of chapters to thousands. Fetch
+  them through the dev Worker (`tools/README.md`), add the host to its
+  `SITES` allowlist first, and pace the crawl — these sites challenge a
+  burst, and some individual novels are challenge-protected for every client
+  (truyenfull's `-free` titles), which is worth recording rather than
+  retrying.
+- One HTML per zip under `android/app/src/test/resources/pages/<site>/`
+  (`tools/pack-pages.py <dir> <site>` does the packing): compressed so whole
+  third-party pages stay out of repository search, one per archive so a
+  single page can be extracted while debugging.
+- Add a row per page to `pages/manifest.tsv`, and measure its columns with a
+  script that does NOT use this app's parser. The tests compare the app
+  against that independent measurement; if the manifest is filled in from
+  `Listing.collect`, the tests only prove the code agrees with itself.
+- Everything else here is tested against values we invented, which is fine
+  for the arithmetic and useless for the thing that actually breaks: what a
+  site's HTML really contains. Three shipped bugs came out of that gap.
+
 ## Workflow
 
 - After completing a fix, always merge it RIGHT AWAY: push the branch, open
