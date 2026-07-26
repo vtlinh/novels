@@ -108,35 +108,40 @@ class ListingTest {
     }
 
     /* A page that answers 200 with no chapters on it — a soft 404, a WAF
-       interstitial, a layout change — is put back with the pages that didn't
-       load and judged by this same rule. The two cases it has to separate:
-       a blank page in the MIDDLE takes its chapters into the dedupe as ones
-       the site no longer lists... */
+       interstitial, a layout change — is a page we could not read. It goes
+       into `missed`, and it must NOT go into `gone`: `gone` means the SITE
+       said the page isn't there, and that is the only evidence that excuses a
+       page as the count over-reading.
+
+       This is the whole bug. Filing a blank page as "gone" forgives it
+       exactly when it is the LAST page — nothing loaded after it, because it
+       didn't load either — so the listing is declared complete with a page of
+       chapters missing and the dedupe deletes their files. That is precisely
+       the failure the blank-page check was written to prevent, rebuilt by the
+       fix for it. */
     @Test
-    fun `a blank page inside the book is a hole`() {
+    fun `a blank last page is never forgiven`() {
+        val forgivable = Listing.forgivableTailPages(
+            missed = setOf(90),
+            gone = emptySet(),           // blank pages must never be reported as "not there"
+            loaded = (2..89).toSet(),
+            lastPage = 90,
+        )
+        assertTrue(
+            "a page that answered 200 exists — if it holds no chapters we could not read it",
+            forgivable.isEmpty(),
+        )
+    }
+
+    @Test
+    fun `a blank page inside the book is a hole too`() {
         val forgivable = Listing.forgivableTailPages(
             missed = setOf(45),
-            gone = setOf(45),            // blank pages are recorded as "not there"
+            gone = emptySet(),
             loaded = (2..90).toSet() - 45,
             lastPage = 90,
         )
         assertTrue(forgivable.isEmpty())
-    }
-
-    /* ...while a blank page past the last real one is the page count
-       over-reading, and blocking on it would leave the novel permanently
-       un-renamed and un-deduped. Note `loaded` must EXCLUDE the blank page:
-       counting it as loaded is what made the old check skip the last page
-       entirely, which is exactly where a soft 404 lands. */
-    @Test
-    fun `a blank page past the end is an over-read`() {
-        val forgivable = Listing.forgivableTailPages(
-            missed = setOf(90),
-            gone = setOf(90),
-            loaded = (2..89).toSet(),
-            lastPage = 90,
-        )
-        assertEquals(listOf(90), forgivable)
     }
 
     @Test

@@ -53,6 +53,8 @@ class DownloadEngine(
         /* a listing page that wouldn't load is usually throttling, so give it
            room rather than spending all three retries inside one busy second */
         private const val LIST_RETRY_MS = 7_000
+        /* where a chapter waits while a rename cycle is broken around it */
+        private const val PARK = "Chapter __shift"
 
         /* Bumped whenever a rename pass actually moves a file. A reader that
            is open on that novel is holding a list of names that just stopped
@@ -355,12 +357,28 @@ class DownloadEngine(
             /* nothing could move: the remaining renames form a cycle, so park
                one out of the way to break it */
             val e = pending.entries.first()
-            val park = "Chapter __shift$parked.txt"
+            val park = "$PARK$parked.txt"
             parked++
             move(e.key, park)
             pending.remove(e.key)
             pending[park] = e.value
             if (parked > inSiteOrder.size) break     // safety valve
+        }
+        /* Anything still parked when the loop gives up — Stop, the safety
+           valve, a move the provider refused — is a real chapter sitting under
+           a name that matches NOTHING: not the reader's pattern, not the
+           dedupe's, not the half-written sweep's. Its row in the index still
+           says it is that chapter, so nothing re-fetches it either: the
+           chapter simply disappears from the novel. The park name is meant to
+           live for one pass; put anything left back where the app can see it. */
+        for ((key, want) in pending.entries.toList()) {
+            if (!key.startsWith(PARK)) continue
+            if (!occupied(want) && move(key, want)) { renamed++; continue }
+            val stem = want.removeSuffix(".txt")
+            var aside = "$stem (unlisted).txt"
+            var n = 2
+            while (occupied(aside) && n < 100) { aside = "$stem (unlisted $n).txt"; n++ }
+            if (move(key, aside)) evicted++
         }
         /* A file matched by guesswork has now proved where it went, so give it
            its page and it never has to be guessed at again. */
@@ -521,7 +539,14 @@ class DownloadEngine(
             if (!ok) return false
             translatedId?.let { tid ->
                 for (t in Saf.children(cr, treeUri, tid)) {
-                    if (!t.isDir && t.name == x.name) {
+                    /* by BASE name: the source and its translation compress
+                       independently, so "Chapter 900.txt.gz" beside a loose
+                       "translated/Chapter 900.txt" matched nothing here and
+                       left the translation orphaned — a file the reader hides,
+                       the sweeps ignore, and the next chapter to take that
+                       name inherits. purgeUnreferenced already keys on the
+                       base; this is the same rule. */
+                    if (!t.isDir && t.name.removeSuffix(".gz") == x.base) {
                         try {
                             DocumentsContract.deleteDocument(
                                 cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, t.docId),
@@ -547,7 +572,20 @@ class DownloadEngine(
            recorded page look unlisted. A real site removal takes a chapter or
            two. Losing a large slice of everything we can identify is evidence
            about the LISTING, not about the files, so say so and keep them. */
-        val unlisted = extras.count { val u = fileUrl[it.base]; u != null && u !in listedUrls }
+        /* "The site no longer lists this chapter" can only be read off a
+           listing from the SAME site. These novels are served from more than
+           one host — truyenfull.today and .live carry the same books — and the
+           status sweep will happily probe the other one when the recorded host
+           blips. Every recorded page then names a host the listing doesn't
+           use, so every file looks removed, and for a novel with few enough
+           chapters the count guard below waves it through: the whole novel
+           deleted because one host was briefly down. A page we can't compare
+           is unidentified, not removed. */
+        val listedHosts = listedUrls.mapNotNullTo(HashSet()) { hostOf(it) }
+        fun comparable(url: String) = hostOf(url).let { it != null && it in listedHosts }
+        val unlisted = extras.count {
+            val u = fileUrl[it.base]; u != null && comparable(u) && u !in listedUrls
+        }
         val identified = fileUrl.size
         /* Half, not a fifth. A listing that is actually broken loses nearly
            everything — the widget-only fallback finds ten links out of seven
@@ -564,7 +602,9 @@ class DownloadEngine(
         var dropped = 0
         var suspect = 0
         for (x in extras) {
-            val from = fileUrl[x.base]
+            /* a page from another host tells us nothing about this listing —
+               fall through to the content check rather than the identity one */
+            val from = fileUrl[x.base]?.takeIf { comparable(it) }
             if (from != null && from !in listedUrls) {
                 /* We know exactly which chapter this is, and the site no
                    longer lists it. Not a mystery and not a duplicate — a
@@ -644,6 +684,11 @@ class DownloadEngine(
         }
         return gone
     }
+
+    /* the host a recorded page came from, for telling "this listing doesn't
+       have that chapter" apart from "this listing is a different site" */
+    private fun hostOf(url: String): String? =
+        try { java.net.URI(url).host?.lowercase() } catch (e: Exception) { null }
 
     /* How chapters were named before the URL map existed: the site's own
        number, plus a suffix for a repeat. Only used to recognise files
@@ -775,19 +820,46 @@ class DownloadEngine(
             }
             fetched = batch.last()
         }
+        /* Confirm every page that reported missing before writing any of them
+           off. A status check gets ONE attempt at each page, where a download
+           re-confirms the 404 tail and then retries every hole three times
+           before forgiving anything — so a page that blips 404 once was
+           forgiven here on the spot, the listing came back a page short, and
+           the dedupe deleted those chapters with no download to put them
+           back. Before the parse loop, because a page that turns out to be
+           real still has to be read in its own place in the order. */
+        val tailSuspects = missed.toList()
+        if (tailSuspects.isNotEmpty()) {
+            val htmls = arrayOfNulls<String>(tailSuspects.size)
+            coroutineScope {
+                val sem = Semaphore(10)
+                for ((i, p) in tailSuspects.withIndex()) {
+                    launch { sem.withPermit { htmls[i] = fetch(site.listPageUrl(base, slug, p)).html } }
+                }
+            }
+            for ((i, html) in htmls.withIndex()) {
+                if (html == null) continue
+                /* there after all — a real page, not an over-read */
+                val p = tailSuspects[i]
+                pageHtml[p] = html
+                gone.remove(p)
+                missed.remove(p)
+                last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
+            }
+        }
+        missed.removeAll(Listing.forgivableTailPages(missed, gone, pageHtml.keys, last).toSet())
+        /* Collected in page order — discovery order is the site's order, and
+           the site's order is what names every file. */
         for (p in 2..last) {
             val html = pageHtml[p] ?: continue
             if (addLinks(Jsoup.parse(html, base)) > 0) continue
-            /* no chapters on it: not read, whatever it answered */
+            /* No chapters on it: not read, whatever it answered — and NOT
+               added to `gone`, which means "the site said not there" and is
+               the only thing that excuses a page as an over-read. See run(). */
             pageHtml.remove(p)
             missed.add(p)
-            gone.add(p)
             break
         }
-        /* A tail of pages that report missing is the page count over-reading
-           the pagination — the one gap that is safe to write off, and only
-           under the conditions in Listing.forgivableTailPages. */
-        missed.removeAll(Listing.forgivableTailPages(missed, gone, pageHtml.keys, last).toSet())
         if (seen.isEmpty()) return@withContext null
         /* A status check renames and deletes but never downloads, so nothing
            here self-corrects. Acting on a listing with a page missing would
@@ -1104,7 +1176,17 @@ class DownloadEngine(
             if (addLinks(Jsoup.parse(html, base)) > 0) continue
             pageHtml.remove(p)
             missed.add(p)
-            gone.add(p)
+            /* NOT `gone`. That set means "the site said this page is not
+               there", which is the only evidence that excuses a page as the
+               count over-reading — and forgiveness is what declares the
+               listing complete. Filing a blank page there forgave it exactly
+               when it was the LAST page (nothing loaded after it, because we
+               just removed it), so the previous version of this fix rebuilt
+               the very hole it was written to close: 200-with-no-chapters on
+               the final page, listing "complete", fifty chapters deleted by
+               the dedupe. A page that answered 200 is a page that exists; if
+               it holds no chapters we could not read it, and the run stops
+               collecting there and stays additive. */
             blank = p
             break
         }
@@ -1324,6 +1406,12 @@ class DownloadEngine(
             val rows = ArrayList<Pair<String, String>>()
             for (f in dir.listFiles()) {
                 val n = f.name ?: continue
+                /* Half-written files are invisible to every other lister by
+                   design; this one indexed them as chapters, so a run killed
+                   mid-write left rows pointing at documents the sweep then
+                   deleted — a count the Library shows and the ownership check
+                   trusts, backed by nothing. */
+                if (Zips.isPartName(n)) continue
                 if (Zips.isGzName(n)) {
                     /* A compressed chapter IS that chapter — index it under
                        its plain name against the .gz document. Counting it as
@@ -1578,29 +1666,42 @@ class DownloadEngine(
            just fetched. Clear the old document first when we know one is
            there. (Only then: findFile is a query per call, and the normal
            path never collides.) */
-        if (replace) {
-            /* A provider reports a refusal by RETURNING false; only a missing
-               file throws. Ignoring the result meant going on to create a name
-               that is still taken — which is the very thing this block exists
-               to prevent, and it left "Chapter 5 (1).txt" behind: invisible to
-               the reader, and deleted by the next sweep as surplus. Stop
-               instead; the chapter stays as it was and the next run retries. */
-            fun clear(n: String) {
-                val f = try { dir.findFile(n) } catch (e: Exception) { null } ?: return
-                val ok = try { f.delete() } catch (e: Exception) { false }
-                if (ok) return
-                /* delete() also returns false for a file that was already gone
-                   by the time we asked, so confirm before giving up */
-                if (try { f.exists() } catch (e: Exception) { true }) {
-                    throw RuntimeException("could not replace $n")
-                }
+        /* A provider reports a refusal by RETURNING false; only a missing
+           file throws. Ignoring the result meant going on to create a name
+           that is still taken — which is the very thing this block exists
+           to prevent, and it left "Chapter 5 (1).txt" behind: invisible to
+           the reader, and deleted by the next sweep as surplus. Stop
+           instead; the chapter stays as it was and the next run retries. */
+        fun clear(n: String) {
+            val f = try { dir.findFile(n) } catch (e: Exception) { null } ?: return
+            val ok = try { f.delete() } catch (e: Exception) { false }
+            if (ok) return
+            /* delete() also returns false for a file that was already gone
+               by the time we asked, so confirm before giving up */
+            if (try { f.exists() } catch (e: Exception) { true }) {
+                throw RuntimeException("could not replace $n")
             }
+        }
+        if (replace) {
             clear(name)
             clear("$name.gz")
         }
         if (compress) {
             Zips.writeGzDoc(context.contentResolver, dir.uri, "$name.gz", text)
                 ?.let { return it.toString() }
+            /* The write refuses a name the provider would have MINTED around
+               ("Chapter 5.txt (1).gz"), so a failure here can mean the name is
+               held by a file we don't count: a zero-length .gz from a killed
+               run, which the index skips and `replace` therefore never
+               cleared. Left alone the chapter could never be written under its
+               own name again — every attempt minted a new invisible file while
+               the reader kept serving the empty one. Clear the name and try
+               once more. */
+            if (!replace) {
+                try { clear(name); clear("$name.gz") } catch (e: Exception) {}
+                Zips.writeGzDoc(context.contentResolver, dir.uri, "$name.gz", text)
+                    ?.let { return it.toString() }
+            }
         }
         /* Write under a name nothing adopts and rename it into place once the
            bytes are down — the same protection the compressed path has had.
@@ -1616,6 +1717,15 @@ class DownloadEngine(
             out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
             val done = DocumentsContract.renameDocument(context.contentResolver, f.uri, name)
                 ?: throw RuntimeException("could not name $name")
+            /* renameDocument does not fail on a taken name — it MINTS one and
+               returns a valid Uri for it. Recording that as the chapter left
+               the real name pointing at whatever was already there, and the
+               file we just wrote under a name nothing in the app matches. */
+            val got = Zips.docName(context.contentResolver, done)
+            if (got != null && got != name) {
+                try { DocumentsContract.deleteDocument(context.contentResolver, done) } catch (e2: Exception) {}
+                throw RuntimeException("$name is taken")
+            }
             return done.toString()
         } catch (e: Exception) {
             try { f.delete() } catch (e2: Exception) {}
