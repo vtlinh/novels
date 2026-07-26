@@ -266,7 +266,10 @@ class DownloadEngine(
             ch.filename = "Chapter $n" + (if (c > 1) "-$c" else "") + ".txt"
         }
         SiteStatus(
-            siteOrdered.size, site.isCompleted(doc), Sites.author(doc),
+            /* only the ones we could name: a link with no readable chapter
+               number can never be fetched, so counting it would leave the
+               library short of a total it can never reach */
+            siteOrdered.count { it.filename != null }, site.isCompleted(doc), Sites.author(doc),
             siteOrdered.mapNotNull { it.filename },
         )
     }
@@ -386,6 +389,17 @@ class DownloadEngine(
             val c = (counts[n] ?: 0) + 1
             counts[n] = c
             ch.filename = "Chapter $n" + (if (c > 1) "-$c" else "") + ".txt"
+        }
+        /* A link whose chapter number can't be read gets no filename, so it
+           can never be fetched. Counting it would leave the library parked at
+           N-2/N with a Download button that can't make progress, and it would
+           be reported as "already downloaded" every run. Drop it from the
+           working set — naming the ones we can is what the total means. */
+        val unnamed = chapters.filter { it.filename == null }
+        if (unnamed.isNotEmpty()) {
+            log("ignoring ${unnamed.size} listed link(s) with no readable chapter number")
+            unnamed.take(3).forEach { log("  ${it.url}") }
+            chapters.retainAll { it.filename != null }
         }
         if (chapters.isEmpty()) {
             log("No chapters found — site layout may have changed")
