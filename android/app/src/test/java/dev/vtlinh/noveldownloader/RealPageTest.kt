@@ -101,7 +101,7 @@ class RealPageTest {
         val novels = fixtures.filter { it.kind == "novel" }
         for (name in listOf("truyenfull", "novelfull")) {
             val mine = novels.filter { it.site.name == name }
-            assertEquals("10 novel pages captured for $name", 10, mine.size)
+            assertEquals("100 novel pages captured for $name", 100, mine.size)
             assertTrue("$name: some finished", mine.any { it.completed == true })
             assertTrue("$name: some ongoing", mine.any { it.completed == false })
             assertTrue("$name: some short", mine.any { (it.maxPage ?: 1) <= 3 })
@@ -173,7 +173,18 @@ class RealPageTest {
                 .mapNotNull { f.site.chapterNumFromUrl(it.first) }
             assertTrue("${f.file}: no numbered chapters", nums.size > 5)
             assertEquals("${f.file}: page 1 does not start at chapter 1", 1, nums.first())
-            assertEquals("${f.file}: chapters are not in ascending order", nums.sorted(), nums)
+            /* Broadly ascending, not strictly. A real page in this corpus
+               lists ...40, 42, 41, 43... — the site's own order does not
+               always agree with the numbers it prints, which is exactly why
+               a file is named by its POSITION in the listing and not by the
+               number in its heading. Assert the shape (the listing runs
+               forwards) without asserting a sortedness the site does not
+               promise. */
+            val inversions = nums.zipWithNext().count { it.first > it.second }
+            assertTrue(
+                "${f.file}: listing is not broadly ascending ($inversions inversions in ${nums.size})",
+                inversions <= maxOf(1, nums.size / 25),
+            )
         }
     }
 
@@ -223,6 +234,148 @@ class RealPageTest {
             val found = Listing.collect(doc(f), f.site, f.slug)
             assertFalse("${f.file}: read as a fallback", found.fellBack)
             assertTrue("${f.file}: a real last page still holds chapters", found.links.isNotEmpty())
+        }
+    }
+}
+
+/* The chapter parser, run over REAL chapter pages.
+
+   parseChapter decides the CONTENTS of every file the app saves — the heading
+   it writes, which of the page is prose and which is navigation, adverts and
+   "report a problem" boxes. Nothing else here covered it, and a mistake in it
+   is not visible as a crash: the chapter simply saves short, or saves the ad
+   text, or saves with the wrong heading, and the reader shows exactly that
+   forever.
+
+   chapters.tsv records each page's heading number and the visible character
+   count of the site's own chapter container, measured by a separate script.
+   Counted on characters rather than <p> tags on purpose: truyenfull separates
+   paragraphs with <br>, so a tag count reads 5 for a ninety-line chapter. */
+class RealChapterTest {
+
+    private class Chap(
+        val site: Site,
+        val file: String,
+        val url: String,
+        val novel: String,
+        val which: String,
+        val headingNumber: Int?,
+        val contentChars: Int,
+    ) {
+        override fun toString() = file
+    }
+
+    private fun read(path: String): String {
+        val ins = javaClass.getResourceAsStream("/pages/$path.zip")
+            ?: throw AssertionError("missing test resource: pages/$path.zip")
+        ins.use { raw ->
+            java.util.zip.ZipInputStream(raw).use { zip ->
+                zip.nextEntry ?: throw AssertionError("empty archive: pages/$path.zip")
+                return zip.readBytes().toString(Charsets.UTF_8)
+            }
+        }
+    }
+
+    private val chapters: List<Chap> by lazy {
+        val tsv = javaClass.getResourceAsStream("/pages/chapters.tsv")!!
+            .use { it.readBytes().toString(Charsets.UTF_8) }
+        tsv.lineSequence().filter { it.isNotBlank() && !it.startsWith("#") }.map { line ->
+            val c = line.split("\t")
+            Chap(
+                site = Sites.all.first { it.name == c[0] },
+                file = c[1], url = c[2], novel = c[3], which = c[4],
+                headingNumber = c[5].toIntOrNull(), contentChars = c[6].toInt(),
+            )
+        }.toList()
+    }
+
+    private fun parse(c: Chap): String =
+        Extractor.parseChapter(Jsoup.parse(read(c.file), c.url), "", c.headingNumber ?: 1, c.site.headingWord)
+
+    @Test
+    fun `chapter pages are captured from both sites, first and middle`() {
+        assertTrue("no chapter fixtures", chapters.size >= 20)
+        for (name in listOf("truyenfull", "novelfull")) {
+            assertTrue("$name: no chapter pages", chapters.any { it.site.name == name })
+        }
+        assertTrue("no first chapters", chapters.any { it.which == "first" })
+        assertTrue("no middle chapters", chapters.any { it.which == "mid" })
+    }
+
+    /* Every one has to parse. parseChapter THROWS when the content area comes
+       back empty — which is the right answer for a page it cannot read, and a
+       disaster if it happens to a page it should. */
+    @Test
+    fun `every real chapter page parses`() {
+        for (c in chapters) {
+            val out = try { parse(c) } catch (e: Exception) {
+                throw AssertionError("${c.file}: parseChapter threw — ${e.message}")
+            }
+            assertTrue("${c.file}: empty result", out.isNotBlank())
+        }
+    }
+
+    /* The first line is the heading, and it carries the number the app was
+       told to use — not the one printed on the page. That distinction is the
+       whole naming scheme: a file is named by its POSITION in the listing,
+       and the heading inside it has to agree with the name. */
+    @Test
+    fun `the first line is the heading the app was asked for`() {
+        for (c in chapters) {
+            val first = parse(c).lineSequence().first()
+            val n = c.headingNumber ?: 1
+            assertTrue(
+                "${c.file}: heading is \"$first\", expected to start \"${c.site.headingWord} $n\"",
+                first.startsWith("${c.site.headingWord} $n"),
+            )
+        }
+    }
+
+    /* The body has to be the chapter, not a fragment of it and not the whole
+       page. Measured against the site's own container: well under it means
+       the extractor is dropping the chapter, well over means it is keeping
+       the navigation and the adverts. */
+    @Test
+    fun `the body is the chapter, not a fragment and not the whole page`() {
+        for (c in chapters) {
+            val body = parse(c).substringAfter('\n', "")
+            assertTrue("${c.file}: body is empty", body.isNotBlank())
+            assertTrue(
+                "${c.file}: kept ${body.length} chars of a ${c.contentChars}-char container — too little",
+                body.length >= c.contentChars / 2,
+            )
+            assertTrue(
+                "${c.file}: kept ${body.length} chars of a ${c.contentChars}-char container — too much",
+                body.length <= c.contentChars + 200,
+            )
+        }
+    }
+
+    /* The junk these pages carry around the prose. Any of it saved into a
+       chapter file is read aloud by TTS and translated at the API's price. */
+    @Test
+    fun `site furniture never survives into a chapter`() {
+        val junk = listOf(
+            "Chương trước", "Chương tiếp", "Chương sau",
+            "Previous Chapter", "Next Chapter", "Report chapter",
+            "Bạn đang đọc truyện tại", "truyenfull.vn",
+            "function ", "googletag", "adsbygoogle", "<script",
+        )
+        for (c in chapters) {
+            val out = parse(c)
+            for (j in junk) {
+                assertFalse("${c.file}: kept site furniture \"$j\"", out.contains(j, ignoreCase = true))
+            }
+        }
+    }
+
+    /* Blank lines between paragraphs were what the reader's paragraph indexing
+       counted, so a page that arrived double-spaced moved every saved reading
+       position in it. */
+    @Test
+    fun `paragraphs are single-spaced`() {
+        for (c in chapters) {
+            assertFalse("${c.file}: blank line between paragraphs", parse(c).contains("\n\n"))
         }
     }
 }
