@@ -112,18 +112,30 @@ class ChapterListActivity : AppCompatActivity() {
             val source = HashMap<String, String>()
             val gzSource = HashMap<String, String>()
             var translatedId: String? = null
+            /* An EMPTY file is not a chapter. The download-side lister has
+               always required a length; this one asked only for the name, and
+               a 0-byte "Chapter N.txt" — what a killed run or a full volume
+               leaves — reads back as "" rather than null, so the reader's
+               unreadable-chapter handling never fired. It recorded a chapter
+               of zero length instead: a blank header, the next chapter's text
+               immediately below it, and the empty chapter saved as the place
+               the novel reopens at. Only a KNOWN zero counts; a provider that
+               reports no size at all gives -1, and dropping those would empty
+               the library. */
+            fun empty(e: Saf.Entry) = e.size == 0L
             for (e in Saf.children(cr, treeUri, dir.docId)) {
                 if (e.isDir && e.name == "translated") translatedId = e.docId
-                else if (!e.isDir && Zips.isGzName(e.name)) {
+                else if (e.isDir || empty(e)) continue
+                else if (Zips.isGzName(e.name)) {
                     val n = e.name.removeSuffix(".gz")
                     if (CHAPTER_RE.matches(n)) gzSource[n] = Zips.gzRef(e.docId)
-                } else if (!e.isDir && CHAPTER_RE.matches(e.name)) source[e.name] = e.docId
+                } else if (CHAPTER_RE.matches(e.name)) source[e.name] = e.docId
             }
             val translated = HashMap<String, String>()
             val gzTranslated = HashMap<String, String>()
             translatedId?.let {
                 for (e in Saf.children(cr, treeUri, it)) {
-                    if (e.isDir) continue
+                    if (e.isDir || empty(e)) continue
                     if (Zips.isGzName(e.name)) {
                         val n = e.name.removeSuffix(".gz")
                         if (CHAPTER_RE.matches(n)) gzTranslated[n] = Zips.gzRef(e.docId)

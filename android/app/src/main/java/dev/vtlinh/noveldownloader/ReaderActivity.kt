@@ -1002,7 +1002,14 @@ class ReaderActivity : AppCompatActivity() {
         if (saved != null && ord != null) {
             val name = saved.substringBefore('|')
             val para = saved.substringAfter('|').toIntOrNull() ?: 0
-            val idx = ord.indexOf(name)
+            /* By chapter NUMBER, as restoreTargetFor and onCreate both resolve
+               the same stored name — an exact-string compare misses a chapter
+               saved under one spelling and listed under another (a title
+               suffix appearing or going), and the miss is not harmless: it
+               falls through to reading from the top of the viewport, and the
+               first spoken sentence then calls saveTtsPos, overwriting the
+               only record of where the user actually stopped. */
+            val idx = ord.indexOfFirst { sameChapter(name, it) }
             if (idx >= 0) {
                 val lc = loadedChapters.firstOrNull { it.idx == idx }
                 if (lc != null) {
@@ -1017,7 +1024,11 @@ class ReaderActivity : AppCompatActivity() {
                     startTtsFrom(restoreOffsetIn(lc.start, chEnd, para, anchor))
                 } else {
                     pendingSpeakAfterOpen = true
-                    openAt(idx, para)
+                    /* with the anchor, exactly as the loaded branch three
+                       lines above: openAt runs the same restoreOffsetIn, and
+                       without the stored paragraph text the index-drift
+                       correction it exists for never runs at all */
+                    openAt(idx, para, slugX.let { prefs.getString("ttsParaText:$it", null) })
                 }
                 return
             }
