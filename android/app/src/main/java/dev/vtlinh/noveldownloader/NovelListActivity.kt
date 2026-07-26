@@ -614,15 +614,21 @@ class NovelListActivity : AppCompatActivity() {
                deleted came down to the order the provider happened to
                enumerate them in. The recorded directory settles it; the slug
                arm is only for a library older than that column. */
-            val recorded = try { store.dirNameFor(folder, slug) } catch (e: Exception) { null }
             var deleted = true
             try {
                 val dirName = try {
                     store.dirNameOrGuess(folder, slug, row.rec.title)
                 } catch (e: Exception) { Extractor.folderName(row.rec.title.ifEmpty { slug }, slug) }
                 val kids = children(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+                /* The recorded name first — it is the only one that can be
+                   trusted when two novels' titles sanitise alike. The slug
+                   match stays as a FALLBACK for when that name isn't on disk
+                   (the user renamed the folder, a restore recreated it): its
+                   danger was being tried alongside the recorded name, where
+                   the provider's enumeration order decided which of two
+                   colliding novels got deleted. */
                 val dir = kids.firstOrNull { it.third && it.second == dirName }
-                    ?: if (recorded == null) kids.firstOrNull { it.third && slugify(it.second) == slug } else null
+                    ?: kids.firstOrNull { it.third && slugify(it.second) == slug }
                 if (dir != null) {
                     /* a refusal is REPORTED, not thrown */
                     deleted = DocumentsContract.deleteDocument(

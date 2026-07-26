@@ -145,6 +145,29 @@ class ChapterNameTest {
         assertTrue(Zips.isPartName("$tmp.txt"))
     }
 
+    /* SAF answers a taken name by MINTING one rather than failing, and a
+       minted file matches nothing in the app: the reader can't see it, the
+       sweeps ignore it, and the index records it as the chapter. The write
+       has to notice. */
+    @Test
+    fun `a minted name is recognised as a collision`() {
+        assertTrue(Zips.isMinted("Chapter 5.txt.gz", "Chapter 5.txt (1).gz"))
+        assertTrue(Zips.isMinted("Chapter 5.txt", "Chapter 5 (2).txt"))
+    }
+
+    /* ...but SAF rewrites display names for other reasons too — it forces the
+       extension to match the mime type, which this app relies on elsewhere.
+       Treating every rewrite as a collision would delete the file just
+       written and fail EVERY chapter on such a provider. */
+    @Test
+    fun `a provider normalising the name is not a collision`() {
+        assertFalse(Zips.isMinted("Chapter 5.txt.gz", "Chapter 5.txt.gz"))
+        assertFalse("an added extension is not a mint", Zips.isMinted("Chapter 5.txt", "Chapter 5.txt.txt"))
+        assertFalse(Zips.isMinted("Chapter 5.txt.gz.part", "Chapter 5.txt.gz.part.gz"))
+        assertFalse("another chapter is not our name minted", Zips.isMinted("Chapter 5.txt", "Chapter 6.txt"))
+        assertFalse(Zips.isMinted("Chapter 5.txt", "Chapter 50 (1).txt"))
+    }
+
     @Test
     fun `the finished name is unchanged by the temporary one`() {
         assertTrue(re.matches("Chapter 5.txt"))

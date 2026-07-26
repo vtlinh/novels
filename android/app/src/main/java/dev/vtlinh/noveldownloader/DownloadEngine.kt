@@ -848,6 +848,18 @@ class DownloadEngine(
            the dedupe deleted those chapters with no download to put them
            back. Before the parse loop, because a page that turns out to be
            real still has to be read in its own place in the order. */
+        /* Every page in range is either read or recorded as missing. A page
+           count raised AFTER the fetch loop ended — by this confirm pass, or
+           by a retry — leaves pages that were never requested at all, and the
+           parse loop below simply skips what isn't in `pageHtml`. They never
+           entered `missed`, so the listing read as complete with a page of
+           chapters absent and the dedupe deleted them: the hole this whole
+           mechanism exists to prevent, re-entered through the code added to
+           strengthen it. */
+        fun accountForRange() {
+            for (p in 2..last) if (p !in pageHtml && p !in missed) missed.add(p)
+        }
+        accountForRange()
         val tailSuspects = missed.toList()
         if (tailSuspects.isNotEmpty()) {
             val htmls = arrayOfNulls<String>(tailSuspects.size)
@@ -867,6 +879,8 @@ class DownloadEngine(
                 last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
             }
         }
+        /* ...and again, since the pages just read can raise the count too */
+        accountForRange()
         missed.removeAll(Listing.forgivableTailPages(missed, gone, pageHtml.keys, last).toSet())
         /* Collected in page order — discovery order is the site's order, and
            the site's order is what names every file. */
@@ -880,15 +894,20 @@ class DownloadEngine(
             missed.add(p)
             break
         }
-        if (seen.isEmpty()) return@withContext null
         /* A status check renames and deletes but never downloads, so nothing
            here self-corrects. Acting on a listing with a page missing would
            renumber the library against a short list and delete the chapters
-           the gap hid. Report nothing rather than something wrong. */
+           the gap hid. Report nothing rather than something wrong.
+
+           BEFORE the empty check: a listing that is both partial and yielded
+           nothing is still partial, and answering "not this novel" sends the
+           caller to the site's other host — the one thing that must not
+           happen with pages missing. */
         if (missed.isNotEmpty()) {
             log("! $slug: listing page ${missed.first()} would not load — skipping this novel rather than acting on a partial list")
             throw PartialListing()
         }
+        if (seen.isEmpty()) return@withContext null
         val siteOrdered = seen.values.toList()
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
@@ -1078,6 +1097,16 @@ class DownloadEngine(
                every one of their files. That also covers the case where NOTHING
                past page 1 loads: the whole tail is "gone", far too much to
                excuse, so the listing is short rather than falsely complete. */
+        /* Every page in range is either read or recorded as missing. A page
+           count raised AFTER the fetch loop ended — by the tail confirmation
+           or a retry, both of which read pagination off pages page 1 hadn't
+           seen — leaves pages that were never requested at all. The collect
+           loop simply skips what isn't in `pageHtml`, so those pages never
+           entered `missed`: the listing read as COMPLETE with fifty chapters
+           absent, and the dedupe deleted their files. */
+        fun accountForRange() {
+            for (p in 2..last) if (p !in pageHtml && p !in missed) missed.add(p)
+        }
         fun forgiveOverRead() {
             /* the rule itself is in Listing.forgivableTailPages, so it can be
                tested without a network — see ListingTest */
@@ -1100,6 +1129,7 @@ class DownloadEngine(
            wait: that is cheap enough to spend on a phantom page and enough to
            unmask a transient one. Only what is still missing afterwards can
            be forgiven. */
+        accountForRange()
         val tailSuspects = missed.filter { p ->
             p in gone && p > (pageHtml.keys.maxOrNull() ?: 1)
         }
@@ -1125,6 +1155,7 @@ class DownloadEngine(
                 missed.remove(p)
                 last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
             }
+            accountForRange()
         }
         forgiveOverRead()
 
@@ -1170,9 +1201,12 @@ class DownloadEngine(
                 pageHtml[retry[i]] = html
                 gone.remove(retry[i])
                 missed.remove(retry[i])
+                last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
             }
+            accountForRange()
         }
         if (stopRequested) { status("Stopped."); return@withContext }
+        accountForRange()
         forgiveOverRead()
         var listingComplete = missed.isEmpty()
         /* A hole doesn't invalidate the whole listing — only what comes AFTER
@@ -1496,6 +1530,16 @@ class DownloadEngine(
             if (!listingComplete) return true
             val owner = ownerOf[name] ?: return true   // unclaimed — a legacy save
             if (owner == ch.url) return true
+            /* A page from a DIFFERENT HOST is not a different chapter. These
+               novels are served from several, and the status sweep records
+               whichever answered — so after one host blips, every recorded
+               page differs from the listing's and every file reads as holding
+               the wrong chapter. That marks the whole novel stale, which
+               re-downloads it (free) and now also drops every translation
+               under those names (not free: the entire novel goes back to the
+               API). The dedupe already refuses to compare across hosts; so
+               does this. */
+            if (hostOf(owner) != hostOf(ch.url)) return true
             stale.add(name)
             return false
         }
@@ -1562,7 +1606,13 @@ class DownloadEngine(
                                    re-translated because its name was present.
                                    Drop it; the next translate run buys the
                                    right one. */
-                                if (replacing) dropTranslation(dir, ch.filename!!)
+                                /* Only for a name PROVEN to hold a different
+                                   chapter. refetchAll is a guess — it fires
+                                   when nothing can be identified, which is
+                                   exactly a legacy library, and dropping every
+                                   translation on a guess re-buys the whole
+                                   novel at the API's price. */
+                                if (ch.filename in stale) dropTranslation(dir, ch.filename!!)
                                 /* record the page it came from: that mapping is
                                    what keeps this file's name stable if the site
                                    later relabels or renumbers the chapter */
@@ -1739,7 +1789,15 @@ class DownloadEngine(
                own name again — every attempt minted a new invisible file while
                the reader kept serving the empty one. Clear the name and try
                once more. */
-            if (!replace) {
+            /* ...but only when what holds the name is EMPTY. The write fails
+               for transient reasons too (no space, a provider error), and
+               clearing on those would delete a perfectly good chapter the
+               index simply hadn't recorded. A zero-length file is the one
+               case this retry exists for. */
+            val squatterEmpty = !replace && listOf(name, "$name.gz").any { n ->
+                try { dir.findFile(n)?.takeIf { it.isFile }?.length() == 0L } catch (e: Exception) { false }
+            }
+            if (squatterEmpty) {
                 try { clear(name); clear("$name.gz") } catch (e: Exception) {}
                 Zips.writeGzDoc(context.contentResolver, dir.uri, "$name.gz", text)
                     ?.let { return it.toString() }
@@ -1764,7 +1822,7 @@ class DownloadEngine(
                the real name pointing at whatever was already there, and the
                file we just wrote under a name nothing in the app matches. */
             val got = Zips.docName(context.contentResolver, done)
-            if (got != null && got != name) {
+            if (got != null && Zips.isMinted(name, got)) {
                 try { DocumentsContract.deleteDocument(context.contentResolver, done) } catch (e2: Exception) {}
                 throw RuntimeException("$name is taken")
             }

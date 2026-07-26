@@ -269,15 +269,25 @@ object SpeechEdits {
        using the rule set after a timeout rather than starting another one
        each sentence — but the reader, and the editor's live preview, stay
        responsive. */
+    /* BOUNDED. A timed-out task is not cancellable — a backtracking matcher
+       doesn't check for interruption — so each timeout pins a thread until it
+       finishes on its own. An unbounded pool therefore leaks one spinning
+       thread per call, and the editor's live preview calls this on every
+       keystroke: typing "(a+)+b" one character at a time would pin a core per
+       character. With a hard ceiling and no queue, the extra submissions are
+       refused instead, which reads to the caller exactly like a timeout. */
     private val pool by lazy {
-        java.util.concurrent.Executors.newCachedThreadPool { r ->
-            Thread(r, "speech-rules").apply { isDaemon = true }
-        }
+        java.util.concurrent.ThreadPoolExecutor(
+            0, 2, 10L, java.util.concurrent.TimeUnit.SECONDS,
+            java.util.concurrent.SynchronousQueue(),
+        ) { r -> Thread(r, "speech-rules").apply { isDaemon = true } }
     }
 
     fun within(budgetMs: Long, work: () -> String): String? = try {
         pool.submit<String> { work() }.get(budgetMs, java.util.concurrent.TimeUnit.MILLISECONDS)
     } catch (e: Exception) {
+        /* timed out, or refused because both threads are still stuck on the
+           last runaway — either way we have no answer for this text */
         null
     }
 }
