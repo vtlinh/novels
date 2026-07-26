@@ -185,58 +185,117 @@ class DownloadEngine(
         }
     }
 
-    /* Filenames are identity, not meaning. A chapter keeps the file it was
-       first saved under — found by its page URL — and anything new takes the
-       next free "Chapter N.txt", counting from 1 in listing order. Nothing
-       is read out of the site's labels, so a typo or an unnumbered extra
-       can't cost a chapter its file or its place.
+    /* Bring the files into the page's order: the chapter at listing position
+       i lives in "Chapter i+1.txt". A chapter added in the middle pushes
+       every chapter after it up one, and the files move with them.
 
-       Where a chapter SITS is a separate fact, held in chapter_order and
-       rewritten from the listing on every download and status check. That's
-       what lets a chapter inserted mid-novel take its position and shift
-       everything after it, without renaming a single file on disk.
+       Renames run from the LAST chapter backwards. Positions shift up when
+       something is inserted, so working from the end frees each target name
+       just before it is needed — nothing has to be parked under a temporary
+       name, and no file is moved twice however many insertions there were. A
+       listing that LOST a chapter shifts the other way, so a forward pass
+       picks up whatever the backward pass could not place, and a genuine
+       cycle falls back to a temp name.
 
-       Files saved before URLs were recorded are adopted under their old
-       derived name, so an existing library keeps what it has rather than
-       downloading itself again as Chapter 1..N. */
-    private fun assignFilenames(
+       A chapter's page URL says which file is its own. Files saved before
+       that was recorded are matched by the name the old numbering would have
+       given them, so an existing library is renamed into order rather than
+       downloaded again. */
+    private fun renameToListingOrder(
+        treeUri: Uri,
+        dir: DocumentFile,
         store: DownloadStore,
         folderKey: String,
         slug: String,
         inSiteOrder: List<Chapter>,
     ) {
+        val cr = context.contentResolver
         val byUrl = store.urlMap(folderKey, slug)
-        val onRecord = store.get(folderKey, slug).keys
-        val used = HashSet<String>(onRecord)
-        used.addAll(byUrl.values)
+        val onRecord = store.get(folderKey, slug)
+        if (byUrl.isEmpty() && onRecord.isEmpty()) return    // nothing downloaded yet
         val legacy = legacyNames(inSiteOrder)
-        var adopted = 0
-        /* Count on from the highest name already in use rather than filling
-           gaps below it. A fresh novel still numbers 1, 2, 3… in listing
-           order; a library carrying files named for the site's own numbering
-           gets its next chapter after those, instead of a new chapter
-           appearing as "Chapter 1" halfway down the list. */
-        var next = 1 + (
-            used.mapNotNull { Regex("^Chapter (\\d+)").find(it)?.groupValues?.get(1)?.toIntOrNull() }
-                .maxOrNull() ?: 0
-            )
-        for (ch in inSiteOrder) {
-            val mapped = byUrl[ch.url]
-            if (mapped != null) { ch.filename = mapped; continue }
-            val old = legacy[ch.url]
-            if (old != null && old in onRecord) {
-                ch.filename = old
-                store.linkUrl(folderKey, slug, old, ch.url)
-                adopted++
-                continue
-            }
-            var name = "Chapter $next.txt"
-            while (name in used) { next++; name = "Chapter $next.txt" }
-            used.add(name)
-            next++
-            ch.filename = name
+
+        val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return }
+        val files = HashMap<String, String>()                // name -> docId
+        var translatedId: String? = null
+        for (e in Saf.children(cr, treeUri, dirId)) {
+            if (e.isDir) { if (e.name == "translated") translatedId = e.docId } else files[e.name] = e.docId
         }
-        if (adopted > 0) log("matched $adopted existing chapter file(s) to their page")
+        val translated = HashMap<String, String>()
+        translatedId?.let { id ->
+            for (e in Saf.children(cr, treeUri, id)) if (!e.isDir) translated[e.name] = e.docId
+        }
+
+        /* what has to move, walked from the last chapter back */
+        val pending = LinkedHashMap<String, String>()
+        for (ch in inSiteOrder.asReversed()) {
+            val want = ch.filename ?: continue
+            val have = byUrl[ch.url] ?: legacy[ch.url]?.takeIf { it in onRecord } ?: continue
+            if (have != want) pending[have] = want
+            else if (ch.url !in byUrl) store.linkUrl(folderKey, slug, have, ch.url)
+        }
+        if (pending.isEmpty()) return
+
+        fun occupied(n: String) = files.containsKey(n) || files.containsKey("$n.gz")
+
+        /* move both the chapter and its translated counterpart; a compressed
+           chapter is the same name with .gz on the end */
+        fun move(from: String, to: String): Boolean {
+            var moved = false
+            for (sfx in listOf("", ".gz")) {
+                files[from + sfx]?.let { id ->
+                    Saf.rename(cr, treeUri, id, to + sfx)?.let { newId ->
+                        files.remove(from + sfx)
+                        files[to + sfx] = newId
+                        store.renameChapter(
+                            folderKey, slug, from, to,
+                            DocumentsContract.buildDocumentUriUsingTree(treeUri, newId).toString(),
+                        )
+                        moved = true
+                    }
+                }
+                translated[from + sfx]?.let { id ->
+                    Saf.rename(cr, treeUri, id, to + sfx)?.let { newId ->
+                        translated.remove(from + sfx)
+                        translated[to + sfx] = newId
+                    }
+                }
+            }
+            return moved
+        }
+
+        status("Renumbering chapters to match the site…")
+        var renamed = 0
+        var parked = 0
+        while (pending.isNotEmpty() && !stopRequested) {
+            var progress = false
+            val walk = pending.entries.iterator()
+            while (walk.hasNext()) {
+                val e = walk.next()
+                if (occupied(e.value)) {
+                    /* Held by a file no pending rename will ever move — a
+                       chapter the site dropped, say. Waiting or parking would
+                       only shuffle files under temp names, so leave this one
+                       where it is; the listing still orders it correctly. */
+                    if (!pending.containsKey(e.value)) { walk.remove(); progress = true }
+                    continue                          // otherwise its turn comes
+                }
+                if (move(e.key, e.value)) renamed++
+                walk.remove()
+                progress = true
+            }
+            if (progress) continue
+            /* nothing could move: the remaining renames form a cycle, so park
+               one out of the way to break it */
+            val e = pending.entries.first()
+            val park = "Chapter __shift$parked.txt"
+            parked++
+            move(e.key, park)
+            pending.remove(e.key)
+            pending[park] = e.value
+            if (parked > inSiteOrder.size) break     // safety valve
+        }
+        if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
     }
 
     /* How chapters were named before the URL map existed: the site's own
@@ -345,12 +404,23 @@ class DownloadEngine(
             fetched = batch.last()
         }
         if (seen.isEmpty()) return@withContext null
-        /* Name them exactly as run() would, off the same identity map, so
-           the order this reports lines up with the files on disk. */
         val siteOrdered = seen.values.toList()
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
-        assignFilenames(DownloadStore(context), folderKey, slug, siteOrdered)
+        /* Report the name each chapter actually lives under, so the order
+           recorded here matches the files on disk. A status check doesn't
+           move anything — renaming a whole library is the download's job —
+           so a chapter that has shifted keeps its old name until then, and
+           only a chapter with no file yet takes its positional one. */
+        val store = DownloadStore(context)
+        val byUrl = store.urlMap(folderKey, slug)
+        val onRecord = store.get(folderKey, slug)
+        val legacy = legacyNames(siteOrdered)
+        for ((i, ch) in siteOrdered.withIndex()) {
+            ch.filename = byUrl[ch.url]
+                ?: legacy[ch.url]?.takeIf { it in onRecord }
+                ?: "Chapter ${i + 1}.txt"
+        }
         SiteStatus(
             siteOrdered.size, site.isCompleted(doc), Sites.author(doc),
             siteOrdered.mapNotNull { it.filename },
@@ -469,7 +539,7 @@ class DownloadEngine(
         /* the site's own number, still wanted for the heading inside the file */
         for (ch in chapters) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
-        assignFilenames(store, folderKey, slug, siteOrdered)
+        for ((i, ch) in siteOrdered.withIndex()) ch.filename = "Chapter ${i + 1}.txt"
         if (chapters.isEmpty()) {
             log("No chapters found — site layout may have changed")
             status("Error: no chapters found")
@@ -530,6 +600,7 @@ class DownloadEngine(
             status("Error: could not create the novel folder")
             return@withContext
         }
+        renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
         log("Saving to: $folderName/")
 
         status("Checking already-downloaded chapters…")
