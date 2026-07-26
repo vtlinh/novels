@@ -610,13 +610,18 @@ class NovelListActivity : AppCompatActivity() {
             { _, _ -> },
         )
         lifecycleScope.launch {
-            /* A complete novel (site finished + everything on disk) can never
-               regress — no need to recheck it — EXCEPT when its site chapter
-               order was never indexed: those are checked once more so the
-               reader gets its ordering. */
+            /* Skip only a novel that is genuinely done — the site has
+               finished it AND every chapter is here. The stored flag alone
+               isn't that: it can be set on a novel still missing chapters,
+               which is precisely the novel a check should look at. Same test
+               the rows use to decide between a Complete tag and a Download
+               button, so what the list offers and what a check visits agree.
+               A novel whose chapter order was never indexed is checked once
+               more regardless, so the reader gets its ordering. */
             val targets = withContext(Dispatchers.IO) {
                 rows().filter {
-                    !it.rec.complete || store.chapterOrderCount(folder, it.rec.slug) == 0
+                    val done = it.rec.complete && it.rec.total > 0 && it.local >= it.rec.total
+                    !done || store.chapterOrderCount(folder, it.rec.slug) == 0
                 }
             }
             if (targets.isEmpty()) {
