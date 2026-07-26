@@ -104,12 +104,26 @@ object Zips {
             for (f in kids) {
                 if (f.isDir || !isGzName(f.name)) continue
                 val target = f.name.removeSuffix(".gz")
-                if (target !in names) {
-                    val text = readGz(cr, treeUri, f.docId) ?: continue
+                val text = readGz(cr, treeUri, f.docId) ?: continue   // unreadable .gz: leave it be
+                val bytes = text.toByteArray(Charsets.UTF_8)
+                /* A plain file being PRESENT is not proof it holds the
+                   chapter: an interrupted run (a kill, a full volume) leaves
+                   an empty or short one behind, and trusting the name alone
+                   meant skipping the rewrite and then deleting the .gz — the
+                   only good copy. Compare what's there against what we're
+                   about to write, exactly as the compress direction verifies
+                   its .gz before dropping the original. */
+                val existing = kids.firstOrNull { !it.isDir && it.name == target }
+                if (existing == null || existing.size != bytes.size.toLong()) {
+                    existing?.let {
+                        try {
+                            DocumentsContract.deleteDocument(cr, docUri(treeUri, it.docId))
+                        } catch (e: Exception) { }
+                    }
                     val u = DocumentsContract.createDocument(cr, parentUri, "text/plain", target)
                         ?: continue
                     try {
-                        cr.openOutputStream(u)?.use { it.write(text.toByteArray(Charsets.UTF_8)) } ?: continue
+                        cr.openOutputStream(u)?.use { it.write(bytes) } ?: continue
                     } catch (e: Exception) { continue }
                     names.add(target)
                 }
