@@ -2030,7 +2030,29 @@ class ReaderActivity : AppCompatActivity() {
             val sb = StringBuilder()
             var targetBodyLen = 0
             for (i in p..last) {
-                val b = readAt(i) ?: continue
+                val b = readAt(i)
+                if (b == null) {
+                    /* The chapter is listed but its file won't read — a
+                       download killed mid-write leaves a truncated .gz that
+                       still has a name. Skipping it silently meant the header
+                       resolved to the NEXT chapter and saved that as the
+                       reading place, so the spot was not just unreachable but
+                       overwritten; with TTS it started speaking the next
+                       chapter from the top and wrote that over the saved
+                       paragraph. Say so, and stop recording a place we never
+                       reached — the same treatment as a chapter that is gone
+                       outright, cleared as soon as one is picked. */
+                    if (i == p) {
+                        spotLost = true
+                        android.widget.Toast.makeText(
+                            this@ReaderActivity,
+                            "That chapter can't be read — it may not have finished downloading. " +
+                                "Re-download the novel, or pick another chapter.",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    continue
+                }
                 if (sb.isNotEmpty()) sb.append(SEP)
                 loadedChapters.add(LoadedChapter(i, sb.length, headingOf(b)))
                 sb.append(b)

@@ -13,6 +13,12 @@ object Zips {
 
     fun isGzName(name: String) = name.endsWith(".txt.gz")
 
+    /* suffix a half-written chapter carries until its bytes are down; nothing
+       else in the app matches a name ending in it, which is the point */
+    const val PART = ".part"
+
+    fun isPartName(name: String) = name.endsWith(PART)
+
     private const val GZREF = "gz::"
     fun gzRef(docId: String) = GZREF + docId
     fun isGzRef(s: String) = s.startsWith(GZREF)
@@ -37,8 +43,28 @@ object Zips {
            .gz is worse than no file at all: the index counts it as the chapter
            (it has a length, and no page is recorded against it), so the chapter
            is never fetched again and reads blank for good. Clear it up. */
+        return writeGzUnder(cr, parentDocUri, name) { it.write(text.toByteArray(Charsets.UTF_8)) }
+    }
+
+    /* Write under a name nothing in the app will adopt, and only rename it
+       into place once the bytes are down. Cleaning up on EXCEPTION isn't
+       enough: a process kill between creating the document and finishing the
+       write runs no catch, and the truncated ".gz" it leaves has a length and
+       no recorded page, so the index reads it as a completed chapter and never
+       fetches it again — the chapter is blank for good, and the re-fetch that
+       might have saved it can't overwrite the name either (SAF mints
+       "Chapter 5.txt (1).gz", which matches no pattern here). A leftover
+       ".part" matches nothing, so the chapter simply stays missing and the
+       next run downloads it properly. */
+    private fun writeGzUnder(
+        cr: ContentResolver,
+        parentDocUri: Uri,
+        name: String,
+        write: (java.io.OutputStream) -> Unit,
+    ): Uri? {
+        val tmp = "$name$PART"
         val u = try {
-            DocumentsContract.createDocument(cr, parentDocUri, "application/gzip", name)
+            DocumentsContract.createDocument(cr, parentDocUri, "application/gzip", tmp)
         } catch (e: Exception) { null } ?: return null
         return try {
             /* opened inside the try and closed by it: the GZIPOutputStream
@@ -46,9 +72,10 @@ object Zips {
                finishes the deflate stream before closing the one below. */
             cr.openOutputStream(u).use { os ->
                 if (os == null) throw java.io.IOException("could not open $name")
-                java.util.zip.GZIPOutputStream(os).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                java.util.zip.GZIPOutputStream(os).use { write(it) }
             }
-            u
+            val renamed = DocumentsContract.renameDocument(cr, u, name)
+            renamed ?: throw java.io.IOException("could not name $name")
         } catch (e: Exception) {
             try { DocumentsContract.deleteDocument(cr, u) } catch (e2: Exception) {}
             null
@@ -60,21 +87,8 @@ object Zips {
 
     /* gzip bytes exactly as given, for the compress pass — it is moving a
        file, not authoring one, so it must not reinterpret the encoding */
-    fun writeGzBytes(cr: ContentResolver, parentDocUri: Uri, name: String, bytes: ByteArray): Boolean {
-        val u = try {
-            DocumentsContract.createDocument(cr, parentDocUri, "application/gzip", name)
-        } catch (e: Exception) { null } ?: return false
-        return try {
-            cr.openOutputStream(u).use { os ->
-                if (os == null) throw java.io.IOException("could not open $name")
-                java.util.zip.GZIPOutputStream(os).use { it.write(bytes) }
-            }
-            true
-        } catch (e: Exception) {
-            try { DocumentsContract.deleteDocument(cr, u) } catch (e2: Exception) {}
-            false
-        }
-    }
+    fun writeGzBytes(cr: ContentResolver, parentDocUri: Uri, name: String, bytes: ByteArray): Boolean =
+        writeGzUnder(cr, parentDocUri, name) { it.write(bytes) } != null
 
     fun docSize(cr: ContentResolver, uri: Uri): Long = try {
         cr.query(uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use {
@@ -105,6 +119,13 @@ object Zips {
         /* gz every loose chapter file directly under parentDocId */
         fun gzChildren(parentDocId: String) {
             val kids = Saf.children(cr, treeUri, parentDocId)
+            /* Sweep up half-written chapters from a run the system killed.
+               They are invisible to everything else by design, so this is the
+               only thing that would ever remove them; the chapter itself is
+               absent from the index, so the next download fetches it again. */
+            for (f in kids) {
+                if (!f.isDir && isPartName(f.name)) deleteDoc(cr, docUri(treeUri, f.docId))
+            }
             val byName = kids.associateBy { it.name }
             val parentUri = docUri(treeUri, parentDocId)
             for (f in kids) {
