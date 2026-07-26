@@ -24,6 +24,49 @@ object ChapterName {
 
 object Listing {
 
+    /* What a page's chapter links are, and whether we had to guess.
+
+       This is the single most consequential read in the app: the links, in
+       this order, are the novel — position N names the file that holds
+       chapter N, and every destructive pass compares what is on disk against
+       exactly this list. It lived twice, inline and private, in the download
+       and in the status check, which is how the two drifted apart. One copy,
+       and a test can reach it — see RealPageTest, which runs it over real
+       pages captured from both sites.
+
+       `fellBack` means the site's own chapter-list container was not there
+       (or held nothing) and these links came from reading the whole document
+       instead, where the only chapter links are the "latest chapters" widget:
+       a handful, in the wrong order. That is not a short listing, it is a
+       different document, and nothing destructive may run against it. */
+    class Found(val links: List<Pair<String, String>>, val fellBack: Boolean)
+
+    fun collect(d: org.jsoup.nodes.Document, site: Site, slug: String): Found {
+        fun scan(root: org.jsoup.nodes.Element, inList: Boolean): List<Pair<String, String>> {
+            val out = ArrayList<Pair<String, String>>()
+            for (a in root.select("a[href]")) {
+                val href = a.absUrl("href").substringBefore('#')
+                if (href.isEmpty()) continue
+                val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
+                /* Inside the site's list, being there is what identifies a
+                   chapter; outside it there is no such evidence, so the
+                   stricter URL test applies. */
+                val isChapter =
+                    if (inList) site.isChapterInList(path, slug)
+                    else site.isChapterPath(path, slug)
+                if (!isChapter) continue
+                out.add(href to a.text().trim())
+            }
+            return out
+        }
+        val scope = d.selectFirst(site.listScope)
+        val inScope = if (scope == null) emptyList() else scan(scope, inList = true)
+        if (inScope.isNotEmpty()) return Found(inScope, false)
+        val loose = scan(d, inList = false)
+        return Found(loose, loose.isNotEmpty())
+    }
+
+
     /* Pages that reported "not there" and can be written off as the page
        count over-reading the pagination, rather than as holes in the listing.
 

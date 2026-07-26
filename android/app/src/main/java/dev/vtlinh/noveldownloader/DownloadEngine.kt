@@ -818,63 +818,22 @@ class DownloadEngine(
         val doc = Jsoup.parse(first.html, base)
         saveCover(slug, doc)
         val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
-        /* Set when a page had no usable chapter-list container and we had to
-           read the whole document instead. Everything destructive is off in
-           that case: the links we get are a widget, not the listing. */
+        /* Set when a page had no usable chapter-list container and the links
+           came from reading the whole document instead. Everything
+           destructive is off in that case: those are widget links, not the
+           listing. */
         var fellBack = false
-        /* Collect chapter links from the REAL chapter list only — pages also
-           carry a "latest chapters" widget whose links come first in the HTML
-           and would corrupt the site order. Whole-document fallback when the
-           scoped container is missing or yields nothing new. */
-        /* Returns how many chapter links the page held. A status check renames
-           files and deletes them, so it needs the same answer a download does:
-           a page that came back 200 with no chapters on it — a soft 404, a WAF
-           interstitial, a layout change — is a hole, not an empty page, and
-           acting on a listing with a hole in it renumbers the library against
-           a short list and deletes the chapters the hole hid. */
+        /* One implementation, in Listing.collect — this logic used to be
+           written out separately here and in run(), which is how the two
+           drifted apart. Adding preserves discovery order, which IS the
+           site's order and therefore names every file. */
         fun addLinks(d: org.jsoup.nodes.Document): Int {
-            /* Returns how many chapter links the container HOLDS, not how many
-               were new. A listing page whose chapters were all seen already is
-               still a real chapter list — counting only new ones made it look
-               empty and sent us to the whole-document fallback, which is
-               exactly where the "latest chapters" widget lives.
-
-               `inList` reads links from the site's own chapter list, where
-               being in that container is what identifies a chapter; the
-               whole-document fallback has no such evidence and falls back to
-               the stricter URL test. */
-            fun collect(root: org.jsoup.nodes.Element, inList: Boolean): Int {
-                var found = 0
-                for (a in root.select("a[href]")) {
-                    val href = a.absUrl("href").substringBefore('#')
-                    if (href.isEmpty()) continue
-                    val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                    val isChapter =
-                        if (inList) site.isChapterInList(path, slug)
-                        else site.isChapterPath(path, slug)
-                    if (!isChapter) continue
-                    found++
-                    if (!seen.containsKey(href)) seen[href] = Chapter(href, a.text().trim())
-                }
-                return found
+            val found = Listing.collect(d, site, slug)
+            if (found.fellBack) fellBack = true
+            for ((href, text) in found.links) {
+                if (!seen.containsKey(href)) seen[href] = Chapter(href, text)
             }
-            val scope = d.selectFirst(site.listScope)
-            val inScope = if (scope == null) 0 else collect(scope, inList = true)
-            if (inScope > 0) return inScope
-            /* The site's own chapter-list container is what identifies a
-               chapter and fixes its ORDER. Without it we are reading the
-               whole page, where the only chapter links are the "latest
-               chapters" widget — a handful, in the wrong order. That is not a
-               short listing, it is a different document, and treating it as
-               the truth deleted the rest of the novel. */
-            /* ...and only if it actually produced links. A page that yields
-               nothing either way is a blank page, which the gap logic already
-               accounts for — poisoning the whole run for it would leave a
-               novel with one over-read tail page permanently un-renamed and
-               un-deduped. What is dangerous is ACTING on widget links. */
-            val loose = collect(d, inList = false)
-            if (loose > 0) fellBack = true
-            return loose
+            return found.links.size
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
@@ -1063,52 +1022,13 @@ class DownloadEngine(
         val seen = LinkedHashMap<String, Chapter>()
         /* see checkStatus */
         var fellBack = false
-        /* Collect chapter links from the REAL chapter list only — pages also
-           carry a "latest chapters" widget whose links come first in the HTML
-           and would corrupt the site order. Whole-document fallback when the
-           scoped container is missing or yields nothing new. */
-        /* Returns how many chapter links this page held, so the caller can
-           tell a real listing page from one that answered 200 with nothing on
-           it — a soft 404, a WAF interstitial, a layout change. Those never
-           entered `missed`, so the listing looked complete while a page of
-           chapters was simply absent, and the dedupe then deleted their files
-           as chapters the site no longer lists. */
         fun addLinks(d: org.jsoup.nodes.Document): Int {
-            /* Counts how many chapter links the container HOLDS, not how many
-               were new. A listing page whose chapters were all seen already is
-               still a real chapter list — counting only new ones made it look
-               empty and sent us to the whole-document fallback, which is
-               exactly where the "latest chapters" widget lives.
-
-               `inList` reads links from the site's own chapter list, where
-               being in that container is what identifies a chapter; the
-               whole-document fallback has no such evidence and falls back to
-               the stricter URL test. */
-            fun collect(root: org.jsoup.nodes.Element, inList: Boolean): Int {
-                var found = 0
-                for (a in root.select("a[href]")) {
-                    val href = a.absUrl("href").substringBefore('#')
-                    if (href.isEmpty()) continue
-                    val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                    val isChapter =
-                        if (inList) site.isChapterInList(path, slug)
-                        else site.isChapterPath(path, slug)
-                    if (!isChapter) continue
-                    found++
-                    if (!seen.containsKey(href)) seen[href] = Chapter(href, a.text().trim())
-                }
-                return found
+            val found = Listing.collect(d, site, slug)
+            if (found.fellBack) fellBack = true
+            for ((href, text) in found.links) {
+                if (!seen.containsKey(href)) seen[href] = Chapter(href, text)
             }
-            val scope = d.selectFirst(site.listScope)
-            val inScope = if (scope == null) 0 else collect(scope, inList = true)
-            if (inScope > 0) return inScope
-            /* see checkStatus: a whole-document fallback is the "latest
-               chapters" widget, not the chapter list — but a page that yields
-               nothing either way is just a blank page, and the gap logic
-               already handles those */
-            val loose = collect(d, inList = false)
-            if (loose > 0) fellBack = true
-            return loose
+            return found.links.size
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
