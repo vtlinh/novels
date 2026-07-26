@@ -236,7 +236,13 @@ class DownloadEngine(
             for (e in Saf.children(cr, treeUri, id)) if (!e.isDir) translated[e.name] = e.docId
         }
 
-        fun occupied(n: String) = files.containsKey(n) || files.containsKey("$n.gz")
+        /* Free means free in BOTH folders. A translation whose source is gone
+           still sits in translated/ under its old name, and renaming a
+           chapter onto it would collide there while the main folder looked
+           clear — leaving the translation stranded on the wrong chapter. */
+        fun occupied(n: String) =
+            files.containsKey(n) || files.containsKey("$n.gz") ||
+                translated.containsKey(n) || translated.containsKey("$n.gz")
 
         /* move both the chapter and its translated counterpart; a compressed
            chapter is the same name with .gz on the end */
