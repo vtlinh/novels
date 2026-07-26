@@ -390,10 +390,14 @@ class NovelListActivity : AppCompatActivity() {
            Complete tag, hides its counts, and offers no way to fetch the
            rest. */
         val haveAll = row.rec.total > 0 && row.local >= row.rec.total
-        val done = row.rec.complete && haveAll
+        /* MORE files than the site lists — something is off, and the fix is
+           a download: it re-fetches the novel and clears whatever is surplus.
+           Counting that as settled hides the only button that can fix it. */
+        val surplus = row.rec.total > 0 && row.local > row.rec.total
+        val done = row.rec.complete && haveAll && !surplus
         /* checked, still-ongoing novel with every site chapter on disk:
            nothing to download until the site adds more */
-        val upToDate = !row.rec.complete && haveAll
+        val upToDate = !row.rec.complete && haveAll && !surplus
         val text = buildString {
             if (isHot(row.rec.slug)) append("★ ")   // hot marker (monochrome)
             append(row.display)
@@ -620,7 +624,7 @@ class NovelListActivity : AppCompatActivity() {
                more regardless, so the reader gets its ordering. */
             val targets = withContext(Dispatchers.IO) {
                 rows().filter {
-                    val done = it.rec.complete && it.rec.total > 0 && it.local >= it.rec.total
+                    val done = it.rec.complete && it.rec.total > 0 && it.local == it.rec.total
                     !done || store.chapterOrderCount(folder, it.rec.slug) == 0
                 }
             }
