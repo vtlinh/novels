@@ -218,13 +218,6 @@ class DownloadEngine(
         }
         if (pending.isEmpty()) return
 
-        /* Where the reader and the read-aloud left off is remembered by
-           FILENAME. Renaming underneath them would leave that name pointing
-           at whatever chapter now holds it — resuming somewhere else in the
-           book without anything looking wrong. Move those marks with the
-           files. */
-        remapSavedSpot(slug, pending)
-
         val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return }
         val files = HashMap<String, String>()                // name -> docId
         var translatedId: String? = null
@@ -243,6 +236,16 @@ class DownloadEngine(
         fun occupied(n: String) =
             files.containsKey(n) || files.containsKey("$n.gz") ||
                 translated.containsKey(n) || translated.containsKey("$n.gz")
+
+        /* Where the reader and the read-aloud left off is remembered by
+           FILENAME, so a mark has to travel with its file. Only moves that
+           the provider actually performed count: an intended move that never
+           happened — held up by a file nothing will shift — would otherwise
+           walk the mark one chapter back on every single pass. `whereFrom`
+           follows a file that gets parked mid-cycle back to the name the mark
+           knows it by. */
+        val applied = LinkedHashMap<String, String>()
+        val whereFrom = HashMap<String, String>()
 
         /* move both the chapter and its translated counterpart; a compressed
            chapter is the same name with .gz on the end */
@@ -266,6 +269,11 @@ class DownloadEngine(
                         translated[to + sfx] = newId
                     }
                 }
+            }
+            if (moved) {
+                val orig = whereFrom.remove(from) ?: from
+                whereFrom[to] = orig
+                applied[orig] = to
             }
             return moved
         }
@@ -301,6 +309,7 @@ class DownloadEngine(
             pending[park] = e.value
             if (parked > inSiteOrder.size) break     // safety valve
         }
+        remapSavedSpot(slug, applied)
         if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
     }
 
@@ -329,8 +338,8 @@ class DownloadEngine(
     }
 
     /* The saved reading spot and read-aloud spot both name their chapter by
-       filename, so a rename has to carry them across. Done from the same
-       from->to map the renames use, before anything moves — the marks are a
+       filename, so a rename has to carry them across. Fed only the moves the
+       rename pass really made, once it has finished — the marks are a
        pointer, not a file, and nothing reads them mid-pass. */
     private fun remapSavedSpot(slug: String, moves: Map<String, String>) {
         try {
