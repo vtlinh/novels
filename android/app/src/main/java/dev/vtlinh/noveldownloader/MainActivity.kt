@@ -13,8 +13,10 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -228,17 +230,36 @@ class MainActivity : AppCompatActivity() {
         installStuckCheck?.let { installHandler.removeCallbacks(it) }
         statusText.text = "Installing update…"
         installInFlight = true
-        try {
-            Updater.abandonSessions(this)   // clear any stuck/previous session first
-            Updater.install(this, apk)
-        } catch (e: Exception) {
-            installInFlight = false
-            updateFound = false
-            statusText.text = "Update failed — ${e.message}"
-            banner.text = "Update ready — tap to install"
-            banner.visibility = View.VISIBLE
-            return
+        lifecycleScope.launch {
+            /* Committing streams the whole APK into the session and fsyncs it.
+               On the UI thread that freezes the screen for the length of the
+               copy — long enough to earn an ANR on slow storage, and the stuck
+               check re-commits it up to twice more. The About screen and the
+               notification receiver were both moved off-thread for this; the
+               banner, which is the update path for anyone who never opens
+               About, was left behind. */
+            val err = withContext(Dispatchers.IO) {
+                try {
+                    Updater.abandonSessions(this@MainActivity)   // clear any stuck/previous session
+                    Updater.install(this@MainActivity, apk)
+                    null
+                } catch (e: Exception) { e.message ?: "install failed" }
+            }
+            if (err != null) {
+                installInFlight = false
+                updateFound = false
+                statusText.text = "Update failed — $err"
+                banner.text = "Update ready — tap to install"
+                banner.visibility = View.VISIBLE
+                return@launch
+            }
+            armStuckCheck(apk)
         }
+    }
+
+    private fun armStuckCheck(apk: java.io.File) {
+        val statusText = findViewById<TextView>(R.id.statusText)
+        val banner = findViewById<TextView>(R.id.updateBanner)
         installStuckCheck = Runnable {
             /* a successful silent install kills the process (so this never
                runs); a shown confirmation pauses us (so we're not RESUMED).
