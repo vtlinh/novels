@@ -631,7 +631,7 @@ class NovelListActivity : AppCompatActivity() {
                                         "https://truyenfull.live/${row.rec.slug}/",
                                     )
                                 for (u in urls) {
-                                    val res = try { engine.checkStatus(u) } catch (e: Exception) { null } ?: continue
+                                    val res = try { engine.checkStatus(u, folder) } catch (e: Exception) { null } ?: continue
                                     if (row.rec.url.isEmpty()) {
                                         store.registerNovel(folder, row.rec.slug, u, row.display, 0L)
                                     }
