@@ -47,8 +47,17 @@ object Saf {
         null
     }
 
-    fun readText(cr: ContentResolver, treeUri: Uri, docId: String): String? = try {
+    fun readText(cr: ContentResolver, treeUri: Uri, docId: String): String? =
+        readBytes(cr, treeUri, docId)?.toString(Charsets.UTF_8)
+
+    /* Raw bytes, for anything that only MOVES a file's contents. Decoding to a
+       String substitutes U+FFFD for anything that isn't valid UTF-8 rather
+       than failing, so a round-trip through readText rewrites those bytes as
+       replacement characters — and the compress pass then deletes the
+       original. Chapters this app downloads are UTF-8, but a library copied
+       in from elsewhere need not be. */
+    fun readBytes(cr: ContentResolver, treeUri: Uri, docId: String): ByteArray? = try {
         val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-        cr.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+        cr.openInputStream(uri)?.use { it.readBytes() }
     } catch (e: Exception) { null }
 }
