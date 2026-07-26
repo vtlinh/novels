@@ -21,6 +21,9 @@ class ChapterListActivity : AppCompatActivity() {
            with a title suffix like "Chapter 70 - Hoan chinh van.txt" */
         val CHAPTER_RE = Regex("Chapter (\\d+)(?:-(\\d+))?.*\\.txt")
 
+        /* how many places in a cached listing to spot-check before trusting it */
+        private const val CACHE_PROBES = 5
+
         class Chapters(
             val ordered: List<String>,               // chapter filenames in order
             val source: Map<String, String>,         // name -> docId or gz ref
@@ -77,15 +80,30 @@ class ChapterListActivity : AppCompatActivity() {
             if (slug != null && store != null) {
                 val cached = try { store.getChapterList(folder, slug) } catch (e: Exception) { null }
                 if (cached != null) {
-                    val firstRef = cached.source[cached.ordered.first()]
-                    val lastRef = cached.source[cached.ordered.last()]
-                    val ok = firstRef != null && lastRef != null &&
-                        refUsable(context, cr, treeUri, firstRef) &&
-                        refUsable(context, cr, treeUri, lastRef)
+                    /* Probing only the ends missed anything removed between
+                       them — a chapter deleted outside the app stayed in the
+                       listing, and the reader silently skipped over it with no
+                       gap shown. Spread the sample across the novel; still a
+                       handful of lookups, not a walk. */
+                    val n = cached.ordered.size
+                    val probes = LinkedHashSet<Int>()
+                    probes.add(0)
+                    probes.add(n - 1)
+                    for (k in 1 until CACHE_PROBES) probes.add(k * n / CACHE_PROBES)
+                    val ok = probes.all { i ->
+                        val ref = cached.source[cached.ordered.getOrNull(i) ?: return@all false]
+                        ref != null && refUsable(context, cr, treeUri, ref)
+                    }
                     if (ok) return Chapters(cached.ordered, cached.source, cached.translated)
                     try { store.clearChapterList(folder, slug) } catch (e: Exception) {}
                 }
             }
+            /* Taken before the walk. Listing a 7k-file folder over SAF takes
+               seconds, and a chapter saved during it clears the cache before
+               we finish — so writing our result afterwards would put back a
+               listing that never had that chapter, and nothing clears it
+               again once the download ends. */
+            val epoch = store?.chapterListEpoch() ?: -1L
             val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri))
             val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
                 ?: return Chapters(emptyList(), emptyMap(), emptyMap())
@@ -163,6 +181,7 @@ class ChapterListActivity : AppCompatActivity() {
                     store.saveChapterList(
                         folder, slug,
                         CachedChapterList(ordered, source, translated),
+                        epoch,
                     )
                 } catch (e: Exception) {}
             }

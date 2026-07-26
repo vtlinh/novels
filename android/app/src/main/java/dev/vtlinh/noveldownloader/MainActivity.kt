@@ -311,13 +311,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startDownload() {
-        val url = findViewById<EditText>(R.id.urlInput).text.toString().trim()
-        prefs.edit().putString("url", url).apply()
-        if (Sites.forUrl(url) == null) {
+        val typed = findViewById<EditText>(R.id.urlInput).text.toString().trim()
+        prefs.edit().putString("url", typed).apply()
+        val site = Sites.forUrl(typed)
+        if (site == null) {
             findViewById<TextView>(R.id.statusText).text =
                 "Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com"
             return
         }
+        /* Reduce to the novel's own URL before anything else touches it. The
+           site test only matches the host, so a chapter or listing URL —
+           exactly what gets shared from a phone browser — passes straight
+           through. The engine normalises internally, so the right novel still
+           downloaded, but the key the service publishes came from the LAST
+           path segment: "chuong-100" rather than the novel. Every guard that
+           asks "is this novel busy?" then answered no — the Library offered
+           Download again, and a Check status sweep would rename and dedupe
+           the novel's files underneath the running download. The browser
+           already normalises before starting; this path never did. */
+        val url = try { site.normalize(typed).first } catch (e: Exception) { typed }
         /* the user threw this novel away before — confirm before re-downloading */
         val slugKey = NovelListActivity.slugKeyFromUrl(url)
         val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()
