@@ -204,6 +204,14 @@ class DownloadService : Service() {
                 engine = eng
                 try {
                     eng.run(curUrl, Uri.parse(treePath), curTranslate, curKey, curForce)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    /* The service is going away. Cancellation is an Exception,
+                       so the catch below would swallow it and the loop would
+                       carry straight on popping the queue — every novel in it
+                       failing instantly against the dead job, which drained
+                       the whole persisted queue in a burst of ERROR lines.
+                       Leave the queue alone; the next foreground resumes it. */
+                    throw e
                 } catch (e: Exception) {
                     appendLog("ERROR: ${e.message}")
                     statusFlow.value = "Error: ${e.message}"

@@ -63,10 +63,18 @@ class DownloadEngine(
            silently stopped recording the place in the one being read. */
         private val renameEpochs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
-        fun renameEpochOf(slug: String): Long = renameEpochs[slug] ?: 0L
+        /* Letters and digits only, so the two sides agree. The engine bumps
+           under the site's slug; a reader opened on a novel adopted by the
+           folder scan holds a slug derived from the folder name instead, and
+           on a raw string compare those never match — leaving the guard
+           permanently off for exactly the libraries most likely to be
+           renumbered. Same rule the Library uses to reconcile the two. */
+        private fun epochKey(slug: String) = slug.lowercase().filter { it.isLetterOrDigit() }
+
+        fun renameEpochOf(slug: String): Long = renameEpochs[epochKey(slug)] ?: 0L
 
         fun bumpRenameEpoch(slug: String) {
-            renameEpochs[slug] = renameEpochOf(slug) + 1
+            renameEpochs[epochKey(slug)] = renameEpochOf(slug) + 1
         }
 
         /* app-private cover thumbnail for a novel */
@@ -859,7 +867,8 @@ class DownloadEngine(
            names every file. Parsing a retried page last would move its
            chapters to the end of the book. */
         val pageHtml = HashMap<Int, String>()
-        val missed = LinkedHashSet<Int>()      // pages that exist but wouldn't load
+        val missed = LinkedHashSet<Int>()      // pages that wouldn't load
+        val gone = HashSet<Int>()              // ...of those, the ones that said "not there"
         var fetched = 1
         while (fetched < last && !stopRequested) {
             val batch = ((fetched + 1)..last).toList()
@@ -883,11 +892,16 @@ class DownloadEngine(
             for ((i, html) in htmls.withIndex()) {
                 val p = batch[i]
                 if (html == null) {
-                    /* Gone means gone: the page count over-read the pagination,
-                       so there are no chapters there and nothing shifts. Every
-                       other refusal — blocked, throttled, unauthorised — is a
-                       page that exists and wouldn't load, which is a hole. */
-                    if (codes[i] != 404 && codes[i] != 410) missed.add(p)
+                    /* "Gone" only excuses a page past the END of the list,
+                       where the page count over-read the pagination and there
+                       was never anything to miss. A 404 in the MIDDLE is a
+                       hole like any other, and treating it as nothing left the
+                       listing looking complete while ~50 chapters were absent
+                       — enough for the rename pass to renumber the novel
+                       around them and the dedupe to delete them as chapters
+                       the site no longer lists. Record it; the check below
+                       forgives it once we know nothing followed. */
+                    missed.add(p)
                     continue
                 }
                 pageHtml[p] = html
@@ -931,16 +945,21 @@ class DownloadEngine(
             }
             for ((i, html) in htmls.withIndex()) {
                 if (html == null) {
-                    /* it answered "not there" this time — the page count simply
-                       over-read the pagination, so it was never a hole */
-                    if (codes[i] == 404 || codes[i] == 410) missed.remove(retry[i])
+                    if (codes[i] == 404 || codes[i] == 410) gone.add(retry[i])
                     continue
                 }
                 pageHtml[retry[i]] = html
+                gone.remove(retry[i])
                 missed.remove(retry[i])
             }
         }
         if (stopRequested) { status("Stopped."); return@withContext }
+        /* A page that says "not there" and has nothing after it is the page
+           count over-reading the pagination — no chapters were ever there, so
+           it isn't a hole. One with real pages beyond it is a hole whatever
+           status it returned. */
+        val lastReal = pageHtml.keys.maxOrNull() ?: 1
+        missed.removeAll { it in gone && it > lastReal }
         val listingComplete = missed.isEmpty()
         /* A hole doesn't invalidate the whole listing — only what comes AFTER
            it. Chapters discovered before the first missing page are still at
@@ -989,8 +1008,13 @@ class DownloadEngine(
         store.touchNovel(folderKey, slug, System.currentTimeMillis())
         author?.let { store.setAuthor(folderKey, slug, it) }
         saveCover(slug, doc)
-        /* index the site's chapter order for the reader */
-        store.setChapterOrder(folderKey, slug, siteOrdered.mapNotNull { it.filename })
+        /* Index the site's chapter order for the reader — but only from a
+           listing we read in full. A prefix would replace a 4500-chapter
+           order with the 500 we managed to see, and the reader sorts by
+           exactly this, so the rest of the novel would fall out of order. */
+        if (listingComplete) {
+            store.setChapterOrder(folderKey, slug, siteOrdered.mapNotNull { it.filename })
+        }
 
         /* When translating, render the English folder name up front (Sonnet,
            Batches API) so chapters save straight into an "English (Vietnamese)"
@@ -1040,9 +1064,23 @@ class DownloadEngine(
            owned by the slug that claimed them; a different owner means make a
            new folder rather than move in. */
         val owner = try { store.slugOwningName(folderKey, folderName) } catch (e: Exception) { null }
-        if (owner != null && owner != slug) {
-            folderName = "$folderName ($slug)"
-            log("Another novel already uses that folder name — saving to \"$folderName\"")
+        /* Chapters already recorded under this slug mean the folder is ours
+           however it came to be — an old library predates the ownership
+           table entirely, and evicting THAT novel from the folder it has been
+           using would abandon every file in it and re-download the lot. */
+        val ours = owner == slug ||
+            (owner == null && try { store.chapterCount(folderKey, slug) > 0 } catch (e: Exception) { false })
+        if (!ours) {
+            /* Unclaimed but already full is somebody else's work — the first
+               of two colliding novels to run must not be able to claim, and
+               then be evicted from, the folder it has been living in. */
+            val existingDir = root.findFile(folderName)?.takeIf { it.isDirectory }
+            val occupied = owner != null ||
+                (existingDir != null && try { existingDir.listFiles().isNotEmpty() } catch (e: Exception) { false })
+            if (occupied) {
+                folderName = Extractor.sanitize("$folderName ($slug)").ifEmpty { slug }
+                log("Another novel already uses that folder name — saving to \"$folderName\"")
+            }
         }
         val dir = root.findFile(folderName)?.takeIf { it.isDirectory }
             ?: root.createDirectory(folderName)
@@ -1052,8 +1090,11 @@ class DownloadEngine(
             return@withContext
         }
         /* Claim the name, so the next novel that sanitises to the same thing
-           is told to go elsewhere instead of writing over this one. */
-        try { store.setTitle(folderKey, slug, folderName) } catch (e: Exception) {}
+           is told to go elsewhere instead of writing over this one. Its own
+           table — this used to write `titles`, which is the TRANSLATED-title
+           cache, so an untranslated run pointed the library at an empty
+           folder and threw away a paid title translation. */
+        try { store.claimFolderName(folderKey, folderName, slug) } catch (e: Exception) {}
         val assigned = siteOrdered.mapNotNull { it.filename }.toSet()
         if (listingComplete) renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
         /* Files we can neither place nor prove are copies. Rather than leave
@@ -1156,6 +1197,17 @@ class DownloadEngine(
         fun settled(ch: Chapter): Boolean {
             val name = ch.filename ?: return false
             if (name !in existing) return false
+            /* A prefix run adds, and ONLY adds. Its positions are right for
+               the chapters it saw, but the files on disk were named under the
+               whole listing — and the pass that reconciles the two was
+               skipped, precisely because the listing is short. So a shifted
+               chapter looks like it holds the wrong page, and re-fetching it
+               would DELETE the file first (that is what replace does) to write
+               a neighbour's text over it. That is the deletion-without-proof
+               the completeness gate exists to prevent, walking in through the
+               write path instead of the dedupe. Leave every existing file
+               alone; a complete run puts them right. */
+            if (!listingComplete) return true
             val owner = ownerOf[name] ?: return true   // unclaimed — a legacy save
             if (owner == ch.url) return true
             stale.add(name)
@@ -1289,7 +1341,10 @@ class DownloadEngine(
                files, and the folder scan is one-time — so without this the row
                keeps showing a stale count after a download. We know it exactly
                here: the chapters that were already present plus what we saved. */
-            store.setDiskCount(
+            /* Not from a prefix either: "the chapters already present plus
+               what we saved" counts only the ones this run knew about, so a
+               500-of-4500 run would report the novel as having 500. */
+            if (listingComplete) store.setDiskCount(
                 folderKey, slug,
                 if (refetchAll) {
                     saved.get()
