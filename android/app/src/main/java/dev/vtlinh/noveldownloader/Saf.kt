@@ -42,7 +42,28 @@ object Saf {
        fresh one) or null if the provider refused */
     fun rename(cr: ContentResolver, treeUri: Uri, docId: String, newName: String): String? = try {
         val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-        DocumentsContract.renameDocument(cr, uri, newName)?.let { DocumentsContract.getDocumentId(it) }
+        val before = Zips.docName(cr, uri)
+        DocumentsContract.renameDocument(cr, uri, newName)?.let { out ->
+            /* A taken name does not fail a rename — SAF MINTS one and hands
+               back a valid Uri. Reporting that as success recorded the index
+               against a document called "Chapter 5.txt (1)", which matches no
+               pattern in the app: invisible to the reader, the dedupe and
+               every sweep, while the name it was meant to take still holds
+               someone else's file.
+
+               Put it back rather than delete it: this document IS the chapter,
+               moved — not a copy — so removing it would destroy the file we
+               were only trying to rename. */
+            val got = Zips.docName(cr, out)
+            if (got != null && Zips.isMinted(newName, got)) {
+                if (before != null) {
+                    try { DocumentsContract.renameDocument(cr, out, before) } catch (e: Exception) {}
+                }
+                null
+            } else {
+                DocumentsContract.getDocumentId(out)
+            }
+        }
     } catch (e: Exception) {
         null
     }

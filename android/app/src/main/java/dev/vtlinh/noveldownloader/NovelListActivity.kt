@@ -325,6 +325,16 @@ class NovelListActivity : AppCompatActivity() {
                 if (count == 0) continue   // not a novel folder
                 store.registerNovel(folder, slug, "", name, 0L)
                 store.setDiskCount(folder, slug, count)
+                /* We are LOOKING AT the directory, so record it. Storing the
+                   name only as the title left every adopted novel on the
+                   rebuild-from-title guess — which drops anything non-ASCII,
+                   i.e. exactly the copied-in folders this scan exists to
+                   adopt. Tapping the row then opened a directory that does
+                   not exist, permanently, and the garbage delete fell back to
+                   matching by slug, where two folders that slugify alike are
+                   told apart by nothing but enumeration order. */
+                try { store.setDirName(folder, slug, name) } catch (e: Exception) {}
+                try { store.claimFolderName(folder, name, slug) } catch (e: Exception) {}
             }
             store.markScanned(folder, System.currentTimeMillis())
         } catch (e: Exception) {
@@ -596,6 +606,21 @@ class NovelListActivity : AppCompatActivity() {
         val folder = folderKey ?: return
         val slug = row.rec.slug
         val status = findViewById<TextView>(R.id.statusText)
+        /* Not while it is downloading. Everything else that touches a novel's
+           files asks this first — the status sweep asks twice — because a
+           rename racing a download is unacceptable; this RECURSIVELY DELETES
+           the folder the engine is writing into. And a queued novel would be
+           started minutes later by the queue, re-downloading in full the
+           thing just thrown away, into a folder the Library now filters out
+           for good. */
+        if (DownloadService.isBusy(normKey(slug))) {
+            Toast.makeText(
+                this,
+                "That novel is downloading — stop it first",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
         status.text = "Removing…"
         /* remember first, so the novel stays gone even if deletion hiccups */
         prefs.edit()

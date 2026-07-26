@@ -29,6 +29,15 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
+    /* Android does not deliver onFocusChange(false) when the screen is torn
+       down, so the focus-loss save alone lost the key whenever it was typed
+       and Back was pressed — and a missing key makes translation silently do
+       nothing, with no error anywhere to explain it. */
+    override fun onPause() {
+        super.onPause()
+        try { saveKey() } catch (e: Exception) {}
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
