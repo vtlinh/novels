@@ -185,6 +185,12 @@ class ReaderActivity : AppCompatActivity() {
        couldn't find on open must not be replaced by wherever we landed
        instead; that turns "can't restore" into "lost for good". */
     private var chaptersEpoch = 0L
+
+    /* How far either side of its old position a loaded chapter is looked for
+       after a rename. A pass that inserts or drops chapters moves everything
+       after that point by the same small amount; anything larger is not a
+       shift we should be guessing at. */
+    private val SHIFT_SEARCH = 8
     private var spotLost = false
 
     private fun spotWritable(): Boolean =
@@ -215,32 +221,46 @@ class ReaderActivity : AppCompatActivity() {
             if (fresh == null || fresh.ordered.isEmpty()) return@launch
             /* The text on screen, the drawer position and the chapter we are
                about to name a saved spot after are all POSITIONS in the old
-               listing. Swapping the listing without moving them re-opened the
-               write gate over a mismatch: the spot was then saved under the
-               name one chapter along, a drawer tap scrolled to a neighbour's
-               text without reloading, and the next append read the wrong
-               chapter. Carry the buffer across by NAME, which is the only
-               thing that survives a renumbering. */
-            val old = chapters?.ordered
-            val where = HashMap<String, Int>(fresh.ordered.size)
-            fresh.ordered.forEachIndexed { i, n -> where[n] = i }
-            val moved = loadedChapters.map { lc -> old?.getOrNull(lc.idx)?.let { where[it] } }
-            /* Every loaded chapter has to be findable, and they have to stay in
-               the order they are stacked in the buffer. If they don't — a
-               chapter on screen is no longer listed, or the listing reordered
-               around us — then nothing here can say where we are, and the old
-               listing at least agrees with the indices we hold. Keep both, and
-               leave the gate shut until an open rebuilds them together. */
-            if (moved.any { it == null } || moved.filterNotNull().zipWithNext().any { it.first >= it.second }) {
-                return@launch
+               listing. Swapping the listing without moving them re-opens the
+               write gate over a mismatch: the spot is then saved under the
+               name one chapter along — overwriting the correction the rename
+               pass just made — a drawer tap scrolls to a neighbour's text
+               without reloading, and the next append reads a chapter already
+               on screen.
+
+               Matching the old NAMES against the new listing cannot find the
+               shift: both listings are "Chapter 1.txt".."Chapter N.txt", so
+               that map is the identity and passes while proving nothing. The
+               heading inside the file is the chapter itself. Look for the
+               shift that puts the buffer back over its own text — the ends are
+               enough, and the answer is almost always 0 or ±1. */
+            val loaded = loadedChapters.toList()
+            val probes = listOfNotNull(loaded.firstOrNull(), loaded.lastOrNull())
+            var shift: Int? = 0
+            if (probes.isNotEmpty()) {
+                shift = null
+                val order = ArrayList<Int>(2 * SHIFT_SEARCH + 1)
+                order.add(0)
+                for (d in 1..SHIFT_SEARCH) { order.add(d); order.add(-d) }
+                for (d in order) {
+                    val ok = probes.all { lc ->
+                        val i = lc.idx + d
+                        i >= 0 && i < fresh.ordered.size && headingIn(fresh, i) == lc.heading
+                    }
+                    if (ok) { shift = d; break }
+                }
             }
+            /* Nothing lines up — the chapters on screen were dropped, or moved
+               further than we look. The old listing at least agrees with the
+               indices we hold, so keep both and leave the gate shut until an
+               open rebuilds them together. */
+            val d = shift ?: return@launch
             chapters = fresh
             drawerAdapter?.clear()
             drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
             drawerAdapter?.notifyDataSetChanged()
-            val here = old?.getOrNull(currentChapterIdx)?.let { where[it] }
-            for ((i, lc) in loadedChapters.withIndex()) lc.idx = moved[i]!!
-            currentChapterIdx = here ?: currentChapterIdx
+            for (lc in loadedChapters) lc.idx += d
+            if (currentChapterIdx >= 0) currentChapterIdx += d
             loadedChapters.firstOrNull()?.let { firstIdx = it.idx }
             loadedChapters.lastOrNull()?.let { nextIdx = it.idx + 1 }
             chaptersEpoch = now
@@ -2023,6 +2043,17 @@ class ReaderActivity : AppCompatActivity() {
     /* switch language and reload at the SAME chapter and paragraph — the
        translation keeps one paragraph per line, so paragraphs map 1:1 */
     private fun toggleLanguage() {
+        /* openAt refuses while a load is in flight, so flipping first left the
+           preference (and the menu label) changed with the text untouched —
+           and every later append then resolved the OTHER language, so the
+           buffer continued in the language the user wasn't reading, and the
+           switch "took effect" only on the next open. */
+        if (loading) {
+            android.widget.Toast.makeText(
+                this, "Still loading — try again in a moment", android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
         val pos = currentPosition()
         english = !english
         prefs.edit().putString("readerLang", if (english) "en" else "vi").apply()
@@ -2033,6 +2064,23 @@ class ReaderActivity : AppCompatActivity() {
         fontSp = (fontSp + delta).coerceIn(12f, 26f)
         prefs.edit().putFloat("readerFontSize", fontSp).apply()
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
+    }
+
+    /* First line of the chapter at `i` in a given listing — the heading, which
+       carries the chapter's own number and title and so identifies it however
+       the file has been renamed. */
+    private suspend fun headingIn(ch: ChapterListActivity.Companion.Chapters, i: Int): String? {
+        if (i < 0 || i >= ch.ordered.size) return null
+        val name = ch.ordered[i]
+        val ref = (if (english) ch.translated[name] ?: ch.source[name] else ch.source[name])
+            ?: return null
+        val body = withContext(Dispatchers.IO) {
+            try {
+                if (Zips.isGzRef(ref)) Zips.readGz(contentResolver, treeUri!!, Zips.gzDocId(ref))
+                else Saf.readText(contentResolver, treeUri!!, ref)
+            } catch (e: Exception) { null }
+        } ?: return null
+        return body.lineSequence().firstOrNull()?.trim()
     }
 
     private suspend fun readAt(i: Int): String? {

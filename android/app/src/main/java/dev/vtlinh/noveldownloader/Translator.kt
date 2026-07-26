@@ -688,6 +688,27 @@ class Translator(
                         val text = o.optString("text")
                         val ch = bundle.getOrNull(n - 1)
                         if (ch == null || text.isBlank() || done.contains(ch.first)) continue
+                        /* `n` is a bare index into what we submitted, and the
+                           prompt has to tell the model three times not to
+                           answer with the chapter number printed in the
+                           heading. When it does anyway, every entry lands one
+                           or more slots out — each chapter's English written
+                           under a neighbour's filename, which the reader joins
+                           by name alone and the translator never re-sends
+                           because the name exists. Both halves carry the
+                           chapter's number in their first line; if they
+                           disagree, this mapping is not to be trusted. */
+                        val srcNum = Extractor.parseHeading(
+                            ch.second.lineSequence().firstOrNull().orEmpty(),
+                        ).first
+                        val outNum = Extractor.parseHeading(
+                            text.lineSequence().firstOrNull().orEmpty(),
+                        ).first
+                        if (srcNum != null && outNum != null && srcNum != outNum) {
+                            failed++
+                            log("! bundle $bundleNo: reply $n is chapter $outNum, not $srcNum — not saved")
+                            continue
+                        }
                         if (writeTranslated(tdir, ch.first, text)) {
                             done.add(ch.first); saved++
                             log("saved  translated/${ch.first}")

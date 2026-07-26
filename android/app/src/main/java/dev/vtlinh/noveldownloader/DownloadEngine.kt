@@ -357,7 +357,16 @@ class DownloadEngine(
             /* nothing could move: the remaining renames form a cycle, so park
                one out of the way to break it */
             val e = pending.entries.first()
-            val park = "$PARK$parked.txt"
+            /* `parked` restarts at 0 on every pass, so this name can be one a
+               previous run stranded here. Renaming onto a taken name does not
+               fail — SAF mints one — while the index write first DELETES the
+               row holding that file's page, which is the one thing the file
+               itself cannot rebuild. Take a free name. */
+            var park = "$PARK$parked.txt"
+            while (occupied(park) && parked < inSiteOrder.size + 8) {
+                parked++
+                park = "$PARK$parked.txt"
+            }
             parked++
             move(e.key, park)
             pending.remove(e.key)
@@ -593,8 +602,18 @@ class DownloadEngine(
            a fifth, a real purge of 15 from a 60-chapter novel tripped the
            guard, and the arithmetic is identical on every later run, so those
            files were parked as "(unlisted)" for good while the log promised to
-           reconsider "until it reads correctly". */
-        val trustDrops = unlisted <= MAX_QUIET_DROPS || unlisted * 2 <= identified
+           reconsider "until it reads correctly".
+
+           PROPORTION ONLY. An absolute floor of ten sat in front of this as an
+           `||`, so up to ten chapters were deleted on identity alone however
+           small the novel and however obviously broken the listing: a site
+           that drops its chapter-list container falls back to the "latest
+           chapters" widget, five links, and a twelve-chapter novel lost seven
+           chapters and their paid translations in one sweep. The proportional
+           rule already tolerates a real purge at any size — two dropped from
+           twelve is 4 <= 12 — and it is the one that notices when more than
+           half the book goes quiet. */
+        val trustDrops = unlisted * 2 <= identified
         if (!trustDrops) {
             log("! the site's list is missing $unlisted of the $identified chapters we have on record")
             log("! that is too much to be chapters the site removed — keeping them all until it reads correctly")
@@ -683,6 +702,25 @@ class DownloadEngine(
             gone++
         }
         return gone
+    }
+
+    /* Is the chapter already at this name byte-identical to what we just
+       fetched? Answers "did this name change hands", which is the question
+       the translation beside it turns on. False when nothing is there — then
+       there is no translation to worry about either. */
+    private fun sameOnDisk(dir: DocumentFile, name: String, body: String): Boolean {
+        val cr = context.contentResolver
+        for (n in listOf(name, "$name.gz")) {
+            val f = try { dir.findFile(n) } catch (e: Exception) { null } ?: continue
+            val text = try {
+                cr.openInputStream(f.uri)?.use { ins ->
+                    if (n.endsWith(".gz")) java.util.zip.GZIPInputStream(ins).use { it.readBytes() }
+                    else ins.readBytes()
+                }?.toString(Charsets.UTF_8)
+            } catch (e: Exception) { null } ?: continue
+            return text == body
+        }
+        return false
     }
 
     /* Remove the translation filed under a chapter's name. Called when the
@@ -1313,7 +1351,15 @@ class DownloadEngine(
            a fresh one. */
         val vietName = Extractor.folderName(title, slug)
         var folderName = vietName
-        if (translate && apiKey.isNotBlank() && !stopRequested) {
+        /* ...and only when there is anything to translate. The chapter pass
+           skips a source that is already English (`sourceEnglish` below), but
+           this ran before it and unconditionally: resuming an English novel
+           with the translate preference left on spent an API call on an
+           English title and could then RENAME the whole folder to the
+           round-tripped result, which the user never asked for. */
+        if (translate && apiKey.isNotBlank() && !stopRequested &&
+            (!sourceEnglish || forceTranslate)
+        ) {
             status("Translating title…")
             val t = translator ?: Translator(context, apiKey, log, status).also { translator = it }
             val english = try {
@@ -1530,16 +1576,16 @@ class DownloadEngine(
             if (!listingComplete) return true
             val owner = ownerOf[name] ?: return true   // unclaimed — a legacy save
             if (owner == ch.url) return true
-            /* A page from a DIFFERENT HOST is not a different chapter. These
-               novels are served from several, and the status sweep records
-               whichever answered — so after one host blips, every recorded
-               page differs from the listing's and every file reads as holding
-               the wrong chapter. That marks the whole novel stale, which
-               re-downloads it (free) and now also drops every translation
-               under those names (not free: the entire novel goes back to the
-               API). The dedupe already refuses to compare across hosts; so
-               does this. */
-            if (hostOf(owner) != hostOf(ch.url)) return true
+            /* A page from a different HOST — these novels are served from
+               several, and the status sweep records whichever answered — is
+               not evidence either way. Calling it settled looked cheap, but
+               it is a claim that the file is CORRECT, and nothing else in the
+               app would ever revisit it: the rename pass can't place a
+               cross-host page and the dedupe won't compare one, so a file
+               holding its neighbour's text stayed wrong for good. Re-fetch
+               it. That is free, it records the new host so the next run is
+               settled, and the translation beside it is judged on whether the
+               text actually changed rather than on this guess. */
             stale.add(name)
             return false
         }
@@ -1591,6 +1637,18 @@ class DownloadEngine(
                                     Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
                                 )
                                 val replacing = refetchAll || ch.filename in stale
+                                /* Is what is already under this name the same
+                                   chapter? Read it BEFORE the write, because
+                                   that is the only thing that can answer
+                                   whether the translation beside it belongs to
+                                   this chapter or to a previous occupant.
+                                   Guessing from which path we are on doesn't
+                                   work: the re-fetch-everything path sets
+                                   `replace` for every chapter and populates
+                                   `stale` for none, so a rule keyed on `stale`
+                                   fires exactly nowhere on the one path that
+                                   overwrites blindly. */
+                                val sameText = replacing && sameOnDisk(dir, ch.filename!!, body)
                                 val uri = writeFile(
                                     dir, ch.filename!!, body, compressOn,
                                     replace = replacing,
@@ -1606,13 +1664,16 @@ class DownloadEngine(
                                    re-translated because its name was present.
                                    Drop it; the next translate run buys the
                                    right one. */
-                                /* Only for a name PROVEN to hold a different
-                                   chapter. refetchAll is a guess — it fires
-                                   when nothing can be identified, which is
-                                   exactly a legacy library, and dropping every
-                                   translation on a guess re-buys the whole
-                                   novel at the API's price. */
-                                if (ch.filename in stale) dropTranslation(dir, ch.filename!!)
+                                /* The text under this name changed, so the
+                                   translation under it is the old chapter's.
+                                   translated/ has no identity of its own — the
+                                   translator skips a name that exists and the
+                                   reader joins by name alone — so left there it
+                                   is served as this chapter's English for good.
+                                   Unchanged text keeps its translation, which
+                                   is what stops a legacy re-fetch re-buying a
+                                   whole novel that was already translated. */
+                                if (replacing && !sameText) dropTranslation(dir, ch.filename!!)
                                 /* record the page it came from: that mapping is
                                    what keeps this file's name stable if the site
                                    later relabels or renumbers the chapter */
@@ -1794,8 +1855,17 @@ class DownloadEngine(
                clearing on those would delete a perfectly good chapter the
                index simply hadn't recorded. A zero-length file is the one
                case this retry exists for. */
+            /* Read it, don't ask its length: DocumentFile.length() returns 0
+               when the provider simply doesn't report a size, and clearing on
+               that would delete a perfectly good chapter — the very thing this
+               narrowing exists to prevent. */
             val squatterEmpty = !replace && listOf(name, "$name.gz").any { n ->
-                try { dir.findFile(n)?.takeIf { it.isFile }?.length() == 0L } catch (e: Exception) { false }
+                val f = try { dir.findFile(n) } catch (e: Exception) { null }
+                if (f == null || !f.isFile) return@any false
+                val bytes = try {
+                    context.contentResolver.openInputStream(f.uri)?.use { it.readBytes() }
+                } catch (e: Exception) { null }
+                bytes != null && bytes.isEmpty()
             }
             if (squatterEmpty) {
                 try { clear(name); clear("$name.gz") } catch (e: Exception) {}

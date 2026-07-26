@@ -207,6 +207,18 @@ object Zips {
                    re-fetched. Compare the bytes; the loose file is the one we
                    just wrote, so it wins. */
                 val bytes = Saf.readBytes(cr, treeUri, f.docId) ?: continue
+                /* An EMPTY loose file never wins. "The loose file is the one
+                   we just wrote, so it wins" holds for a chapter a download
+                   just saved — not for the 0-byte stub an interrupted
+                   uncompress leaves behind, and taking that as authoritative
+                   deleted the .gz that still held the only copy and then
+                   gzipped the stub. The chapter read blank for ever after,
+                   and nothing re-fetched it: the index counts a ~20-byte
+                   gzip as present. */
+                if (bytes.isEmpty()) {
+                    if (existing != null) deleteDoc(cr, docUri(treeUri, f.docId))
+                    continue
+                }
                 val valid = existing != null &&
                     readGzBytes(cr, treeUri, existing.docId)?.contentEquals(bytes) == true
                 if (!valid) {
@@ -272,13 +284,25 @@ object Zips {
                        would create a second file under a minted name and then
                        drop the .gz that is still the only good copy */
                     if (existing != null && !deleteDoc(cr, docUri(treeUri, existing.docId))) continue
+                    /* Under a name nothing adopts, then renamed into place —
+                       the same protection every other writer in the app has.
+                       This was the last one creating a document under its
+                       final name: a kill mid-write left a stub that the next
+                       compress pass then promoted over the good .gz. */
                     val u = try {
-                        DocumentsContract.createDocument(cr, parentUri, "text/plain", target)
+                        DocumentsContract.createDocument(cr, parentUri, "text/plain", partName(target))
                     } catch (e: Exception) { null } ?: continue
                     val ok = try {
                         cr.openOutputStream(u).use { os ->
                             if (os == null) throw java.io.IOException("could not open $target")
                             os.write(bytes)
+                        }
+                        val renamed = DocumentsContract.renameDocument(cr, u, target)
+                            ?: throw java.io.IOException("could not name $target")
+                        val got = docName(cr, renamed)
+                        if (got != null && isMinted(target, got)) {
+                            try { DocumentsContract.deleteDocument(cr, renamed) } catch (e: Exception) {}
+                            throw java.io.IOException("$target is taken")
                         }
                         true
                     } catch (e: Exception) {

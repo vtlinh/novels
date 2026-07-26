@@ -261,6 +261,14 @@ class DownloadService : Service() {
                     activeSlugFlow.value = null
                     runningFlow.value = false
                     engine = null
+                    /* Drop OUR foreground state here, before handing off.
+                       Doing it after resumeQueueIfNeeded meant the next run
+                       could already have called startForeground — and this
+                       then removed ITS notification and dropped the service
+                       out of the foreground, leaving a live download running
+                       unprotected with no Stop action, which stopSelfResult
+                       does not undo. */
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     /* Anything queued while we were winding down was accepted
                        on the strength of runningFlow, which stays true from
                        the moment Stop is pressed until the engine unwinds —
@@ -271,7 +279,6 @@ class DownloadService : Service() {
                     try { resumeQueueIfNeeded(applicationContext) } catch (e: Exception) {}
                 }
             }
-            stopForeground(STOP_FOREGROUND_REMOVE)
             /* Pass the start id. A plain stopSelf() tears the service down
                even if a new download arrived while we were finishing — that
                one would clear `engine` (killing its Stop button), take away
