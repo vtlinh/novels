@@ -11,6 +11,7 @@ import android.widget.Toast
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
@@ -334,14 +335,14 @@ class NovelListActivity : AppCompatActivity() {
                    matching by slug, where two folders that slugify alike are
                    told apart by nothing but enumeration order. */
                 try { store.setDirName(folder, slug, name) } catch (e: Exception) {}
-                /* NOT claimFolderName. The slug here is invented from the
-                   directory name, and the claim is an INSERT OR REPLACE keyed
-                   on the name — so adopting a folder whose real novel the scan
-                   didn't recognise (one living under a collision suffix, say)
-                   took the claim away from it, and its next download stepped
-                   aside into a fresh folder and re-downloaded and re-translated
-                   the whole book. Recording which directory this row uses is
-                   safe; claiming the name against a made-up slug is not. */
+                /* ...and mark the name spoken for, but only if it is free.
+                   An INSERT OR REPLACE here would take the claim from the novel
+                   that really owns the folder; recording nothing at all leaves
+                   the folder unclaimed, unrecorded and (the scan writes no
+                   chapter rows) invisible to every ownership test — so the next
+                   novel whose title sanitises to the same name moves straight
+                   in and adopts this book's chapters as its own. */
+                try { store.claimFolderNameIfFree(folder, name, slug) } catch (e: Exception) {}
             }
             store.markScanned(folder, System.currentTimeMillis())
         } catch (e: Exception) {
@@ -609,6 +610,23 @@ class NovelListActivity : AppCompatActivity() {
             .show()
     }
 
+    /* Do this novel's recorded chapters still open? A sample is enough — the
+       question is whether the folder is somewhere on disk under a name we
+       failed to match, not how much of it survives. */
+    private fun filesStillThere(treeUri: Uri, folder: String, slug: String): Boolean {
+        val uris = try { store.get(folder, slug).values } catch (e: Exception) { return false }
+        var checked = 0
+        for (u in uris) {
+            if (u.isEmpty() || Zips.isGzRef(u)) continue
+            val there = try {
+                DocumentFile.fromSingleUri(this, Uri.parse(u))?.exists() == true
+            } catch (e: Exception) { false }
+            if (there) return true
+            if (++checked >= 5) break
+        }
+        return false
+    }
+
     private fun doGarbage(row: Row) {
         val folder = folderKey ?: return
         val slug = row.rec.slug
@@ -667,14 +685,20 @@ class NovelListActivity : AppCompatActivity() {
                         contentResolver,
                         DocumentsContract.buildDocumentUriUsingTree(treeUri, dir.first),
                     )
-                } else if (row.local > 0) {
-                    /* Not found, but the index says this novel has chapters —
-                       so the folder is out there under a name we don't know
-                       (renamed in a file manager, recreated by a restore).
-                       Wiping the record anyway left a directory of chapters
-                       nothing in the app could name, list or remove, with the
-                       novel hidden from the Library for good. Only a novel
-                       with nothing on disk is safe to forget this way. */
+                } else if (row.local > 0 && filesStillThere(treeUri, folder, slug)) {
+                    /* Not found by name, but its chapters still open — so the
+                       folder is out there under a name we don't know (renamed
+                       in a file manager, recreated by a restore). Wiping the
+                       record then left a directory of chapters nothing in the
+                       app could name, list or remove, with the novel hidden
+                       from the Library for good.
+
+                       Asked of the FILES, not of the count. `disk_count` is
+                       never lowered when a folder disappears from underneath
+                       the app, so "the count says it has chapters" was true
+                       forever for a novel the user had already deleted by
+                       hand — and that row could then never be removed from
+                       the Library at all. */
                     deleted = false
                 }
             } catch (e: Exception) { deleted = false }
