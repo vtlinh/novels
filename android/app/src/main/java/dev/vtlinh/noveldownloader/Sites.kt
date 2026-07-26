@@ -117,6 +117,13 @@ object Sites {
                 Regex("chapter-(\\d+)", RegexOption.IGNORE_CASE)
                     .findAll(url).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
                     ?: Regex("^(\\d+)").find(seg)?.groupValues?.get(1)?.toIntOrNull()
+                    /* The site misspells its own word: "chpater-2812-…",
+                       "chaoter-2843-…". The number is right there, so don't
+                       lose a real chapter to a typo — but keep the word
+                       anchored and close enough in length to "chapter" that
+                       an ordinary title ("child-3-…") can't match. */
+                    ?: Regex("^ch[a-z]{4,6}-(\\d+)", RegexOption.IGNORE_CASE)
+                        .find(seg)?.groupValues?.get(1)?.toIntOrNull()
             },
             /* novel page: <h3>Status:</h3><a href=".../status/Completed">Completed</a> */
             isCompleted = { doc ->
