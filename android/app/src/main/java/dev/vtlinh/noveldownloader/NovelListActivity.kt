@@ -384,14 +384,21 @@ class NovelListActivity : AppCompatActivity() {
             /* long-press: hot / finished / garbage marks */
             setOnLongClickListener { showMarkSheet(row); true }
         }
+        /* "complete" is the SITE saying the story is finished — it says
+           nothing about how much of it is here. Only call a novel done when
+           both are true, or a finished novel missing chapters shows a
+           Complete tag, hides its counts, and offers no way to fetch the
+           rest. */
+        val haveAll = row.rec.total > 0 && row.local >= row.rec.total
+        val done = row.rec.complete && haveAll
         /* checked, still-ongoing novel with every site chapter on disk:
            nothing to download until the site adds more */
-        val upToDate = !row.rec.complete && row.rec.total > 0 && row.local >= row.rec.total
+        val upToDate = !row.rec.complete && haveAll
         val text = buildString {
             if (isHot(row.rec.slug)) append("★ ")   // hot marker (monochrome)
             append(row.display)
             if (row.rec.author.isNotEmpty()) append("\n${row.rec.author}")
-            if (!row.rec.complete) {
+            if (!done) {
                 /* "on-disk / site-total" — total is filled in by downloads
                    and Check status */
                 if (row.rec.total > 0) append("\n${row.local}/${row.rec.total} chapters")
@@ -440,7 +447,7 @@ class NovelListActivity : AppCompatActivity() {
                     }
                 },
             )
-        } else if (row.rec.complete) {
+        } else if (done) {
             line.addView(
                 TextView(ctx).apply {
                     this.text = "COMPLETE"
@@ -454,7 +461,7 @@ class NovelListActivity : AppCompatActivity() {
                     }
                 },
             )
-        } else if (row.rec.url.isNotEmpty() && !upToDate) {
+        } else if (row.rec.url.isNotEmpty() && !upToDate) {   // includes finished-but-incomplete
             /* already downloading (or waiting its turn) → say so and go dead,
                so a second job can't be started for the same novel */
             val key = normKey(row.rec.slug)
