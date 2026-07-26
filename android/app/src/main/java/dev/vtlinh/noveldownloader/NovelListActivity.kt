@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.provider.DocumentsContract
 import android.view.View
 import android.widget.Button
+import android.widget.Toast
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -408,8 +409,7 @@ class NovelListActivity : AppCompatActivity() {
             isFocusable = true
             setOnClickListener {
                 val folder = folderKey ?: return@setOnClickListener
-                val dirName = store.getTitle(folder, row.rec.slug)
-                    ?: Extractor.sanitize(row.rec.title.ifEmpty { row.rec.slug })
+                val dirName = store.dirNameOrGuess(folder, row.rec.slug, row.rec.title)
                 /* already listening to this novel? go straight back to where
                    TTS stopped — the reader restores that chapter's scroll
                    position too — instead of via the chapter list */
@@ -606,22 +606,53 @@ class NovelListActivity : AppCompatActivity() {
             .apply()
         lifecycleScope.launch(Dispatchers.IO) {
             val treeUri = Uri.parse(folder)
+            /* This recursively deletes a directory, so which one it picks has
+               to be answered from the record, not rebuilt from the title. The
+               name a title rebuilds is the UNSUFFIXED one — for a novel pushed
+               off a colliding name, that is the OTHER novel's folder, and the
+               fallback arm below (match by slug) meant which of the two got
+               deleted came down to the order the provider happened to
+               enumerate them in. The recorded directory settles it; the slug
+               arm is only for a library older than that column. */
+            val recorded = try { store.dirNameFor(folder, slug) } catch (e: Exception) { null }
+            var deleted = true
             try {
-                /* the novel's folder: match by registered title, else by slug */
-                val dirName = store.getTitle(folder, slug)
-                    ?: Extractor.sanitize(row.rec.title.ifEmpty { slug })
-                val dir = children(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
-                    .firstOrNull { it.third && (it.second == dirName || slugify(it.second) == slug) }
+                val dirName = try {
+                    store.dirNameOrGuess(folder, slug, row.rec.title)
+                } catch (e: Exception) { Extractor.folderName(row.rec.title.ifEmpty { slug }, slug) }
+                val kids = children(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+                val dir = kids.firstOrNull { it.third && it.second == dirName }
+                    ?: if (recorded == null) kids.firstOrNull { it.third && slugify(it.second) == slug } else null
                 if (dir != null) {
-                    DocumentsContract.deleteDocument(
+                    /* a refusal is REPORTED, not thrown */
+                    deleted = DocumentsContract.deleteDocument(
                         contentResolver,
                         DocumentsContract.buildDocumentUriUsingTree(treeUri, dir.first),
                     )
                 }
-            } catch (e: Exception) {}
+            } catch (e: Exception) { deleted = false }
+            if (!deleted) {
+                /* The folder is still there. Erasing the record anyway left a
+                   directory of chapters nothing in the app could name, list or
+                   remove — so keep the novel, say so, and let the user try
+                   again. */
+                prefs.edit().putStringSet(GARBAGE_KEY, garbageSet() - normKey(slug)).apply()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@NovelListActivity,
+                        "Could not delete that novel's folder — nothing was removed",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    render()
+                }
+                return@launch
+            }
             try { store.removeNovel(folder, slug) } catch (e: Exception) {}
             try { store.clear(folder, slug) } catch (e: Exception) {}
             try { store.setChapterOrder(folder, slug, emptyList()) } catch (e: Exception) {}
+            /* let go of the folder name too, or it stays reserved for a novel
+               that no longer exists and pushes the next one into a suffix */
+            try { store.releaseFolderName(folder, slug) } catch (e: Exception) {}
             try { DownloadEngine.coverFile(this@NovelListActivity, slug).delete() } catch (e: Exception) {}
             withContext(Dispatchers.Main) { render() }
         }
@@ -735,7 +766,21 @@ class NovelListActivity : AppCompatActivity() {
                                     return@withPermit
                                 }
                                 for (u in urls) {
-                                    val res = try { engine.checkStatus(u, folder) } catch (e: Exception) { null } ?: continue
+                                    val res = try {
+                                        engine.checkStatus(u, folder)
+                                    } catch (e: DownloadEngine.PartialListing) {
+                                        /* The check refused because the listing
+                                           had a hole in it. Asking the site's
+                                           OTHER host next is the one thing that
+                                           must not happen: its chapter URLs are
+                                           different, so every recorded page
+                                           reads as unlisted against it and the
+                                           deletion this refusal exists to
+                                           prevent happens anyway. Leave this
+                                           novel for a run that can read the
+                                           whole list. */
+                                        break
+                                    } catch (e: Exception) { null } ?: continue
                                     /* A locked or full database throws, and
                                        these run off the main thread inside a
                                        sweep with no handler — one bad write
@@ -748,7 +793,7 @@ class NovelListActivity : AppCompatActivity() {
                                            asking the host that no longer has
                                            it. */
                                         if (u != row.rec.url) {
-                                            store.registerNovel(folder, row.rec.slug, u, row.display, 0L)
+                                            store.recordNovelUrl(folder, row.rec.slug, u, row.display, 0L)
                                         }
                                         res.author?.let { store.setAuthor(folder, row.rec.slug, it) }
                                         /* index the site's chapter order for the reader —

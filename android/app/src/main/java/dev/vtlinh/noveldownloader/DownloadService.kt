@@ -305,6 +305,13 @@ class DownloadService : Service() {
     }
 
     private fun maybeNotify(text: String, done: Int, total: Int) {
+        /* A chapter fetch is a blocking call, so progress keeps being reported
+           for up to a read timeout after the service is gone — and posting
+           then re-created the notification AFTER stopForeground removed it.
+           That copy is ongoing, so it cannot be swiped away, and its Stop
+           button reaches a null engine and does nothing: an undismissable
+           progress bar for a download nothing is running. */
+        if (!runningFlow.value) return
         val now = System.currentTimeMillis()
         if (now - lastNotify < 500) return
         lastNotify = now
