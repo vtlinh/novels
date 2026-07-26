@@ -6,7 +6,8 @@
     android:orientation="vertical"
     android:background="@color/bg">
 
-    <!-- sticky header (hidden while the recent-domains start screen shows) -->
+    <!-- sticky header: back, address bar, download. Present on every screen,
+         start page included, so a URL can always be typed -->
     <LinearLayout
         android:id="@+id/browserHeader"
         android:layout_width="match_parent"
@@ -83,37 +84,20 @@
             android:background="@color/bg"
             android:visibility="gone">
 
-            <LinearLayout
+            <!-- the address bar above doubles as this screen's header, so all
+                 that's left is a caption for the list -->
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@color/card">
-
-                <TextView
-                    android:id="@+id/recentBack"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="10dp"
-                    android:paddingTop="10dp"
-                    android:paddingBottom="10dp"
-                    android:text="←"
-                    android:textSize="22sp"
-                    android:textColor="@color/fg"
-                    android:clickable="true"
-                    android:focusable="true" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:padding="10dp"
-                    android:text="Recent sites"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/fg" />
-            </LinearLayout>
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="14dp"
+                android:paddingBottom="8dp"
+                android:text="Recent sites"
+                android:textSize="13sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.08"
+                android:textColor="@color/muted" />
 
             <ListView
                 android:id="@+id/recentList"
