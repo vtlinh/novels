@@ -864,7 +864,23 @@ class NovelListActivity : AppCompatActivity() {
                                 }
                                 for (u in urls) {
                                     val res = try {
-                                        engine.checkStatus(u, folder)
+                                        /* A guessed URL has to prove it is the
+                                           same novel. The slug is not proof:
+                                           for a folder-scanned row it is
+                                           derived from the folder NAME, and
+                                           the sites tell same-titled books
+                                           apart with a numeric suffix — so
+                                           "the other host serves something at
+                                           this slug" was enough to renumber a
+                                           library against a foreign listing
+                                           and write that book's URL, order and
+                                           totals over ours. */
+                                        engine.checkStatus(
+                                            u, folder,
+                                            expectTitle = if (u == row.rec.url) null else {
+                                                row.rec.title.ifEmpty { row.display }
+                                            },
+                                        )
                                     } catch (e: DownloadEngine.PartialListing) {
                                         /* The check refused because the listing
                                            had a hole in it. Asking the site's

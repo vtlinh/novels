@@ -117,7 +117,14 @@ object Extractor {
         val firstLine = (if (nl == -1) content else content.substring(0, nl)).trim()
         if (firstLine.length < 120 && HEADING_START_RE.containsMatchIn(firstLine)) {
             val fh = parseHeading(firstLine)
-            if (fh.first == num) {
+            /* ...or the number the PAGE prints. `num` is the number the app
+               was told to use, and on a renumbered novel it is not the site's
+               — so a first body line repeating the page's own heading was
+               left in place, and the file went out with two heading lines
+               disagreeing about which chapter it is. What identifies the line
+               as furniture is that it echoes the page's heading, not that it
+               happens to agree with us. */
+            if (fh.first == num || (fh.first != null && fh.first == head.first)) {
                 if (title.isEmpty() && fh.second.isNotEmpty()) title = fh.second
                 content = if (nl == -1) "" else content.substring(nl).trimStart('\n')
             }
@@ -138,6 +145,33 @@ object Extractor {
             .replace(Regex("\\p{Mn}+"), "")
             .replace('đ', 'd').replace('Đ', 'D')
             .lowercase().replace(Regex("[^a-z0-9]+"), "")
+
+    /* Does a page we FOUND name the novel we were looking for?
+
+       The status sweep does not only ask the host it has on record — it also
+       guesses "https://<other host>/<slug>/", which is how a novel whose site
+       moved between .today and .live gets found again. But a slug is not an
+       identity: a folder-scanned novel's slug is derived from its folder
+       NAME, the sites disambiguate same-titled books with a numeric suffix,
+       and any transient failure of the recorded host promotes the guesses. So
+       whatever answers has to say it is the same book before the check acts
+       on it — the sweep renames files by listing position and rewrites the
+       novel's URL, order and totals.
+
+       Diacritic- and punctuation-insensitive, and the translated folder form
+       "English (Vietnamese)" matches on either part, since which one a site
+       prints depends on the site. */
+    fun sameNovelTitle(pageTitle: String, expected: String): Boolean {
+        val p = nameKey(pageTitle)
+        if (p.isEmpty()) return false
+        val parts = ArrayList<String>()
+        parts.add(expected)
+        Regex("^(.*)\\(([^)]*)\\)\\s*$").find(expected.trim())?.let {
+            parts.add(it.groupValues[1])
+            parts.add(it.groupValues[2])
+        }
+        return parts.any { nameKey(it) == p }
+    }
 
     private fun stripAuthorPlain(title: String, author: String): String {
         val m = Regex("^(.*?)\\s*[-–—]\\s*([^-–—]+)$").find(title.trim()) ?: return title.trim()

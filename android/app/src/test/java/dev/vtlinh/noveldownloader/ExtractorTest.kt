@@ -102,9 +102,37 @@ class ExtractorTest {
     @Test
     fun `titles differing only in tone marks collide and must be disambiguated`() {
         assertEquals(Extractor.sanitize("Thần Y"), Extractor.sanitize("Thân Y"))
-        assertNotEquals(
+        /* This used to append " (than-y-b)" to the right-hand side itself and
+           assert the two differed — true of any implementation whatsoever,
+           including one that returned a constant, so under a name promising
+           coverage of the collision rule it constrained nothing.
+
+           What is actually true is the opposite: folderName does NOT
+           disambiguate. Both novels compute the same name, which is precisely
+           why Ownership.choose has to step one of them aside — and that is
+           where the rule is really tested (OwnershipTest). */
+        assertEquals(
             Extractor.folderName("Thần Y", "than-y-a"),
-            Extractor.folderName("Thân Y", "than-y-b") + " (than-y-b)",
+            Extractor.folderName("Thân Y", "than-y-b"),
         )
+    }
+
+    /* The status sweep also GUESSES a URL at the other hosts, so whatever
+       answers has to say it is the same book before the sweep renames files
+       against its listing. The slug is not proof of that: a folder-scanned
+       novel's slug comes from its folder NAME, and the sites tell same-titled
+       books apart with a numeric suffix. */
+    @Test
+    fun `a page is only the novel we asked for when it says the same title`() {
+        assertTrue(Extractor.sameNovelTitle("Tu Tiên", "Tu Tien"))
+        assertTrue("the slug is a slugified title", Extractor.sameNovelTitle("Tu Tiên", "tu-tien"))
+        assertTrue(
+            "a translated folder matches on either half",
+            Extractor.sameNovelTitle("Thần Y", "Divine Doctor (Than Y)"),
+        )
+        assertTrue(Extractor.sameNovelTitle("Divine Doctor", "Divine Doctor (Than Y)"))
+        assertFalse("a different book at the same slug", Extractor.sameNovelTitle("Vũ Thần", "Tu Tien"))
+        assertFalse("a page with no title is not a match", Extractor.sameNovelTitle("", "Tu Tien"))
+        assertFalse(Extractor.sameNovelTitle("Tu Tien Phan 2", "Tu Tien"))
     }
 }

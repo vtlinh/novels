@@ -93,7 +93,17 @@ object Listing {
             p in gone && p > lastReal && ((lastReal + 1) until p).all { it in gone }
         }
         if (forgivable.isEmpty()) return emptyList()
-        return if (forgivable.size <= maxOf(1, lastPage / 20)) forgivable else emptyList()
+        /* ONE page. The allowance used to scale with the novel — lastPage/20
+           — which contradicts the reasoning right above it: an over-read is
+           the pagination reporting one page too many, and that is one page
+           whatever the novel's size, while the scaled version wrote off seven
+           pages (326 chapters) on a 140-page book. The cost is not
+           symmetrical. Forgiving too little leaves the listing incomplete,
+           and everything destructive is already gated on that. Forgiving too
+           much is what lets a status check — which renames and deletes but
+           never downloads, so nothing self-corrects — delete hundreds of
+           chapters and their paid translations. */
+        return if (forgivable.size <= 1) forgivable else emptyList()
     }
 
     /* The first page we could not read. Chapters discovered before it are
@@ -243,12 +253,30 @@ object Renumber {
            differ, that guess can land on a file another chapter has already
            proved is its own. A recorded page beats a guess. */
         val spokenFor = byUrl.values.toHashSet()
+        /* Every name the POSITION scheme gives out. `spokenFor` only protects
+           files whose page we recorded, and that set is empty in the one state
+           where the fallback runs on the whole book at once: a library adopted
+           by the folder scan, or rebuilt after a reinstall, is indexed by name
+           with no page against any row. There the guess fired on every chapter
+           and quietly shifted the entire novel — one slot for a listing whose
+           first entry is an unnumbered extra, twenty-six for a site that skips
+           a block of numbers — and then wrote each file's NEIGHBOUR's page
+           against it, so nothing could ever notice.
+
+           A file already sitting at some other chapter's position name is
+           evidence of the position scheme, not of the legacy one. Refuse the
+           guess there; the slot simply goes unmatched, which costs nothing —
+           an unclaimed file still counts as present, so nothing is
+           re-downloaded and nothing is deleted. */
+        val positionNames = inSiteOrder.mapNotNullTo(HashSet()) { it.want }
         val claimedUrl = HashMap<String, String>()
         val linkNow = ArrayList<Pair<String, String>>()
         for (ch in inSiteOrder.asReversed()) {
             val want = ch.want ?: continue
             val have = byUrl[ch.url]
-                ?: legacy[ch.url]?.takeIf { it in onRecord && it !in spokenFor }
+                ?: legacy[ch.url]?.takeIf {
+                    it in onRecord && it !in spokenFor && (it == want || it !in positionNames)
+                }
                 ?: continue
             if (have != want) {
                 pending[have] = want
