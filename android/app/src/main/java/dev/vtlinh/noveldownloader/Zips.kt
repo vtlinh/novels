@@ -141,9 +141,18 @@ object Zips {
                 /* a VALID compressed copy must exist before the loose original
                    is deleted; a partial .gz from an interrupted run is rewritten
                    from the still-present original, never trusted */
-                val valid = existing != null && readGzBytes(cr, treeUri, existing.docId) != null
+                /* Decodable is not the same as CURRENT. Accepting any .gz that
+                   merely decompresses meant a freshly downloaded chapter,
+                   written loose because the old .gz could not be deleted, was
+                   thrown away in favour of the stale copy — and since the
+                   index then pointed at that .gz under the right name, the
+                   chapter served the wrong text forever and was never
+                   re-fetched. Compare the bytes; the loose file is the one we
+                   just wrote, so it wins. */
+                val bytes = Saf.readBytes(cr, treeUri, f.docId) ?: continue
+                val valid = existing != null &&
+                    readGzBytes(cr, treeUri, existing.docId)?.contentEquals(bytes) == true
                 if (!valid) {
-                    val bytes = Saf.readBytes(cr, treeUri, f.docId) ?: continue
                     /* A provider can refuse a delete by RETURNING false rather
                        than throwing. Ignoring that let the create below collide
                        and mint "Chapter 5.txt (1).gz" — a name no pattern in

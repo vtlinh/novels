@@ -672,7 +672,14 @@ class NovelListActivity : AppCompatActivity() {
                button, so what the list offers and what a check visits agree.
                A novel whose chapter order was never indexed is checked once
                more regardless, so the reader gets its ordering. */
-            val targets = withContext(Dispatchers.IO) {
+            /* Guarded, and released in a finally. rows() and
+               chapterOrderCount both hit the database, and this is a bare
+               launch with no handler — a locked or full database took the
+               whole app down before the sweep had visited a single novel. The
+               writes further down were wrapped for exactly this reason; the
+               reads that decide WHAT to visit were left exposed, as was the
+               button, which stayed dead until the screen was recreated. */
+            val targets = try { withContext(Dispatchers.IO) {
                 rows().filter {
                     val done = it.rec.complete && it.rec.total > 0 && it.local == it.rec.total
                     /* A check renames and dedupes. Running that over a novel
@@ -685,6 +692,10 @@ class NovelListActivity : AppCompatActivity() {
                     !DownloadService.isBusy(normKey(it.rec.slug)) &&
                         (!done || store.chapterOrderCount(folder, it.rec.slug) == 0)
                 }
+            } } catch (e: Exception) {
+                status.text = "Couldn't read the library — ${e.message}"
+                btn.isEnabled = true
+                return@launch
             }
             if (targets.isEmpty()) {
                 status.text = "Nothing to check — all novels are complete and indexed."

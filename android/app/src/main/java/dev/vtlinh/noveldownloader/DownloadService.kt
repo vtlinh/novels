@@ -261,6 +261,14 @@ class DownloadService : Service() {
                     activeSlugFlow.value = null
                     runningFlow.value = false
                     engine = null
+                    /* Anything queued while we were winding down was accepted
+                       on the strength of runningFlow, which stays true from
+                       the moment Stop is pressed until the engine unwinds —
+                       but a stopped run refuses to pop the queue, so that
+                       novel sat there with nothing running: its button stuck
+                       on "Queued", no Stop button, and only backgrounding the
+                       app would ever drain it. Kick it off ourselves. */
+                    try { resumeQueueIfNeeded(applicationContext) } catch (e: Exception) {}
                 }
             }
             stopForeground(STOP_FOREGROUND_REMOVE)

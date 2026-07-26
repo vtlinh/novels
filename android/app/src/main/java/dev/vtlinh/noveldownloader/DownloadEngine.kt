@@ -393,15 +393,22 @@ class DownloadEngine(
         slug: String,
         doc: org.jsoup.nodes.Document,
     ): DocumentFile? = try {
-        val name = store.getTitle(folderKey, slug) ?: Extractor.sanitize(
-            Extractor.stripAuthor(
-                doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
-                    ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
-                    ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
-                    ?: slug,
-                Sites.author(doc),
-            ),
-        )
+        /* The recorded directory first. Rebuilding the name from the title
+           gives the UNSUFFIXED one, so for a novel that was pushed off a
+           colliding name this resolved to the other novel's folder — and
+           Check status then renamed and deduped that novel's files against
+           this one's listing. */
+        val name = store.dirNameFor(folderKey, slug)
+            ?: store.getTitle(folderKey, slug)
+            ?: Extractor.sanitize(
+                Extractor.stripAuthor(
+                    doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
+                        ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
+                        ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
+                        ?: slug,
+                    Sites.author(doc),
+                ),
+            )
         DocumentFile.fromTreeUri(context, treeUri)?.findFile(name)?.takeIf { it.isDirectory }
     } catch (e: Exception) {
         null
@@ -1125,6 +1132,16 @@ class DownloadEngine(
                             /* the folder moved, so the cached URIs are stale —
                                but each file is still the chapter it was */
                             store.clearUris(folderKey, slug)
+                            /* Record the move NOW. The ownership check below
+                               asks which directory this novel uses; left
+                               saying the Vietnamese name, it saw a name that
+                               no longer exists (we just renamed it), decided
+                               the English folder was somebody else's because
+                               it was full, and pushed this novel into an empty
+                               "Title (slug)" beside its own chapters — then
+                               re-downloaded the novel and re-translated it. */
+                            try { store.setDirName(folderKey, slug, english) } catch (e: Exception) {}
+                            try { store.claimFolderName(folderKey, english, slug) } catch (e: Exception) {}
                             log("Renamed existing folder to \"$english\"")
                         } else {
                             /* The chapters are still in the Vietnamese folder,
@@ -1149,20 +1166,26 @@ class DownloadEngine(
            owned by the slug that claimed them; a different owner means make a
            new folder rather than move in. */
         val owner = try { store.slugOwningName(folderKey, folderName) } catch (e: Exception) { null }
-        /* Chapters already recorded under this slug mean the folder is ours
-           however it came to be — an old library predates the ownership
-           table entirely, and evicting THAT novel from the folder it has been
-           using would abandon every file in it and re-download the lot. */
-        /* Chapters recorded under this slug are stronger evidence than any
-           ownership row — they are files we actually put there. Requiring the
-           row to be ABSENT before believing them meant a mis-seeded row could
-           evict the novel that has been living in the folder all along, into
-           a new empty one it would then never fill: the index still resolves
-           into the old folder, so every chapter reads as already present and
-           nothing downloads. */
-        val mine = try { store.chapterCount(folderKey, slug) > 0 } catch (e: Exception) { false }
-        val ours = owner == slug || mine
-        if (!ours) {
+        /* The directory this novel actually used last time, if we know it.
+           This is the only reliable answer: "has this slug got chapters" is
+           true of every novel on its second run and says nothing about WHICH
+           folder they are in, so it let a novel that had been pushed onto a
+           suffixed name walk straight back into the folder it was pushed out
+           of — and then rename and write over that novel's chapters.
+
+           A library older than this column has no recorded name; there,
+           having chapters plus an unclaimed folder still means it is ours,
+           which is what keeps an existing library where it is. */
+        val recordedDir = try { store.dirNameFor(folderKey, slug) } catch (e: Exception) { null }
+        val legacyMine = recordedDir == null && owner == null &&
+            try { store.chapterCount(folderKey, slug) > 0 } catch (e: Exception) { false }
+        val ours = owner == slug || recordedDir == folderName || legacyMine
+        /* We own a folder under a different name — a suffix from a past
+           collision, or the name before a translated rename. Keep using it
+           rather than recomputing our way back into somebody else's. */
+        if (!ours && recordedDir != null && root.findFile(recordedDir)?.isDirectory == true) {
+            folderName = recordedDir
+        } else if (!ours) {
             /* Unclaimed but already full is somebody else's work — the first
                of two colliding novels to run must not be able to claim, and
                then be evicted from, the folder it has been living in. */
@@ -1187,6 +1210,10 @@ class DownloadEngine(
            cache, so an untranslated run pointed the library at an empty
            folder and threw away a paid title translation. */
         try { store.claimFolderName(folderKey, folderName, slug) } catch (e: Exception) {}
+        /* ...and record it against the novel, so the next run resolves to this
+           directory instead of recomputing a name that may be another
+           novel's. `registerNovel` above created the row. */
+        try { store.setDirName(folderKey, slug, folderName) } catch (e: Exception) {}
         val assigned = siteOrdered.mapNotNull { it.filename }.toSet()
         if (listingComplete) renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
         /* Files we can neither place nor prove are copies. Rather than leave
