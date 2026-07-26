@@ -201,13 +201,19 @@ class Translator(
         log("[$label] batch submitted (${requests.length()} request(s)); polling…")
 
         var cancelSent = false
+        var cancelFailed = false
         while (true) {
-            if (isStopped() && !cancelSent) {
-                cancelSent = true
+            if (isStopped() && !cancelSent && !cancelFailed) {
                 try {
                     call("POST", "/v1/messages/batches/$id/cancel", JSONObject(), isStopped, ignoreStop = true)
+                    /* set only once it actually went. Marking it sent before
+                       the call meant a cancel the API refused was never tried
+                       again — and this loop's only other exit is the batch
+                       ending on its own. */
+                    cancelSent = true
                     log("[$label] batch canceled — keeping results that already finished")
                 } catch (e: Exception) {
+                    cancelFailed = true
                     log("[$label] cancel failed — ${e.message}")
                 }
             }
@@ -217,6 +223,14 @@ class Translator(
                 status("[$label] processing: ${c.optInt("processing")}  ok: ${c.optInt("succeeded")}  err: ${c.optInt("errored")}")
             }
             if (b.optString("processing_status") == "ended") break
+            /* Stop has to be able to leave this. A cancel the API refuses
+               leaves the batch running to completion while this polls for as
+               long as that takes, pinning a foreground service with Stop
+               apparently dead. A cancel that WENT is worth waiting out — the
+               batch ends in moments and the results are already paid for —
+               but a refused one is not: the record is on disk, so walking
+               away costs nothing and the next run recovers it. */
+            if (isStopped() && cancelFailed) throw StoppedException()
             sleepPoll(if (cancelSent) 2000L else POLL_MS, isStopped, ignoreStop = true)
         }
 
@@ -308,11 +322,33 @@ class Translator(
             ) {
                 return true
             }
-            val f = tdir.createFile("text/plain", name) ?: return false
-            context.contentResolver.openOutputStream(f.uri)?.use {
-                it.write(body.toByteArray(Charsets.UTF_8))
-            } ?: return false
-            true
+            /* Written under a name nothing adopts and renamed into place, the
+               same as a source chapter. A kill mid-write left a short file
+               that the next run counts as this chapter's translation and never
+               re-sends — English truncated for good, at the API's price. And
+               a name already taken does not fail either call: SAF mints
+               "Chapter 5 (1).txt" and returns it, which reported success for a
+               file the app can't see. */
+            val f = tdir.createFile("text/plain", Zips.partName(name)) ?: return false
+            try {
+                context.contentResolver.openOutputStream(f.uri)?.use {
+                    it.write(body.toByteArray(Charsets.UTF_8))
+                } ?: throw IOException("could not open $name")
+                val done = android.provider.DocumentsContract.renameDocument(
+                    context.contentResolver, f.uri, name,
+                ) ?: throw IOException("could not name $name")
+                val got = Zips.docName(context.contentResolver, done)
+                if (got != null && got != name) {
+                    try {
+                        android.provider.DocumentsContract.deleteDocument(context.contentResolver, done)
+                    } catch (e: Exception) {}
+                    return false
+                }
+                true
+            } catch (e: Exception) {
+                try { f.delete() } catch (e2: Exception) {}
+                false
+            }
         } catch (e: Exception) { false }
     }
 
@@ -456,6 +492,13 @@ class Translator(
             } catch (e: Exception) {
                 log("Title batch recovery failed — ${e.message}")
             }
+            /* Still here, so the orphan gave us nothing usable — blank, or a
+               batch the API no longer has. We are about to submit and pay for
+               a replacement, and once that one succeeds the check at the top
+               short-circuits and this row is never looked at again: it would
+               sit in the table until it aged out, counted as work in flight.
+               Retire it with the attempt that replaced it. */
+            try { store.removePending(orphan.batchId) } catch (e: Exception) {}
         }
 
         /* submit a fresh title batch (Sonnet, plain text) */
@@ -615,6 +658,14 @@ class Translator(
                     } else {
                         failed += bundle.size
                         log("! bundle $bundleNo: ${if (msg != null) "truncated even for one chapter" else "no result"}; not saved")
+                        /* No bundle in the results at all. That is not "this
+                           batch is used up" — it is a batch that ran, was
+                           billed, and whose output we failed to read, and the
+                           id is the only handle on it. Keep the record and let
+                           recovery re-read it; that path is bounded by its own
+                           retry count, so a batch that really is empty still
+                           ages out. */
+                        if (msg == null) continue
                     }
                     store.removePending(run.id)   // consumed: split halves are new batches
                     continue
@@ -733,7 +784,6 @@ class Translator(
                 val results = fetchResults(rec.batchId, "recover", isStopped)
                 val msg = results["bundle"]
                 var n = 0
-                var unwritable = 0
                 if (msg != null && msg.optString("stop_reason") != "max_tokens") {
                     val parsed = parseBundle(messageText(msg))
                     if (parsed != null) {
@@ -765,18 +815,36 @@ class Translator(
                                 }
                                 if (text.isBlank() || done.contains(fn)) continue
                                 if (writeTranslated(tdir, fn, text)) { done.add(fn); n++; log("saved  translated/$fn (recovered)") }
-                                else unwritable++
                             }
                         }
                         log("Recovered bundle: $n chapter(s)")
                     }
                 }
                 /* Retiring the record throws away the batch id, and that id is
-                   the only handle on results already paid for. If every write
-                   failed — full disk, ejected card, revoked grant — keep it
-                   and try again next run rather than pay for them twice. */
-                if (n == 0 && unwritable > 0) {
-                    log("! nothing from batch …${rec.batchId.takeLast(8)} could be written — keeping it for the next run")
+                   the only handle on results already paid for.
+
+                   "Nothing was written" was the wrong test — the same one the
+                   collecting path was fixed away from. A bundle of ten where
+                   three land and seven fail (the volume fills, the card is
+                   pulled) satisfied n > 0, so the row went and seven paid
+                   translations were lost, to be bought again next run. And a
+                   batch whose results came back unusable — no bundle in the
+                   response, a reply cut off at max_tokens, unparseable JSON —
+                   reached the delete with both counters at zero, silently.
+
+                   Reconcile against what was SUBMITTED, as the collecting path
+                   does: every chapter of this batch that can still be placed
+                   has to be on disk. A page that no longer resolves is a
+                   chapter that has since gone; it can never be written, so it
+                   must not hold the record open. retryLater is bounded, so a
+                   record that can never be satisfied still ages out. */
+                val unaccounted = (0 until maxOf(rec.files.size, rec.urls.size)).count { i ->
+                    val url = rec.urls.getOrNull(i)?.takeIf { it.isNotEmpty() }
+                    val fn = if (url != null) nowNamed[url] else rec.files.getOrNull(i)
+                    fn != null && fn !in done
+                }
+                if (unaccounted > 0) {
+                    log("! batch …${rec.batchId.takeLast(8)}: $unaccounted chapter(s) not saved — keeping it for the next run")
                     retryLater(store, rec, "could not write results")
                     continue
                 }

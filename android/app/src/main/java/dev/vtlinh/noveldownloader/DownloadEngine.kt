@@ -685,6 +685,18 @@ class DownloadEngine(
         return gone
     }
 
+    /* Remove the translation filed under a chapter's name. Called when the
+       source at that name is replaced by a different chapter, because nothing
+       else would ever notice: translated/ is keyed by filename only. */
+    private fun dropTranslation(dir: DocumentFile, name: String) {
+        try {
+            val tdir = dir.findFile("translated")?.takeIf { it.isDirectory } ?: return
+            for (n in listOf(name, "$name.gz")) {
+                tdir.findFile(n)?.let { try { it.delete() } catch (e: Exception) {} }
+            }
+        } catch (e: Exception) {}
+    }
+
     /* the host a recorded page came from, for telling "this listing doesn't
        have that chapter" apart from "this listing is a different site" */
     private fun hostOf(url: String): String? =
@@ -1534,10 +1546,23 @@ class DownloadEngine(
                                 val body = Extractor.parseChapter(
                                     Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
                                 )
+                                val replacing = refetchAll || ch.filename in stale
                                 val uri = writeFile(
                                     dir, ch.filename!!, body, compressOn,
-                                    replace = refetchAll || ch.filename in stale,
+                                    replace = replacing,
                                 )
+                                /* The translation under that name belongs to
+                                   the chapter we just overwrote, not to this
+                                   one — and translated/ has no identity of its
+                                   own: the translator decides what is already
+                                   done from the names in the folder, and the
+                                   reader joins the two halves by name alone.
+                                   Left there, this chapter served the previous
+                                   occupant's English for good, and was never
+                                   re-translated because its name was present.
+                                   Drop it; the next translate run buys the
+                                   right one. */
+                                if (replacing) dropTranslation(dir, ch.filename!!)
                                 /* record the page it came from: that mapping is
                                    what keeps this file's name stable if the site
                                    later relabels or renumbers the chapter */
