@@ -24,6 +24,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
@@ -139,8 +140,8 @@ class BrowserActivity : AppCompatActivity() {
                     currentUrl = url
                     /* don't clobber the field while the user is typing in it */
                     if (!urlEdit.hasFocus()) urlEdit.setText(url)
-                    downloadBtn.isEnabled = Sites.forUrl(url) != null
                     findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.GONE
+                    syncDownloadButton(url)
                     syncTranslateBox(url)
                     syncLibraryBanner(url)
                     try {
@@ -255,6 +256,16 @@ class BrowserActivity : AppCompatActivity() {
            Ticking it with no key saved asks for one there and then. */
         findViewById<CheckBox>(R.id.browseTranslate).setOnCheckedChangeListener(translateListener)
 
+        /* follow the service so the button flips as this novel starts, gets
+           queued behind another, or finishes — including the download we
+           just started from here */
+        lifecycleScope.launch {
+            DownloadService.activeSlugFlow.collectLatest { refreshDownloadButton() }
+        }
+        lifecycleScope.launch {
+            DownloadService.queuedSlugsFlow.collectLatest { refreshDownloadButton() }
+        }
+
         /* header back exits straight to the domain list, and off the list
            leaves browser mode; the system back button is the one that walks
            page history */
@@ -296,6 +307,38 @@ class BrowserActivity : AppCompatActivity() {
         findViewById<View>(R.id.browseTranslate).visibility = View.GONE
         findViewById<View>(R.id.libraryBanner).visibility = View.GONE
         findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.VISIBLE
+    }
+
+    /* ---- download button ---- */
+
+    /* slug key of the novel the given page belongs to, "" when it isn't one */
+    private fun slugKeyFor(url: String): String {
+        val site = Sites.forUrl(url) ?: return ""
+        return try {
+            val (base, slug) = site.normalize(url)
+            if (slug.isEmpty()) "" else NovelListActivity.slugKeyFromUrl(base)
+        } catch (e: Exception) { "" }
+    }
+
+    /* re-sync for the page that's open; on the start screen there's no page,
+       and showRecentPanel already parked the button disabled */
+    private fun refreshDownloadButton() {
+        if (findViewById<View>(R.id.recentPanel).visibility == View.VISIBLE) return
+        syncDownloadButton(currentUrl)
+    }
+
+    /* the button goes dead while this novel is downloading or waiting its
+       turn, so tapping it can't start a second job for the same novel */
+    private fun syncDownloadButton(url: String) {
+        val btn = findViewById<Button>(R.id.browseDownload)
+        if (Sites.forUrl(url) == null) {
+            btn.isEnabled = false
+            btn.text = "↓"
+            return
+        }
+        val busy = DownloadService.isBusy(slugKeyFor(url))
+        btn.isEnabled = !busy
+        btn.text = if (busy) "⋯" else "↓"
     }
 
     /* ---- translate toggle ---- */
@@ -365,6 +408,13 @@ class BrowserActivity : AppCompatActivity() {
        keeps the user on the page; the engine itself skips translating a
        source that's already English, so there's no language pre-check here */
     private fun startDownload(url: String) {
+        /* the button is disabled while this novel is in flight; re-check
+           anyway so a stale tap (or the folder-picker resume) can't queue it
+           a second time */
+        if (DownloadService.isBusy(NovelListActivity.slugKeyFromUrl(url))) {
+            refreshDownloadButton()
+            return
+        }
         val tree = prefs.getString("tree", null)
         if (tree == null) {
             pendingDownload = url

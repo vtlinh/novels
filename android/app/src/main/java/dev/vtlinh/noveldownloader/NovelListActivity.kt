@@ -109,6 +109,21 @@ class NovelListActivity : AppCompatActivity() {
                 else if (seenRunning) { seenRunning = false; render() }
             }
         }
+        /* the buttons show which novel is downloading or queued, so re-render
+           when that moves. Both flows replay their current value on collect,
+           which onResume's render already covered — skip that first one. */
+        var firstActive = true
+        lifecycleScope.launch {
+            DownloadService.activeSlugFlow.collectLatest {
+                if (firstActive) firstActive = false else render()
+            }
+        }
+        var firstQueued = true
+        lifecycleScope.launch {
+            DownloadService.queuedSlugsFlow.collectLatest {
+                if (firstQueued) firstQueued = false else render()
+            }
+        }
     }
 
     /* re-render on every return so the RECENTLY READ section reflects the
@@ -440,14 +455,27 @@ class NovelListActivity : AppCompatActivity() {
                 },
             )
         } else if (row.rec.url.isNotEmpty() && !upToDate) {
+            /* already downloading (or waiting its turn) → say so and go dead,
+               so a second job can't be started for the same novel */
+            val key = normKey(row.rec.slug)
+            val busy = DownloadService.isBusy(key)
             line.addView(
                 MaterialButton(ctx).apply {
-                    this.text = "Download"
+                    this.text = when {
+                        DownloadService.isActive(key) -> "Downloading…"
+                        DownloadService.isQueued(key) -> "Queued"
+                        else -> "Download"
+                    }
                     textSize = 13f
-                    setTextColor(Color.WHITE)
-                    backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.accent))
+                    setTextColor(if (busy) getColor(R.color.muted) else Color.WHITE)
+                    /* an explicit tint applies to every state, so a disabled
+                       button would still look live — pick the colour here */
+                    backgroundTintList = android.content.res.ColorStateList.valueOf(
+                        getColor(if (busy) R.color.btn_secondary else R.color.accent),
+                    )
                     cornerRadius = dp(8)
-                    setOnClickListener { startResume(row.rec.url) }
+                    isEnabled = !busy
+                    if (!busy) setOnClickListener { startResume(row.rec.url) }
                 },
             )
         }
