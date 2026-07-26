@@ -4,6 +4,15 @@
   GitHub Pages landing page (`index.html`) whose only job is the app-download
   button. The old browser-based downloader and its Cloudflare Worker proxy
   were removed — all features live in the app now.
+- `worker.js` + `wrangler.toml` are that Worker brought back for DEVELOPMENT
+  ONLY — an authenticated, host-restricted fetch proxy so a session with no
+  browser can read a real page (capturing the fixtures under
+  `android/app/src/test/resources/pages`, checking a selector against what a
+  site actually serves). The app must never call it. `tools/README.md` covers
+  deploy and use; `node worker.test.mjs` checks its guards offline. A plain
+  Worker cannot pass novelfull.com's JS challenge — it reports that as a 409
+  rather than returning the interstitial as if it were the page, and
+  `worker-render.js` (Browser Rendering, paid plan) is the way through.
 - The app fetches novel sites directly (no proxy/CORS). The
   `.github/workflows/android.yml` action builds a signed release APK on every
   push touching `android/` and, on `main`, publishes it (plus `version.json`)
