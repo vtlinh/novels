@@ -235,19 +235,43 @@ class Translator(
         }
     }
 
+    /* A chapter is stored gzipped whenever compression is on — since the
+       download now writes it that way from the start, not just after the
+       compress pass — so decide by what the bytes are rather than by the
+       name we happen to hold. Reading a .gz as UTF-8 would hand the API a
+       chapter of binary noise. */
     private fun readText(uri: String): String? = try {
-        context.contentResolver.openInputStream(Uri.parse(uri))?.use {
-            it.readBytes().toString(Charsets.UTF_8)
+        context.contentResolver.openInputStream(Uri.parse(uri))?.use { ins ->
+            val bytes = ins.readBytes()
+            val gzipped = bytes.size > 1 &&
+                bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()
+            if (gzipped) {
+                java.util.zip.GZIPInputStream(bytes.inputStream()).use {
+                    it.readBytes().toString(Charsets.UTF_8)
+                }
+            } else {
+                bytes.toString(Charsets.UTF_8)
+            }
         }
     } catch (e: Exception) { null }
 
+    private val compressOn: Boolean
+        get() = context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
+            .let { it.getBoolean("compressNovels", it.getBoolean("zipDownloads", true)) }
+
     private fun writeTranslated(tdir: DocumentFile, name: String, text: String): Boolean {
         return try {
+            val body = Extractor.singleNewlines(Extractor.cleanEncoding(text))
+            /* same as the source chapters: written compressed rather than
+               saved plain for the post-download pass to rewrite */
+            if (compressOn &&
+                Zips.writeGzDoc(context.contentResolver, tdir.uri, "$name.gz", body) != null
+            ) {
+                return true
+            }
             val f = tdir.createFile("text/plain", name) ?: return false
             context.contentResolver.openOutputStream(f.uri)?.use {
-                it.write(
-                    Extractor.singleNewlines(Extractor.cleanEncoding(text)).toByteArray(Charsets.UTF_8),
-                )
+                it.write(body.toByteArray(Charsets.UTF_8))
             } ?: return false
             true
         } catch (e: Exception) { false }
@@ -456,7 +480,10 @@ class Translator(
             log("Batch recovery error: ${e.message}")
         }
 
-        val done = tdir.listFiles().mapNotNull { it.name }.toHashSet()
+        /* "Chapter N.txt.gz" is Chapter N, translated. Matching raw names
+           meant a compressed translation looked missing and was sent to the
+           API again — the whole novel, every run, at cost. */
+        val done = tdir.listFiles().mapNotNull { it.name?.removeSuffix(".gz") }.toHashSet()
         val uris = store.get(folder, slug)   // filename -> source document URI
         val pending = filenames.filter { it !in done }.mapNotNull { fn ->
             val uri = uris[fn] ?: return@mapNotNull null
@@ -548,7 +575,7 @@ class Translator(
         /* title batches (wantTitle set) are recovered up front by ensureEnglishTitle */
         val mine = store.pendingFor(folder, slug, now).filter { it.wantTitle == null }
         if (mine.isEmpty()) return
-        val done = tdir.listFiles().mapNotNull { it.name }.toHashSet()
+        val done = tdir.listFiles().mapNotNull { it.name?.removeSuffix(".gz") }.toHashSet()
         log("Found ${mine.size} unfinished batch(es) from a previous session — recovering…")
         for (rec in mine) {
             if (isStopped()) throw StoppedException()
