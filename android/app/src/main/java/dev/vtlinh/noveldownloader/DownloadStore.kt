@@ -560,9 +560,17 @@ class DownloadStore(context: Context) :
         db.beginTransaction()
         try {
             for ((name, uri) in items) {
+                /* INSERT OR REPLACE would drop the row and write a fresh one,
+                   defaulting url/size/hash away — and url is this file's
+                   identity, which nothing on disk can reconstruct. Insert
+                   only what's missing, then update the location alone. */
                 db.execSQL(
-                    "INSERT OR REPLACE INTO chapters(folder,slug,filename,uri) VALUES(?,?,?,?)",
+                    "INSERT OR IGNORE INTO chapters(folder,slug,filename,uri) VALUES(?,?,?,?)",
                     arrayOf(folder, slug, name, uri),
+                )
+                db.execSQL(
+                    "UPDATE chapters SET uri=? WHERE folder=? AND slug=? AND filename=?",
+                    arrayOf(uri, folder, slug, name),
                 )
             }
             db.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))   // listing changed
@@ -570,6 +578,29 @@ class DownloadStore(context: Context) :
         } finally {
             db.endTransaction()
         }
+    }
+
+    /* filename -> the page it came from, for every file we can identify.
+       This is the map that makes a stray file answerable: is it a chapter
+       the site still lists, one it dropped, or something we've never seen? */
+    fun fileUrls(folder: String, slug: String): HashMap<String, String> {
+        val out = HashMap<String, String>()
+        readableDatabase.query(
+            "chapters", arrayOf("filename", "url"),
+            "folder=? AND slug=? AND url IS NOT NULL AND url<>''", arrayOf(folder, slug),
+            null, null, null,
+        ).use { c -> while (c.moveToNext()) out[c.getString(0)] = c.getString(1) }
+        return out
+    }
+
+    /* The folder moved, so every cached URI is stale — but WHICH chapter each
+       file is hasn't changed. Drop the location, keep the identity; clear()
+       would throw both away and leave the novel unidentifiable. */
+    fun clearUris(folder: String, slug: String) {
+        writableDatabase.execSQL(
+            "UPDATE chapters SET uri='' WHERE folder=? AND slug=?", arrayOf(folder, slug),
+        )
+        clearChapterList(folder, slug)
     }
 
     fun clear(folder: String, slug: String) {
