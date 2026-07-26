@@ -31,6 +31,21 @@ class DownloadService : Service() {
         val logFlow = MutableStateFlow<List<String>>(emptyList())
         val runningFlow = MutableStateFlow(false)
 
+        /* Which novels the service is working on, as normalized slug keys:
+           the one downloading now and the ones waiting behind it. The library
+           and the browser watch these to label their buttons and to refuse a
+           second job for a novel that's already spoken for. */
+        val activeSlugFlow = MutableStateFlow<String?>(null)
+        val queuedSlugsFlow = MutableStateFlow<Set<String>>(emptySet())
+
+        fun isActive(slugKey: String) =
+            slugKey.isNotEmpty() && activeSlugFlow.value == slugKey
+
+        fun isQueued(slugKey: String) =
+            slugKey.isNotEmpty() && slugKey in queuedSlugsFlow.value
+
+        fun isBusy(slugKey: String) = isActive(slugKey) || isQueued(slugKey)
+
         @Volatile var engine: DownloadEngine? = null
         @Volatile private var currentUrl: String? = null
 
@@ -41,6 +56,19 @@ class DownloadService : Service() {
             try { org.json.JSONArray(prefs(ctx).getString(QUEUE_KEY, "[]")) } catch (e: Exception) { org.json.JSONArray() }
 
         fun queueSize(ctx: android.content.Context): Int = queueArr(ctx).length()
+
+        /* mirror the persisted queue into queuedSlugsFlow — called after
+           every change to it, and on startup so a queue that outlived the
+           process is reflected too */
+        private fun publishQueue(ctx: android.content.Context) {
+            val arr = queueArr(ctx)
+            val out = LinkedHashSet<String>()
+            for (i in 0 until arr.length()) {
+                val u = arr.optJSONObject(i)?.optString("url") ?: continue
+                if (u.isNotEmpty()) out.add(NovelListActivity.slugKeyFromUrl(u))
+            }
+            queuedSlugsFlow.value = out
+        }
 
         /* add a request to the back of the queue; false if that novel is
            already downloading or already waiting */
@@ -60,6 +88,7 @@ class DownloadService : Service() {
                     .put("translate", translate).put("force", force),
             )
             prefs(ctx).edit().putString(QUEUE_KEY, arr.toString()).apply()
+            publishQueue(ctx)
             return true
         }
 
@@ -70,16 +99,19 @@ class DownloadService : Service() {
             val rest = org.json.JSONArray()
             for (i in 1 until arr.length()) rest.put(arr.getJSONObject(i))
             prefs(ctx).edit().putString(QUEUE_KEY, rest.toString()).apply()
+            publishQueue(ctx)
             return first
         }
 
         private fun clearQueue(ctx: android.content.Context) {
             prefs(ctx).edit().remove(QUEUE_KEY).apply()
+            publishQueue(ctx)
         }
 
         /* app came to the foreground with queued novels but no live download
            (e.g. the process died between queue items) → start the next one */
         fun resumeQueueIfNeeded(ctx: android.content.Context) {
+            publishQueue(ctx)   // reflect a queue that outlived the process
             if (runningFlow.value) return
             val p = prefs(ctx)
             val tree = p.getString("tree", null) ?: return
@@ -139,6 +171,7 @@ class DownloadService : Service() {
             var curKey = apiKey
             while (true) {
                 currentUrl = curUrl
+                activeSlugFlow.value = NovelListActivity.slugKeyFromUrl(curUrl)
                 val eng = DownloadEngine(
                     applicationContext,
                     log = { line -> logFlow.value = (logFlow.value + line).takeLast(400) },
@@ -167,6 +200,7 @@ class DownloadService : Service() {
                 logFlow.value = (logFlow.value + "— next novel: $curUrl —").takeLast(400)
             }
             currentUrl = null
+            activeSlugFlow.value = null
             runningFlow.value = false
             engine = null
             stopForeground(STOP_FOREGROUND_REMOVE)
