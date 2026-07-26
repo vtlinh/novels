@@ -835,6 +835,27 @@ class Translator(
                                     rec.files.getOrNull(idx) ?: continue
                                 }
                                 if (text.isBlank() || done.contains(fn)) continue
+                                /* The same check the collecting path makes.
+                                   Without it, a reply whose `n` is the number
+                                   printed in the heading rather than its
+                                   position was rejected there, the record was
+                                   kept "for recovery", and recovery then wrote
+                                   exactly that bad mapping one run later —
+                                   each chapter's English under a neighbour's
+                                   name, which nothing afterwards can detect. */
+                                /* From the SOURCE FILE's heading, not from
+                                   the filename: a filename is the chapter's
+                                   position in the listing, the heading is the
+                                   number the site prints, and this app exists
+                                   because those two are not the same. */
+                                val srcNum = readHeadingNum(store, folder, slug, fn)
+                                val outNum = Extractor.parseHeading(
+                                    text.lineSequence().firstOrNull().orEmpty(),
+                                ).first
+                                if (srcNum != null && outNum != null && srcNum != outNum) {
+                                    log("! recovered reply $idx is chapter $outNum, not $srcNum — not saved")
+                                    continue
+                                }
                                 if (writeTranslated(tdir, fn, text)) { done.add(fn); n++; log("saved  translated/$fn (recovered)") }
                             }
                         }
@@ -883,6 +904,18 @@ class Translator(
                 retryLater(store, rec, e.message)
             }
         }
+    }
+
+    /* The chapter number printed at the top of a saved chapter, read back off
+       disk — what a translated reply's own heading has to agree with. */
+    private fun readHeadingNum(store: DownloadStore, folder: String, slug: String, fn: String): Int? {
+        val ref = try { store.get(folder, slug)[fn] } catch (e: Exception) { null } ?: return null
+        val treeUri = try { Uri.parse(folder) } catch (e: Exception) { null } ?: return null
+        val text = try {
+            if (Zips.isGzRef(ref)) Zips.readGz(context.contentResolver, treeUri, Zips.gzDocId(ref))
+            else Saf.readText(context.contentResolver, treeUri, ref)
+        } catch (e: Exception) { null } ?: return null
+        return Extractor.parseHeading(text.lineSequence().firstOrNull().orEmpty()).first
     }
 
     private fun retryLater(store: DownloadStore, rec: PendingBatch, why: String?) {

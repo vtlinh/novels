@@ -234,6 +234,13 @@ class ReaderActivity : AppCompatActivity() {
                heading inside the file is the chapter itself. Look for the
                shift that puts the buffer back over its own text — the ends are
                enough, and the answer is almost always 0 or ±1. */
+            /* Not while a load is in flight. openAt clears the buffer and
+               then suspends on every chapter it reads, so this can land in the
+               middle of one — swapping the listing under indices it is still
+               stamping in, and (with the buffer momentarily empty) taking the
+               epoch with nothing whatsoever verified. The next onResume, or
+               the next rename, comes back to it. */
+            if (loading) return@launch
             val loaded = loadedChapters.toList()
             val probes = listOfNotNull(loaded.firstOrNull(), loaded.lastOrNull())
             var shift: Int? = 0
@@ -245,7 +252,7 @@ class ReaderActivity : AppCompatActivity() {
                 for (d in order) {
                     val ok = probes.all { lc ->
                         val i = lc.idx + d
-                        i >= 0 && i < fresh.ordered.size && headingIn(fresh, i) == lc.heading
+                        i >= 0 && i < fresh.ordered.size && lc.heading in headingsIn(fresh, i)
                     }
                     if (ok) { shift = d; break }
                 }
@@ -2048,7 +2055,12 @@ class ReaderActivity : AppCompatActivity() {
            and every later append then resolved the OTHER language, so the
            buffer continued in the language the user wasn't reading, and the
            switch "took effect" only on the next open. */
-        if (loading) {
+        /* All three of openAt's early returns, not just `loading`: flipping
+           the preference for a switch that then doesn't happen leaves the
+           menu label inverted and every later append resolving the other
+           language. */
+        val ready = chapters
+        if (loading || ready == null || ready.ordered.isEmpty()) {
             android.widget.Toast.makeText(
                 this, "Still loading — try again in a moment", android.widget.Toast.LENGTH_SHORT,
             ).show()
@@ -2066,21 +2078,30 @@ class ReaderActivity : AppCompatActivity() {
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
     }
 
-    /* First line of the chapter at `i` in a given listing — the heading, which
-       carries the chapter's own number and title and so identifies it however
-       the file has been renamed. */
-    private suspend fun headingIn(ch: ChapterListActivity.Companion.Chapters, i: Int): String? {
-        if (i < 0 || i >= ch.ordered.size) return null
+    /* First lines of the chapter at `i` — the heading, which carries the
+       chapter's own number and title and so identifies it however the file has
+       been renamed.
+
+       BOTH languages. The buffer's heading was read in whichever language was
+       resolvable when it loaded, and the run that renames chapters is usually
+       the run that translated them — so a chapter read in Vietnamese now
+       resolves to its English translation and no shift would ever match,
+       leaving the reader unable to save its place for the rest of the
+       session. Either heading identifies the chapter. */
+    private suspend fun headingsIn(ch: ChapterListActivity.Companion.Chapters, i: Int): List<String> {
+        if (i < 0 || i >= ch.ordered.size) return emptyList()
         val name = ch.ordered[i]
-        val ref = (if (english) ch.translated[name] ?: ch.source[name] else ch.source[name])
-            ?: return null
-        val body = withContext(Dispatchers.IO) {
-            try {
-                if (Zips.isGzRef(ref)) Zips.readGz(contentResolver, treeUri!!, Zips.gzDocId(ref))
-                else Saf.readText(contentResolver, treeUri!!, ref)
-            } catch (e: Exception) { null }
-        } ?: return null
-        return body.lineSequence().firstOrNull()?.trim()
+        val refs = listOfNotNull(ch.source[name], ch.translated[name])
+        if (refs.isEmpty()) return emptyList()
+        return withContext(Dispatchers.IO) {
+            refs.mapNotNull { ref ->
+                try {
+                    if (Zips.isGzRef(ref)) Zips.readGz(contentResolver, treeUri!!, Zips.gzDocId(ref))
+                    else Saf.readText(contentResolver, treeUri!!, ref)
+                } catch (e: Exception) { null }
+                    ?.lineSequence()?.firstOrNull()?.trim()?.ifEmpty { null }
+            }
+        }
     }
 
     private suspend fun readAt(i: Int): String? {
