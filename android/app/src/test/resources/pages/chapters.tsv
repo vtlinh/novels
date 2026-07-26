@@ -1,0 +1,34 @@
+# Chapter pages, unedited, captured through the dev Worker.
+# content_chars is the visible text of the site's own chapter container, and
+# heading_number the number printed in the page's own heading — both measured
+# by a separate script, NOT by Extractor, so the tests cross-check the parser
+# rather than echo it. Counted on characters, not <p> tags: truyenfull
+# separates paragraphs with <br>, so a tag count reads 5 for a 90-line chapter.
+# site	file	url	novel_slug	which	heading_number	content_chars	novel_pages	novel_completed
+truyenfull	truyenfull/chapters/an-the-tong-tai__chuong-1.html	https://truyenfull.live/an-the-tong-tai/chuong-1/	an-the-tong-tai	first	1	13767	1	true
+truyenfull	truyenfull/chapters/gio-qua-rung-tham__chuong-1.html	https://truyenfull.live/gio-qua-rung-tham/chuong-1/	gio-qua-rung-tham	first	1	15528	1	true
+truyenfull	truyenfull/chapters/nguoi-dung-sau-anh-den__chuong-1.html	https://truyenfull.live/nguoi-dung-sau-anh-den/chuong-1/	nguoi-dung-sau-anh-den	first	1	12240	1	true
+truyenfull	truyenfull/chapters/thoat-khoi-bui-gai-tu-nghi__chuong-1.html	https://truyenfull.live/thoat-khoi-bui-gai-tu-nghi/chuong-1/	thoat-khoi-bui-gai-tu-nghi	first	1	3536	1	false
+truyenfull	truyenfull/chapters/thoat-khoi-bui-gai-tu-nghi__chuong-26.html	https://truyenfull.live/thoat-khoi-bui-gai-tu-nghi/chuong-26/	thoat-khoi-bui-gai-tu-nghi	mid	26	3580	1	false
+truyenfull	truyenfull/chapters/tuong-cong-nha-ty-ty-sang-ruc-nhu-sao-tr__chuong-1.html	https://truyenfull.live/tuong-cong-nha-ty-ty-sang-ruc-nhu-sao-trang/chuong-1/	tuong-cong-nha-ty-ty-sang-ruc-nhu-sao-trang	first	1	16904	2	false
+truyenfull	truyenfull/chapters/tuong-cong-nha-ty-ty-sang-ruc-nhu-sao-tr__chuong-26.html	https://truyenfull.live/tuong-cong-nha-ty-ty-sang-ruc-nhu-sao-trang/chuong-26/	tuong-cong-nha-ty-ty-sang-ruc-nhu-sao-trang	mid	26	22061	2	false
+truyenfull	truyenfull/chapters/trong-sinh-thap-nien-80-vo-toi-co-chut-n__chuong-1.html	https://truyenfull.live/trong-sinh-thap-nien-80-vo-toi-co-chut-nong-tinh/chuong-1/	trong-sinh-thap-nien-80-vo-toi-co-chut-nong-tinh	first	1	7662	8	false
+truyenfull	truyenfull/chapters/trong-sinh-thap-nien-80-vo-toi-co-chut-n__chuong-25.html	https://truyenfull.live/trong-sinh-thap-nien-80-vo-toi-co-chut-nong-tinh/chuong-25/	trong-sinh-thap-nien-80-vo-toi-co-chut-nong-tinh	mid	25	9591	8	false
+truyenfull	truyenfull/chapters/muc-than-ky__chuong-1.html	https://truyenfull.live/muc-than-ky/chuong-1/	muc-than-ky	first	1	13880	40	false
+truyenfull	truyenfull/chapters/muc-than-ky__chuong-26.html	https://truyenfull.live/muc-than-ky/chuong-26/	muc-than-ky	mid	26	12145	40	false
+truyenfull	truyenfull/chapters/than-dao-dan-ton-6060282__chuong-1.html	https://truyenfull.live/than-dao-dan-ton-6060282/chuong-1/	than-dao-dan-ton-6060282	first	1	13548	107	true
+truyenfull	truyenfull/chapters/than-dao-dan-ton-6060282__chuong-26.html	https://truyenfull.live/than-dao-dan-ton-6060282/chuong-26/	than-dao-dan-ton-6060282	mid	26	8939	107	true
+novelfull	novelfull/chapters/dungeon-defense__chapter-1-volume-1.html	https://novelfull.com/dungeon-defense/chapter-1-volume-1.html	dungeon-defense	first	1	12617	1	true
+novelfull	novelfull/chapters/dungeon-defense__chapter-24-volume-3.html	https://novelfull.com/dungeon-defense/chapter-24-volume-3.html	dungeon-defense	mid	24	39559	1	true
+novelfull	novelfull/chapters/back-then-i-adored-you__chapter-1.html	https://novelfull.com/back-then-i-adored-you/chapter-1.html	back-then-i-adored-you	first	1	4120	22	true
+novelfull	novelfull/chapters/back-then-i-adored-you__chapter-26.html	https://novelfull.com/back-then-i-adored-you/chapter-26.html	back-then-i-adored-you	mid	26	3576	22	true
+novelfull	novelfull/chapters/the-desolate-era__chapter-1-the-land-of-the-dead.html	https://novelfull.com/the-desolate-era/chapter-1-the-land-of-the-dead.html	the-desolate-era	first	1	18762	30	true
+novelfull	novelfull/chapters/the-desolate-era__chapter-8-ji-nings-sword.html	https://novelfull.com/the-desolate-era/chapter-8-ji-nings-sword.html	the-desolate-era	mid	8	16673	30	true
+novelfull	novelfull/chapters/the-kings-avatar__chapter-1-the-banished-battle-god.html	https://novelfull.com/the-kings-avatar/chapter-1-the-banished-battle-god.html	the-kings-avatar	first	1	14962	35	true
+novelfull	novelfull/chapters/the-kings-avatar__chapter-26-forgot-to-look-at-a-guide.html	https://novelfull.com/the-kings-avatar/chapter-26-forgot-to-look-at-a-guide.html	the-kings-avatar	mid	26	7759	35	true
+novelfull	novelfull/chapters/i-see-the-aura-of-the-great-emperor-in-a__chapter-1.html	https://novelfull.com/i-see-the-aura-of-the-great-emperor-in-all-my-disciples/chapter-1.html	i-see-the-aura-of-the-great-emperor-in-all-my-disciples	first	1	8598	43	false
+novelfull	novelfull/chapters/i-see-the-aura-of-the-great-emperor-in-a__chapter-26.html	https://novelfull.com/i-see-the-aura-of-the-great-emperor-in-all-my-disciples/chapter-26.html	i-see-the-aura-of-the-great-emperor-in-all-my-disciples	mid	26	8157	43	false
+novelfull	novelfull/chapters/the-human-emperor__chapter-1-the-downfall-of-the-central-plains.html	https://novelfull.com/the-human-emperor/chapter-1-the-downfall-of-the-central-plains.html	the-human-emperor	first	1	28355	50	true
+novelfull	novelfull/chapters/the-human-emperor__chapter-26-borrowing-a-chicken-to-lay-eggs.html	https://novelfull.com/the-human-emperor/chapter-26-borrowing-a-chicken-to-lay-eggs.html	the-human-emperor	mid	26	13637	50	true
+novelfull	novelfull/chapters/quick-transmigration-cannon-fodders-reco__chapter-1-it-was-finally-over.html	https://novelfull.com/quick-transmigration-cannon-fodders-record-of-counterattacks/chapter-1-it-was-finally-over.html	quick-transmigration-cannon-fodders-record-of-counterattacks	first	1	4169	72	false
+novelfull	novelfull/chapters/quick-transmigration-cannon-fodders-reco__chapter-26-next-time.html	https://novelfull.com/quick-transmigration-cannon-fodders-record-of-counterattacks/chapter-26-next-time.html	quick-transmigration-cannon-fodders-record-of-counterattacks	mid	26	4322	72	false
