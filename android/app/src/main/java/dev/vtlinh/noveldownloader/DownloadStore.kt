@@ -142,6 +142,14 @@ class DownloadStore(context: Context) :
            as it recognises them. */
         if (oldVersion < 14) {
             try { db.execSQL("ALTER TABLE chapters ADD COLUMN url TEXT DEFAULT ''") } catch (e: Exception) {}
+            /* v14 is also where "Chapter N" stopped meaning the number the
+               site printed and started meaning the Nth entry in its listing.
+               Both of these index chapters BY FILENAME, so every row written
+               before the change now names a different chapter than it meant
+               to — and the reader sorts by exactly these. Drop them; a
+               download or a Check status rebuilds both. */
+            db.execSQL("DELETE FROM chapter_order")
+            db.execSQL("DELETE FROM chlist")
         }
         /* size + content hash, so a duplicate left behind by an earlier
            naming scheme can be recognised as the same chapter and dropped */
