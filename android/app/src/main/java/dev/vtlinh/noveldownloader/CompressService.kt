@@ -30,6 +30,9 @@ class CompressService : Service() {
            channel, and this one must be MIN so the pass runs invisibly */
         private const val CHANNEL = "storage_bg"
         private const val NOTIF_ID = 3
+        /* passes are incremental, so a converging job needs one or two —
+           this is the backstop for one that never will */
+        private const val MAX_PASSES = 8
 
         val runningFlow = MutableStateFlow(false)
 
@@ -71,7 +74,24 @@ class CompressService : Service() {
             val cr = contentResolver
             val treeUri = Uri.parse(treeStr)
             try {
-                while (true) {
+                /* A pass that reports "changed" without the directory actually
+                   changing never converges, and this loop has no delay and
+                   holds a foreground service — so a single file the provider
+                   refuses to delete would re-walk every novel folder over SAF
+                   forever, wiping the cached listings on each lap. The passes
+                   themselves are incremental, so a real job needs one or two;
+                   anything past this is the stuck case, and stopping leaves
+                   the work to resume on the next launch. */
+                var passes = 0
+                var converged = false
+                while (passes < MAX_PASSES) {
+                    passes++
+                    /* Not while a download is writing into the same folders.
+                       Both passes create and delete the same names, and with
+                       compression off this one can rewrite a chapter that was
+                       just downloaded from an older .gz. The job stays marked
+                       active, so it picks up again on the next app start. */
+                    if (DownloadService.runningFlow.value) break
                     val target = prefs.getBoolean("compressNovels", true)
                     var changedAny = false
                     val dirs = try {
@@ -98,9 +118,16 @@ class CompressService : Service() {
                     }
                     /* converged: a whole pass changed nothing and the target
                        held steady across it → every novel already matches */
-                    if (!changedAny && prefs.getBoolean("compressNovels", true) == target) break
+                    if (!changedAny && prefs.getBoolean("compressNovels", true) == target) {
+                        converged = true
+                        break
+                    }
                 }
-                prefs.edit().putBoolean("compressJobActive", false).apply()
+                /* Only a finished job clears the flag. Standing aside for a
+                   download, or hitting the pass cap, means there is still work
+                   to do — clearing it there would strand the library
+                   half-compressed with nothing to resume it. */
+                if (converged) prefs.edit().putBoolean("compressJobActive", false).apply()
             } catch (e: Exception) {
                 /* silent by design — an interrupted pass just resumes on the
                    next app start (resumeIfNeeded) */
