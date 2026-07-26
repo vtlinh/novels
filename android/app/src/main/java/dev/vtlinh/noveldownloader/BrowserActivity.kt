@@ -2,7 +2,9 @@ package dev.vtlinh.noveldownloader
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebResourceRequest
@@ -10,10 +12,20 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.CheckBox
+import android.widget.CompoundButton
 import android.widget.EditText
+import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
+import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 
 /* In-app site browser. Native WebView loads the novel sites directly — no
@@ -52,7 +64,25 @@ class BrowserActivity : AppCompatActivity() {
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
+    private val store by lazy { DownloadStore(this) }
     private var currentUrl: String = "https://truyenfull.today/"
+
+    /* novel URL waiting on a download folder being picked */
+    private var pendingDownload: String? = null
+
+    private val pickFolder =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+            val pending = pendingDownload
+            pendingDownload = null
+            if (uri != null) {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+                prefs.edit().putString("tree", uri.toString()).apply()
+                pending?.let { startDownload(it) }
+            }
+        }
 
     /* ---- recent domains (start screen) ---- */
 
@@ -111,6 +141,8 @@ class BrowserActivity : AppCompatActivity() {
                     if (!urlEdit.hasFocus()) urlEdit.setText(url)
                     downloadBtn.isEnabled = Sites.forUrl(url) != null
                     findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.GONE
+                    syncTranslateBox(url)
+                    syncLibraryBanner(url)
                     try {
                         java.net.URI(url).host?.let { if (it.isNotEmpty()) recordDomainVisit(it) }
                     } catch (e: Exception) {}
@@ -209,22 +241,19 @@ class BrowserActivity : AppCompatActivity() {
             }
         }
 
+        /* download runs from here — the user stays on the page they were
+           reading and gets a snackbar instead of being thrown to the home
+           screen; its action is the way over to the novels list */
         downloadBtn.setOnClickListener {
             val site = Sites.forUrl(currentUrl) ?: return@setOnClickListener
             val novel = site.normalize(currentUrl).first
             prefs.edit().putString("url", novel).apply()
-            /* hand back to MainActivity, which auto-starts if a folder is set.
-               REORDER_TO_FRONT (not CLEAR_TOP) so a reader reading aloud
-               deeper in the stack isn't destroyed; the existing home gets the
-               URL via onNewIntent either way */
-            startActivity(
-                Intent(this, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                    .setAction(Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, novel),
-            )
-            finish()
+            startDownload(novel)
         }
+
+        /* translate-on-download, sharing the home screen's "translate" pref.
+           Ticking it with no key saved asks for one there and then. */
+        findViewById<CheckBox>(R.id.browseTranslate).setOnCheckedChangeListener(translateListener)
 
         /* header back exits straight to the domain list, and off the list
            leaves browser mode; the system back button is the one that walks
@@ -263,7 +292,168 @@ class BrowserActivity : AppCompatActivity() {
         }
         findViewById<EditText>(R.id.browseUrl).setText("")
         findViewById<Button>(R.id.browseDownload).isEnabled = false
+        /* no page open, so nothing to translate or to already own */
+        findViewById<View>(R.id.browseTranslate).visibility = View.GONE
+        findViewById<View>(R.id.libraryBanner).visibility = View.GONE
         findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.VISIBLE
+    }
+
+    /* ---- translate toggle ---- */
+
+    private val translateListener = CompoundButton.OnCheckedChangeListener { btn, checked ->
+        if (checked && apiKey().isEmpty()) {
+            /* can't translate without a key — ask for one rather than
+               silently failing at download time */
+            promptForApiKey(
+                onSaved = { prefs.edit().putBoolean("translate", true).apply() },
+                onCancel = { btn.isChecked = false },
+            )
+        } else {
+            prefs.edit().putBoolean("translate", checked).apply()
+        }
+    }
+
+    private fun apiKey() = (prefs.getString("apiKey", "") ?: "").trim()
+
+    /* the box tracks the saved preference, except on English sites where
+       there is nothing to translate — there it's off and untouchable */
+    private fun syncTranslateBox(url: String) {
+        val box = findViewById<CheckBox>(R.id.browseTranslate)
+        /* nothing downloadable here, so nothing to offer translating */
+        val site = Sites.forUrl(url)
+        if (site == null) { box.visibility = View.GONE; return }
+        val english = site.english
+        box.visibility = View.VISIBLE
+        /* detach while setting isChecked so syncing doesn't count as a tick */
+        box.setOnCheckedChangeListener(null)
+        box.isEnabled = !english
+        box.isChecked = !english && prefs.getBoolean("translate", false)
+        box.text = if (english) "Translate to English — already in English" else "Translate to English"
+        box.alpha = if (english) 0.5f else 1f
+        box.setOnCheckedChangeListener(translateListener)
+    }
+
+    /* key prompt, same prefs["apiKey"] the Settings screen writes */
+    private fun promptForApiKey(onSaved: () -> Unit, onCancel: () -> Unit) {
+        val view = layoutInflater.inflate(R.layout.dialog_api_key, null)
+        val input = view.findViewById<EditText>(R.id.dialogApiKey)
+        input.setText(prefs.getString("apiKey", ""))
+        view.findViewById<TextView>(R.id.dialogApiKeyLink).setOnClickListener {
+            try {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://console.anthropic.com/settings/keys")),
+                )
+            } catch (e: Exception) {}
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Anthropic API key")
+            .setMessage("Translating runs the chapters through Claude, which needs your own API key.")
+            .setView(view)
+            .setPositiveButton("Save") { _, _ ->
+                val k = input.text.toString().trim()
+                prefs.edit().putString("apiKey", k).apply()
+                if (k.isEmpty()) onCancel() else onSaved()
+            }
+            .setNegativeButton("Cancel") { _, _ -> onCancel() }
+            .setOnCancelListener { onCancel() }
+            .show()
+    }
+
+    /* ---- download ---- */
+
+    /* mirrors the home screen's gates (folder, garbage mark, API key) but
+       keeps the user on the page; the engine itself skips translating a
+       source that's already English, so there's no language pre-check here */
+    private fun startDownload(url: String) {
+        val tree = prefs.getString("tree", null)
+        if (tree == null) {
+            pendingDownload = url
+            pickFolder.launch(null)
+            return
+        }
+        val slugKey = NovelListActivity.slugKeyFromUrl(url)
+        val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()
+        if (slugKey.isNotEmpty() && slugKey in garbage) {
+            AlertDialog.Builder(this)
+                .setTitle("Marked as garbage")
+                .setMessage(
+                    "You previously marked this novel as garbage. " +
+                        "Remove that status and download it again?",
+                )
+                .setPositiveButton("Re-download") { _, _ ->
+                    prefs.edit()
+                        .putStringSet(NovelListActivity.GARBAGE_KEY, garbage - slugKey)
+                        .apply()
+                    startDownload(url)   // re-enter, now past this gate
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        val box = findViewById<CheckBox>(R.id.browseTranslate)
+        val translate = box.isEnabled && box.isChecked
+        val key = apiKey()
+        if (translate && key.isEmpty()) {
+            promptForApiKey(onSaved = { startDownload(url) }, onCancel = {})
+            return
+        }
+        startForegroundService(
+            Intent(this, DownloadService::class.java)
+                .putExtra("url", url).putExtra("tree", tree)
+                .putExtra("translate", translate)
+                .putExtra("forceTranslate", false)
+                .putExtra("apiKey", key),
+        )
+        Snackbar.make(
+            findViewById<View>(R.id.browserRoot),
+            if (translate) "Download started — translating as it goes" else "Download started",
+            Snackbar.LENGTH_LONG,
+        ).setAction("Novels") {
+            startActivity(Intent(this, NovelListActivity::class.java))
+        }.show()
+    }
+
+    /* ---- "already downloaded" banner ---- */
+
+    /* show the green banner when this novel is already in the library, and
+       point it at that novel's chapter list */
+    private fun syncLibraryBanner(url: String) {
+        val banner = findViewById<TextView>(R.id.libraryBanner)
+        banner.visibility = View.GONE
+        val site = Sites.forUrl(url) ?: return
+        val folder = prefs.getString("tree", null) ?: return
+        val (base, slug) = try { site.normalize(url) } catch (e: Exception) { return }
+        if (slug.isEmpty()) return                       // a listing page, not a novel
+        val slugKey = NovelListActivity.slugKeyFromUrl(base)
+        if (slugKey.isEmpty()) return
+        /* garbage-marked novels aren't in the list, so don't advertise them */
+        val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()
+        if (slugKey in garbage) return
+
+        lifecycleScope.launch {
+            val found = withContext(Dispatchers.IO) {
+                try {
+                    val rec = store.novels(folder).firstOrNull {
+                        it.slug.lowercase().filter { c -> c.isLetterOrDigit() } == slugKey
+                    } ?: return@withContext null
+                    val dir = store.getTitle(folder, rec.slug)
+                        ?: Extractor.sanitize(rec.title.ifEmpty { rec.slug })
+                    Pair(rec, dir)
+                } catch (e: Exception) { null }
+            } ?: return@launch
+            /* the page may have moved on while the lookup ran */
+            if (currentUrl != url) return@launch
+            val (rec, dir) = found
+            banner.visibility = View.VISIBLE
+            banner.setOnClickListener {
+                startActivity(
+                    Intent(this@BrowserActivity, ChapterListActivity::class.java)
+                        .putExtra("dir", dir)
+                        .putExtra("title", rec.title.ifEmpty { rec.slug })
+                        .putExtra("slug", rec.slug),
+                )
+            }
+        }
     }
 
     override fun onBackPressed() {
