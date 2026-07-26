@@ -46,6 +46,10 @@ class DownloadEngine(
         const val FETCH_BATCH = 50
         /* a differing heading shifts a chapter's size by only a few bytes */
         private const val HEADING_SLACK = 96L
+        /* how many chapters a listing may drop before we stop believing the
+           listing instead of the files: below this it reads as ordinary site
+           housekeeping, above it only a proportional check will do */
+        private const val MAX_QUIET_DROPS = 10
 
         /* app-private cover thumbnail for a novel */
         fun coverFile(context: Context, slug: String): java.io.File =
@@ -476,7 +480,23 @@ class DownloadEngine(
         /* filename -> the page it came from: what turns "some file nothing
            points at" into an answerable question */
         val fileUrl = store.fileUrls(folderKey, slug)
+        /* Identity is only ever as good as the list it is compared against,
+           and a listing can come back short without any fetch failing — the
+           scoped container gone after a layout change, so discovery fell back
+           to the whole document and found only the "latest chapters" widget;
+           or the novel served from the site's other host, which makes every
+           recorded page look unlisted. A real site removal takes a chapter or
+           two. Losing a large slice of everything we can identify is evidence
+           about the LISTING, not about the files, so say so and keep them. */
+        val unlisted = extras.count { val u = fileUrl[it.base]; u != null && u !in listedUrls }
+        val identified = fileUrl.size
+        val trustDrops = unlisted <= MAX_QUIET_DROPS || unlisted * 5 <= identified
+        if (!trustDrops) {
+            log("! the site's list is missing $unlisted of the $identified chapters we have on record")
+            log("! that is too much to be chapters the site removed — keeping them all until it reads correctly")
+        }
         var dropped = 0
+        var suspect = 0
         for (x in extras) {
             val from = fileUrl[x.base]
             if (from != null && from !in listedUrls) {
@@ -484,6 +504,7 @@ class DownloadEngine(
                    longer lists it. Not a mystery and not a duplicate — a
                    chapter that has been removed, so its file goes with it.
                    No content check: identity already answered the question. */
+                if (!trustDrops) { suspect++; continue }
                 if (remove(x)) { dropped++; continue }
             }
             if (from != null) {
@@ -503,8 +524,9 @@ class DownloadEngine(
         }
         if (removed > 0) log("removed $removed duplicate chapter file(s) — same text as a chapter we kept")
         if (dropped > 0) log("removed $dropped chapter file(s) the site no longer lists")
+        if (suspect > 0) log("$suspect file(s) the list didn't mention were kept — the list looks wrong, not the files")
         if (kept > 0) log("$kept file(s) left alone — see above for why")
-        return kept
+        return kept + suspect
     }
 
     /* After a forced full re-download every listed chapter is on disk under
@@ -783,15 +805,60 @@ class DownloadEngine(
            page we failed to fetch would make it a LIE by omission: chapters
            beyond the gap look unlisted, and identity-based removal deletes
            them outright. Track it, and refuse to act on a partial answer. */
-        var listingComplete = true
+        /* Hold each page's HTML rather than parsing as it lands: a page that
+           has to be re-fetched must still be read IN PAGE ORDER, because
+           discovery order is the site's order and the site's order is what
+           names every file. Parsing a retried page last would move its
+           chapters to the end of the book. */
+        val pageHtml = HashMap<Int, String>()
+        val missed = LinkedHashSet<Int>()      // pages that exist but wouldn't load
         var fetched = 1
         while (fetched < last && !stopRequested) {
             val batch = ((fetched + 1)..last).toList()
             status("Listing chapters: pages ${batch.first()}-${batch.last()} of $last…")
             val htmls = arrayOfNulls<String>(batch.size)
+            val codes = IntArray(batch.size)
             coroutineScope {
                 val sem = Semaphore(conc)
                 for ((i, p) in batch.withIndex()) {
+                    launch {
+                        sem.withPermit {
+                            if (!stopRequested) {
+                                val r = fetch(site.listPageUrl(base, slug, p))
+                                htmls[i] = r.html
+                                codes[i] = r.status
+                            }
+                        }
+                    }
+                }
+            }
+            for ((i, html) in htmls.withIndex()) {
+                val p = batch[i]
+                if (html == null) {
+                    /* 4xx means the page isn't there — the page count over-read
+                       the pagination. It holds no chapters, so nothing shifts
+                       and nothing is missing. Only a page that exists and
+                       wouldn't load leaves a hole. */
+                    if (codes[i] !in 400..499) missed.add(p)
+                    continue
+                }
+                pageHtml[p] = html
+                last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
+            }
+            fetched = batch.last()
+        }
+        /* A page we couldn't read doesn't just hide its own chapters: every
+           chapter after it moves up a position, and position is the filename.
+           Retry the holes before drawing any conclusion from the listing. */
+        var listPass = 0
+        while (missed.isNotEmpty() && listPass < 3 && !stopRequested) {
+            listPass++
+            status("Re-fetching ${missed.size} listing page(s) — pass $listPass/3…")
+            val retry = missed.toList()
+            val htmls = arrayOfNulls<String>(retry.size)
+            coroutineScope {
+                val sem = Semaphore(conc)
+                for ((i, p) in retry.withIndex()) {
                     launch {
                         sem.withPermit {
                             if (!stopRequested) htmls[i] = fetch(site.listPageUrl(base, slug, p)).html
@@ -799,17 +866,24 @@ class DownloadEngine(
                     }
                 }
             }
-            for (html in htmls) {
-                if (html == null) { listingComplete = false; continue }
-                val d = Jsoup.parse(html, base)
-                addLinks(d)
-                last = maxOf(last, site.maxPage(d, slug))
+            for ((i, html) in htmls.withIndex()) {
+                if (html == null) continue
+                pageHtml[retry[i]] = html
+                missed.remove(retry[i])
             }
-            fetched = batch.last()
         }
         if (stopRequested) { status("Stopped."); return@withContext }
+        val listingComplete = missed.isEmpty()
+        for (p in 2..last) pageHtml[p]?.let { addLinks(Jsoup.parse(it, base)) }
+        /* Downloading from a partial listing is not a smaller download — it is
+           a WRONG one. Every chapter after the hole is one position early, so
+           each would be written over the file belonging to the chapter before
+           it, taking that chapter's recorded page with it. Stop instead. */
         if (!listingComplete) {
-            log("! some listing pages could not be fetched — the chapter list is incomplete")
+            log("! ${missed.size} listing page(s) would not load after 3 retries — the chapter list is incomplete")
+            log("Not downloading: positions taken from a partial list would name files after the wrong chapters.")
+            status("Error: could not read the whole chapter list — try again later")
+            return@withContext
         }
 
         val store = DownloadStore(context)
@@ -1121,8 +1195,17 @@ class DownloadEngine(
                here: the chapters that were already present plus what we saved. */
             store.setDiskCount(
                 folderKey, slug,
-                if (refetchAll) saved.get()
-                else chapters.count { it.filename != null && it.filename in existing } + saved.get(),
+                if (refetchAll) {
+                    saved.get()
+                } else {
+                    /* A stale name is in `existing` (it was on disk) AND was
+                       re-fetched into `saved` — counting both made the Library
+                       read 103/100 and kept the novel in every future sweep,
+                       since its skip test wants local == total. */
+                    chapters.count {
+                        it.filename != null && it.filename in existing && it.filename !in stale
+                    } + saved.get()
+                },
             )
         } catch (e: Exception) {}
 
