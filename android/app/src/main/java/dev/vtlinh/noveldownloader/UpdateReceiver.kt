@@ -29,12 +29,7 @@ class UpdateReceiver : BroadcastReceiver() {
                    the system evicts and "Clear cache" wipes while the marker
                    in prefs survives — so "nothing to install" is a real
                    outcome, not a theoretical one. Say so. */
-                if (!Updater.installPending(app)) {
-                    Updater.notifyInstallFailed(
-                        app,
-                        "The downloaded update was no longer on the device. It will be fetched again.",
-                    )
-                }
+                Updater.installPending(app)?.let { why -> Updater.notifyInstallFailed(app, why) }
             } finally { done.finish() }
         }.start()
     }

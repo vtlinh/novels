@@ -83,8 +83,20 @@ class Translator(
 
     private class StoppedException : Exception()
 
-    /* abort an in-flight request so Stop doesn't wait it out */
-    fun cancel() { try { client.dispatcher.cancelAll() } catch (e: Exception) {} }
+    /* Set while a batch-create POST is on the wire. Creating a batch is the
+       one call whose outcome we cannot re-derive: if the server took it and we
+       never read the id, that bundle is billed in full and no record exists
+       for recovery to find. */
+    @Volatile private var creating = false
+
+    /* Abort an in-flight request so Stop doesn't wait it out — except a create.
+       Stop used to kill that too, so stopping during the seconds a large
+       bundle spends uploading orphaned a paid batch outright. Everything else
+       here is a read, or a cancel that the server will honour anyway. */
+    fun cancel() {
+        if (creating) return
+        try { client.dispatcher.cancelAll() } catch (e: Exception) {}
+    }
 
     /* ---- raw HTTP with retry/backoff ----
        `ignoreStop` marks the post-Stop calls (batch cancel, results collection)
@@ -120,6 +132,12 @@ class Translator(
                     val text = r.body?.string() ?: ""
                     if (r.isSuccessful) return text
                     if (r.code != 429 && r.code < 500) throw ApiException(r.code, text) // client error — don't retry
+                    /* A 5xx from a gateway is exactly as ambiguous as a dropped
+                       socket: the backend may already have taken the batch.
+                       Retrying a create then bills the whole bundle again for
+                       something we will never hold an id for. 429 is safe —
+                       nothing was accepted — so it still retries. */
+                    if (!retryOnDrop && r.code != 429) throw ApiException(r.code, text)
                     lastErr = ApiException(r.code, text)
                 }
             } catch (e: ApiException) {
@@ -173,7 +191,10 @@ class Translator(
            after the server accepted it would be re-sent as a SECOND paid batch
            that nothing ever polls. One orphan is bad; three is worse. */
         val submitted = JSONObject(
-            call("POST", "/v1/messages/batches", JSONObject().put("requests", requests), isStopped, retryOnDrop = false),
+            try {
+                creating = true
+                call("POST", "/v1/messages/batches", JSONObject().put("requests", requests), isStopped, retryOnDrop = false)
+            } finally { creating = false },
         )
         val id = submitted.getString("id")
         store.addPending(folder, slug, id, files, urls, System.currentTimeMillis(), wantTitle)
@@ -453,7 +474,10 @@ class Translator(
                 )
             val reqs = JSONArray().put(JSONObject().put("custom_id", "title").put("params", params))
             val submitted = JSONObject(
-                call("POST", "/v1/messages/batches", JSONObject().put("requests", reqs), isStopped, retryOnDrop = false),
+                try {
+                    creating = true
+                    call("POST", "/v1/messages/batches", JSONObject().put("requests", reqs), isStopped, retryOnDrop = false)
+                } finally { creating = false },
             )
             val id = submitted.getString("id")
             store.addPending(folder, slug, id, emptyList(), emptyList(), now, vietTitle)
@@ -523,8 +547,14 @@ class Translator(
                    from before a shift would otherwise hold back whichever
                    chapter sits at 5 today and leave the real one unsent */
                 rec.files.mapIndexed { i, fn ->
-                    rec.urls.getOrNull(i)?.takeIf { it.isNotEmpty() }?.let { nowNamed[it] } ?: fn
-                }
+                    val u = rec.urls.getOrNull(i)?.takeIf { it.isNotEmpty() }
+                    /* Same rule as recovery: a recorded page that no longer
+                       resolves must not fall back to the submitted name. It
+                       held back whichever chapter sits at that number today
+                       while the one really inside the batch went unguarded —
+                       and was submitted, and paid for, a second time. */
+                    if (u != null) nowNamed[u] else fn
+                }.filterNotNull()
             }.toHashSet()
         } catch (e: Exception) { hashSetOf<String>() }
         if (inFlight.isNotEmpty()) {
@@ -600,7 +630,6 @@ class Translator(
                 mergeNames(parsed, glossary, store, folder, slug)
 
                 val chapters = parsed.optJSONArray("chapters")
-                var wrote = 0
                 if (chapters != null) {
                     for (i in 0 until chapters.length()) {
                         val o = chapters.optJSONObject(i) ?: continue
@@ -609,7 +638,7 @@ class Translator(
                         val ch = bundle.getOrNull(n - 1)
                         if (ch == null || text.isBlank() || done.contains(ch.first)) continue
                         if (writeTranslated(tdir, ch.first, text)) {
-                            done.add(ch.first); saved++; wrote++
+                            done.add(ch.first); saved++
                             log("saved  translated/${ch.first}")
                         } else {
                             failed++
@@ -631,10 +660,15 @@ class Translator(
                    whose writes all failed (full disk, ejected card) must keep
                    its record: the batch id is the only handle on results we
                    have already paid for. */
-                if (wrote > 0 || chapters == null || chapters.length() == 0) {
+                /* Everything accounted for, or the record stays. "At least one
+                   write worked" was not enough: a bundle of ten where three
+                   land and seven fail — the volume fills mid-bundle, the card
+                   is pulled — retired the record and lost seven translations
+                   that were already paid for, to be bought again next run. */
+                if (missing == 0 || chapters == null || chapters.length() == 0) {
                     store.removePending(run.id)
                 } else {
-                    log("! bundle $bundleNo: nothing could be written — keeping the batch for recovery")
+                    log("! bundle $bundleNo: $missing chapter(s) unaccounted for — keeping the batch for recovery")
                 }
                 log("Bundle $bundleNo: ${glossary.size} names known")
             }
@@ -674,14 +708,27 @@ class Translator(
         for (rec in mine) {
             if (isStopped()) throw StoppedException()
             try {
-                while (true) {
+                var ended = false
+                while (!ended) {
                     val b = JSONObject(call("GET", "/v1/messages/batches/${rec.batchId}", null, isStopped, ignoreStop = true))
                     val c = b.optJSONObject("request_counts")
                     if (c != null) {
                         status("[recover] processing: ${c.optInt("processing")}  ok: ${c.optInt("succeeded")}  err: ${c.optInt("errored")}")
                     }
-                    if (b.optString("processing_status") == "ended") break
+                    if (b.optString("processing_status") == "ended") { ended = true; break }
+                    /* Stop has to be able to leave this. The poll ignored it
+                       entirely, so a batch still processing pinned a
+                       foreground service checking every ten seconds for as
+                       long as the batch took, with Stop apparently dead. The
+                       record is kept, so walking away costs nothing — the
+                       next run picks it up where it left off. */
+                    if (isStopped()) break
                     sleepPoll(POLL_MS, isStopped, ignoreStop = true)
+                    if (isStopped()) break
+                }
+                if (!ended) {
+                    log("Stopped — batch …${rec.batchId.takeLast(8)} left for the next run")
+                    throw StoppedException()
                 }
                 val results = fetchResults(rec.batchId, "recover", isStopped)
                 val msg = results["bundle"]
@@ -701,8 +748,21 @@ class Translator(
                                    is only a fallback for rows written before
                                    pages were kept */
                                 val url = rec.urls.getOrNull(idx)?.takeIf { it.isNotEmpty() }
-                                val fn = url?.let { nowNamed[it] }
-                                    ?: rec.files.getOrNull(idx) ?: continue
+                                /* A page we recorded but can no longer place
+                                   is a chapter whose row has since gone — the
+                                   site dropped it and the dedupe removed it.
+                                   Falling back to the submitted FILENAME then
+                                   wrote this chapter's English into whatever
+                                   now sits at that number, and the reader
+                                   joins by filename alone, so it showed the
+                                   wrong text for good. The name is only a
+                                   fallback for records written before pages
+                                   were kept at all. */
+                                val fn = if (url != null) {
+                                    nowNamed[url] ?: continue
+                                } else {
+                                    rec.files.getOrNull(idx) ?: continue
+                                }
                                 if (text.isBlank() || done.contains(fn)) continue
                                 if (writeTranslated(tdir, fn, text)) { done.add(fn); n++; log("saved  translated/$fn (recovered)") }
                                 else unwritable++

@@ -17,7 +17,13 @@ object Zips {
        else in the app matches a name ending in it, which is the point */
     const val PART = ".part"
 
-    fun isPartName(name: String) = name.endsWith(PART)
+    /* `contains`, not `endsWith`. SAF does not take a display name literally:
+       ExternalStorageProvider runs it through buildUniqueFile, which forces
+       the extension to match the mime type — ask for
+       "Chapter 5.txt.gz.part" as application/gzip and the document created is
+       "Chapter 5.txt.gz.part.gz". Matching only the tail meant the sweep,
+       which is the one thing that ever removes these, matched nothing. */
+    fun isPartName(name: String) = name.contains(PART)
 
     private const val GZREF = "gz::"
     fun gzRef(docId: String) = GZREF + docId
