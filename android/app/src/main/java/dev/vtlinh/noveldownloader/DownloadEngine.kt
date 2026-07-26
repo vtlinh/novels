@@ -1162,32 +1162,29 @@ class DownloadEngine(
            true of every novel on its second run and says nothing about WHICH
            folder they are in, so it let a novel that had been pushed onto a
            suffixed name walk straight back into the folder it was pushed out
-           of — and then rename and write over that novel's chapters.
-
-           A library older than this column has no recorded name; there,
-           having chapters plus an unclaimed folder still means it is ours,
-           which is what keeps an existing library where it is. */
+           of — and then rename and write over that novel's chapters. */
         val recordedDir = try { store.dirNameFor(folderKey, slug) } catch (e: Exception) { null }
-        val legacyMine = recordedDir == null && owner == null &&
-            try { store.chapterCount(folderKey, slug) > 0 } catch (e: Exception) { false }
-        val ours = owner == slug || recordedDir == folderName || legacyMine
-        /* We own a folder under a different name — a suffix from a past
-           collision, or the name before a translated rename. Keep using it
-           rather than recomputing our way back into somebody else's. */
-        if (!ours && recordedDir != null && root.findFile(recordedDir)?.isDirectory == true) {
-            folderName = recordedDir
-        } else if (!ours) {
-            /* Unclaimed but already full is somebody else's work — the first
-               of two colliding novels to run must not be able to claim, and
-               then be evicted from, the folder it has been living in. */
-            val existingDir = root.findFile(folderName)?.takeIf { it.isDirectory }
-            val occupied = owner != null ||
-                (existingDir != null && try { existingDir.listFiles().isNotEmpty() } catch (e: Exception) { false })
-            if (occupied) {
-                folderName = Extractor.sanitize("$folderName ($slug)").ifEmpty { slug }
-                log("Another novel already uses that folder name — saving to \"$folderName\"")
-            }
-        }
+        val myChapters = try { store.chapterCount(folderKey, slug) } catch (e: Exception) { 0 }
+        /* On failure, assume there ARE others: that is the cautious answer,
+           the one that steps aside rather than moves in. */
+        val knowsOthers = try { store.hasOtherChapters(folderKey, slug) } catch (e: Exception) { true }
+        val choice = Ownership.choose(
+            slug = slug,
+            wanted = folderName,
+            alt = Extractor.sanitize("$folderName ($slug)").ifEmpty { slug },
+            owner = owner,
+            recordedDir = recordedDir,
+            myChapters = myChapters,
+            indexKnowsOthers = knowsOthers,
+            recordedDirOnDisk = { root.findFile(recordedDir ?: "")?.isDirectory == true },
+            wantedOccupied = {
+                val existingDir = root.findFile(folderName)?.takeIf { it.isDirectory }
+                existingDir != null &&
+                    try { existingDir.listFiles().isNotEmpty() } catch (e: Exception) { false }
+            },
+        )
+        folderName = choice.name
+        if (choice.stepAside) log("Another novel already uses that folder name — saving to \"$folderName\"")
         val dir = root.findFile(folderName)?.takeIf { it.isDirectory }
             ?: root.createDirectory(folderName)
         if (dir == null) {

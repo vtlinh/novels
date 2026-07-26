@@ -59,6 +59,77 @@ object Listing {
     fun firstGap(missed: Set<Int>, lastPage: Int): Int = missed.minOrNull() ?: (lastPage + 1)
 }
 
+/* Which directory a novel writes into. Wrong in one direction it overwrites
+   another novel's chapters; wrong in the other it builds a second folder
+   beside a full one and re-downloads — and re-translates, at the API's price
+   — a book that is already on disk. Both have happened. */
+object Ownership {
+
+    /* `name` is the folder to use. `stepAside` means we could not have it and
+       took a disambiguated one; `recorded` means we went back to the folder
+       we are on record as using rather than the name the title computes to. */
+    data class Choice(val name: String, val stepAside: Boolean, val recorded: Boolean)
+
+    /* Is `wanted` this novel's own folder?
+
+       `owner` is the slug that claimed the name, `recordedDir` the directory
+       this novel is on record as using, `myChapters` how many of its chapters
+       the index holds, `indexKnowsOthers` whether the index holds ANY chapter
+       of any other novel in this tree.
+
+       A recorded directory is the whole answer when there is one. Without it
+       the folder is ours if the index already holds our chapters (a library
+       older than the column, sitting where it always has) — or if the index
+       holds nobody else's either, which is what a reinstall on top of a
+       restored folder looks like and is not somebody else's work. */
+    fun ours(
+        slug: String,
+        wanted: String,
+        owner: String?,
+        recordedDir: String?,
+        myChapters: Int,
+        indexKnowsOthers: Boolean,
+    ): Boolean {
+        if (owner == slug) return true
+        if (recordedDir != null) return recordedDir == wanted
+        if (owner != null) return false
+        return myChapters > 0 || !indexKnowsOthers
+    }
+
+    /* The full choice. `recordedDirOnDisk` and `wantedOccupied` are lambdas
+       because answering them costs SAF calls — listing a folder of several
+       thousand chapters is seconds — and neither is needed on the ordinary
+       path where the folder is plainly ours. */
+    fun choose(
+        slug: String,
+        wanted: String,
+        alt: String,
+        owner: String?,
+        recordedDir: String?,
+        myChapters: Int,
+        indexKnowsOthers: Boolean,
+        recordedDirOnDisk: () -> Boolean,
+        wantedOccupied: () -> Boolean,
+    ): Choice {
+        if (ours(slug, wanted, owner, recordedDir, myChapters, indexKnowsOthers)) {
+            return Choice(wanted, stepAside = false, recorded = false)
+        }
+        /* We own a folder under a different name — a suffix from a past
+           collision, or the name before a translated rename. Keep using it
+           rather than recomputing our way back into somebody else's. */
+        if (recordedDir != null && recordedDirOnDisk()) {
+            return Choice(recordedDir, stepAside = false, recorded = true)
+        }
+        /* Claimed, or unclaimed but already full: either way somebody else's
+           work. The first of two colliding novels to run must not be able to
+           claim, and then be evicted from, the folder it lives in. */
+        if (owner != null || wantedOccupied()) {
+            return Choice(alt, stepAside = true, recorded = false)
+        }
+        return Choice(wanted, stepAside = false, recorded = false)
+    }
+}
+
 object Renumber {
 
     /* One entry in the site's listing: the page it came from, and the name
