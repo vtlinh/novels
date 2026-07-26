@@ -43,7 +43,6 @@ class CachedChapterList(
     val ordered: List<String>,
     val source: Map<String, String>,
     val translated: Map<String, String>,
-    val zipDocId: String?,
 )
 
 class DownloadStore(context: Context) :
@@ -66,9 +65,9 @@ class DownloadStore(context: Context) :
             "CREATE TABLE IF NOT EXISTS chapter_order (" +
                 "folder TEXT, slug TEXT, filename TEXT, ord INTEGER, " +
                 "PRIMARY KEY(folder, slug, filename))"
-        /* cached resolved chapter listing (see CachedChapterList); pos -1 is
-           the meta row carrying the chapters.zip docId. Invalidated by every
-           write to the chapter index / order, and by the compress pass. */
+        /* cached resolved chapter listing (see CachedChapterList).
+           Invalidated by every write to the chapter index / order, and by
+           the compress pass. */
         private const val CHLIST_TABLE =
             "CREATE TABLE IF NOT EXISTS chlist (" +
                 "folder TEXT, slug TEXT, pos INTEGER, name TEXT, src TEXT, tr TEXT, " +
@@ -176,19 +175,15 @@ class DownloadStore(context: Context) :
         db.beginTransaction()
         try {
             db.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))
-            db.execSQL(
-                "INSERT INTO chlist(folder,slug,pos,name,src,tr) VALUES(?,?,-1,'',?,'')",
-                arrayOf(folder, slug, list.zipDocId ?: ""),
-            )
             for ((i, name) in list.ordered.withIndex()) {
                 db.execSQL(
                     "INSERT INTO chlist(folder,slug,pos,name,src,tr) VALUES(?,?,?,?,?,?)",
                     arrayOf(folder, slug, i, name, list.source[name] ?: "", list.translated[name] ?: ""),
                 )
             }
-            /* this listing is the truest on-disk count (it sees loose, .gz AND
-               zipped chapters, which the scan/index counters don't) — persist
-               it so the Library's x/y stays right even for zipped novels */
+            /* this listing is the truest on-disk count — it sees loose AND
+               compressed chapters, which the scan/index counters don't — so
+               persist it and the Library's x/y stays right */
             db.execSQL(
                 "UPDATE novels SET disk_count=? WHERE folder=? AND slug=? AND disk_count<?",
                 arrayOf(list.ordered.size, folder, slug, list.ordered.size),
@@ -199,7 +194,7 @@ class DownloadStore(context: Context) :
         }
     }
 
-    /* chapters in the cached resolved listing (counts zipped chapters too) */
+    /* chapters in the cached resolved listing (counts compressed ones too) */
     fun chapterListCount(folder: String, slug: String): Int {
         readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM chlist WHERE folder=? AND slug=? AND pos>=0",
@@ -212,7 +207,6 @@ class DownloadStore(context: Context) :
         val ordered = ArrayList<String>()
         val source = HashMap<String, String>()
         val translated = HashMap<String, String>()
-        var zipDocId: String? = null
         var any = false
         readableDatabase.query(
             "chlist", arrayOf("pos", "name", "src", "tr"),
@@ -220,10 +214,7 @@ class DownloadStore(context: Context) :
         ).use { c ->
             while (c.moveToNext()) {
                 any = true
-                if (c.getInt(0) < 0) {
-                    zipDocId = c.getString(2).ifEmpty { null }
-                    continue
-                }
+                if (c.getInt(0) < 0) continue      // legacy meta row
                 val name = c.getString(1)
                 ordered.add(name)
                 c.getString(2).ifEmpty { null }?.let { source[name] = it }
@@ -231,7 +222,7 @@ class DownloadStore(context: Context) :
             }
         }
         if (!any || ordered.isEmpty()) return null
-        return CachedChapterList(ordered, source, translated, zipDocId)
+        return CachedChapterList(ordered, source, translated)
     }
 
     fun clearChapterList(folder: String, slug: String) {

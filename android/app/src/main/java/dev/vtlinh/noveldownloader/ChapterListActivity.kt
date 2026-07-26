@@ -23,9 +23,8 @@ class ChapterListActivity : AppCompatActivity() {
 
         class Chapters(
             val ordered: List<String>,               // chapter filenames in order
-            val source: Map<String, String>,         // name -> docId or zip ref
-            val translated: Map<String, String>,     // name -> docId or zip ref
-            val zip: java.io.File? = null,           // cached chapters.zip, if any
+            val source: Map<String, String>,         // name -> docId or gz ref
+            val translated: Map<String, String>,     // name -> docId or gz ref
         )
 
         /* does this docId still resolve? one single-row query — the cheap
@@ -50,15 +49,13 @@ class ChapterListActivity : AppCompatActivity() {
             cr: android.content.ContentResolver,
             treeUri: Uri,
             ref: String,
-            zipDocId: String?,
         ): Boolean = when {
-            Zips.isRef(ref) -> zipDocId != null && docExists(cr, treeUri, zipDocId)
             Zips.isGzRef(ref) -> docExists(cr, treeUri, Zips.gzDocId(ref))
             else -> docExists(cr, treeUri, ref)
         }
 
         /* The chapters of one novel dir, with refs for both languages —
-           loose .txt files and/or entries of a chapters.zip (loose wins,
+           loose .txt files and/or their compressed .gz form (loose wins,
            so chapters downloaded after compressing still show up).
            Ordered by the site's own listing sequence when known.
 
@@ -83,14 +80,9 @@ class ChapterListActivity : AppCompatActivity() {
                     val firstRef = cached.source[cached.ordered.first()]
                     val lastRef = cached.source[cached.ordered.last()]
                     val ok = firstRef != null && lastRef != null &&
-                        refUsable(context, cr, treeUri, firstRef, cached.zipDocId) &&
-                        refUsable(context, cr, treeUri, lastRef, cached.zipDocId)
-                    if (ok) {
-                        val zipFile = cached.zipDocId?.let {
-                            try { Zips.cached(context, cr, treeUri, it, dirName) } catch (e: Exception) { null }
-                        }
-                        return Chapters(cached.ordered, cached.source, cached.translated, zipFile)
-                    }
+                        refUsable(context, cr, treeUri, firstRef) &&
+                        refUsable(context, cr, treeUri, lastRef)
+                    if (ok) return Chapters(cached.ordered, cached.source, cached.translated)
                     try { store.clearChapterList(folder, slug) } catch (e: Exception) {}
                 }
             }
@@ -100,10 +92,8 @@ class ChapterListActivity : AppCompatActivity() {
             val source = HashMap<String, String>()
             val gzSource = HashMap<String, String>()
             var translatedId: String? = null
-            var zipDocId: String? = null
             for (e in Saf.children(cr, treeUri, dir.docId)) {
                 if (e.isDir && e.name == "translated") translatedId = e.docId
-                else if (!e.isDir && Zips.isZipName(e.name)) zipDocId = e.docId
                 else if (!e.isDir && Zips.isGzName(e.name)) {
                     val n = e.name.removeSuffix(".gz")
                     if (CHAPTER_RE.matches(n)) gzSource[n] = Zips.gzRef(e.docId)
@@ -123,18 +113,6 @@ class ChapterListActivity : AppCompatActivity() {
             /* compressed chapters fill in behind loose .txt files */
             for ((n, r) in gzSource) if (n !in source) source[n] = r
             for ((n, r) in gzTranslated) if (n !in translated) translated[n] = r
-            /* zipped chapters fill in anything not present as a loose file */
-            val zipFile = zipDocId?.let { Zips.cached(context, cr, treeUri, it, dirName) }
-            zipFile?.let { zf ->
-                for (entry in Zips.entries(zf)) {
-                    if (entry.startsWith("translated/")) {
-                        val n = entry.removePrefix("translated/")
-                        if (CHAPTER_RE.matches(n) && n !in translated) translated[n] = Zips.ref(entry)
-                    } else if (CHAPTER_RE.matches(entry) && entry !in source) {
-                        source[entry] = Zips.ref(entry)
-                    }
-                }
-            }
             translated.keys.retainAll(source.keys)
             /* The site's listing sequence is the order, and it has to be: a
                site can name chapters after their titles rather than number
@@ -184,11 +162,11 @@ class ChapterListActivity : AppCompatActivity() {
                 try {
                     store.saveChapterList(
                         folder, slug,
-                        CachedChapterList(ordered, source, translated, zipDocId),
+                        CachedChapterList(ordered, source, translated),
                     )
                 } catch (e: Exception) {}
             }
-            return Chapters(ordered, source, translated, zipFile)
+            return Chapters(ordered, source, translated)
         }
     }
 
