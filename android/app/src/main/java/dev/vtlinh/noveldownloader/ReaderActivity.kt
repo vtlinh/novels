@@ -47,10 +47,17 @@ class ReaderActivity : AppCompatActivity() {
            saved position doesn't belong to, and the restore found nothing. */
         fun resumeChapter(ctx: android.content.Context, slug: String): String? {
             val p = ctx.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
-            p.getString("ttsPos:$slug", null)
+            val tts = p.getString("ttsPos:$slug", null)
                 ?.substringBefore('|')?.takeIf { it.isNotEmpty() }
-                ?.let { return it }
-            return p.getString("lastCh:$slug", null)
+            val last = p.getString("lastCh:$slug", null)
+            if (tts == null) return last
+            if (last == null) return tts
+            /* Whichever is more recent. Preferring the read-aloud spot
+               unconditionally meant an evening of scroll-reading was thrown
+               away by a TTS position from days earlier: reopening the novel
+               jumped back fifty chapters, and the chapter list highlighted
+               that one too, with hand-picking the only way out. */
+            return if (p.getLong("lastChAt:$slug", 0L) > p.getLong("ttsPosAt:$slug", 0L)) last else tts
         }
     }
 
@@ -182,13 +189,49 @@ class ReaderActivity : AppCompatActivity() {
         !spotLost &&
             DownloadEngine.renameEpochOf(intent.getStringExtra("slug") ?: "") == chaptersEpoch
 
+    /* Re-read the listing when a rename has moved it under us, and take the
+       new epoch with it. Without this the guard above was a one-way latch:
+       the first rename of this novel — a download of it, a status sweep —
+       stopped the reading spot being recorded for the whole life of the
+       reader, and while TTS is playing the reader is deliberately kept alive,
+       so the obvious "leave and come back" gesture never happened. An hour of
+       listening recorded nothing and resumed at the pre-rename chapter. */
+    private fun resyncIfRenamed() {
+        val slug = intent.getStringExtra("slug") ?: return
+        val now = DownloadEngine.renameEpochOf(slug)
+        if (now == chaptersEpoch) return
+        lifecycleScope.launch {
+            val dir = intent.getStringExtra("dir") ?: return@launch
+            val tree = treeUri ?: return@launch
+            val folderKey = prefs.getString("tree", null) ?: return@launch
+            val fresh = withContext(Dispatchers.IO) {
+                val order = try { store.getChapterOrder(folderKey, slug) } catch (e: Exception) { null } ?: emptyMap()
+                try {
+                    ChapterListActivity.chapterNames(this@ReaderActivity, tree, dir, order, slug)
+                } catch (e: Exception) { null }
+            }
+            if (fresh != null && fresh.ordered.isNotEmpty()) {
+                chapters = fresh
+                drawerAdapter?.clear()
+                drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
+                drawerAdapter?.notifyDataSetChanged()
+            }
+            /* take the epoch even if the reload came back empty — otherwise
+               the latch simply stays shut */
+            chaptersEpoch = now
+        }
+    }
+
     /* remember the chapter being read, per novel — the chapter list reopens
        scrolled to (and highlighting) it */
     private fun saveLastChapter(idx: Int) {
         if (!spotWritable()) return
         intent.getStringExtra("slug")?.let { slug ->
             chapters?.ordered?.getOrNull(idx)?.let { name ->
-                prefs.edit().putString("lastCh:$slug", name).apply()
+                prefs.edit()
+                    .putString("lastCh:$slug", name)
+                    .putLong("lastChAt:$slug", System.currentTimeMillis())
+                    .apply()
             }
         }
     }
@@ -526,6 +569,12 @@ class ReaderActivity : AppCompatActivity() {
         }
         setIntent(newIntent)
         if (idx >= 0) {
+            /* An explicit pick from the chapter list is a new place, just as
+               one from the drawer is. Without this a reader that had given up
+               on a lost spot never resumed recording — you could pick a
+               chapter, read for an hour, and still reopen at chapter 1 with
+               the same toast. */
+            spotLost = false
             val t = restoreTargetFor(idx)
             goTo(idx, t.first, t.second)
         } else {
@@ -1065,6 +1114,7 @@ class ReaderActivity : AppCompatActivity() {
            the index doesn't line up. */
         val paraText = body.subSequence(pStart, pEnd).toString()
         prefs.edit().putString("ttsPos:$slug", "$name|$para")
+            .putLong("ttsPosAt:$slug", System.currentTimeMillis())
             .putString("ttsParaText:$slug", paraText)
             .putString("lastTtsPara", paraText)
             .apply()
@@ -1247,6 +1297,7 @@ class ReaderActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         reloadSpeechRules()   // pick up any changes made on the Speech-edits screen
+        resyncIfRenamed()     // a rename while we were away must not latch saving off
         val dir = intent.getStringExtra("dir") ?: return
         val slug = intent.getStringExtra("slug") ?: return
         val o = org.json.JSONObject()

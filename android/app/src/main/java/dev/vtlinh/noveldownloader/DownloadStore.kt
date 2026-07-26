@@ -50,7 +50,7 @@ class CachedChapterList(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 18) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 19) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -71,6 +71,7 @@ class DownloadStore(context: Context) :
                 "started INTEGER, total INTEGER DEFAULT -1, complete INTEGER DEFAULT 0, " +
                 "author TEXT DEFAULT '', disk_count INTEGER DEFAULT 0, " +
                 "last_dl INTEGER DEFAULT 0, last_read INTEGER DEFAULT 0, " +
+                "dir_name TEXT DEFAULT '', " +
                 "PRIMARY KEY(folder, slug))"
         /* which novel a folder NAME belongs to, so a second novel that
            sanitises onto the same name is sent elsewhere instead of writing
@@ -195,6 +196,30 @@ class DownloadStore(context: Context) :
            already have chapters, so an existing library owns the folders it
            has been using rather than being evicted from them by whichever
            novel happens to run first. */
+        /* Which directory each novel actually uses. Nothing recorded it
+           before, so ownership had to be inferred — and the inference was
+           "this slug has chapters somewhere in this tree", which is true of
+           every novel on its second run. Two novels whose titles sanitise to
+           the same name therefore collapsed into one folder: the second one
+           skipped the disambiguating suffix, resolved to the first one's
+           directory, renamed its files and wrote into it. */
+        if (oldVersion < 19) {
+            try { db.execSQL("ALTER TABLE novels ADD COLUMN dir_name TEXT DEFAULT ''") } catch (e: Exception) {}
+            /* Seed it from the ownership table, which v18 already populated.
+               Without this an existing library has no recorded directory, so
+               every guard that asks "which folder is this novel's?" falls back
+               to rebuilding the name from the title — which gives the
+               UNSUFFIXED one, i.e. another novel's folder — until each novel
+               happens to be downloaded again. */
+            try {
+                db.execSQL(
+                    "UPDATE novels SET dir_name = COALESCE((" +
+                        "SELECT name FROM folder_owner " +
+                        "WHERE folder_owner.folder = novels.folder AND folder_owner.slug = novels.slug" +
+                        "), '') WHERE dir_name = ''",
+                )
+            } catch (e: Exception) {}
+        }
         if (oldVersion < 18) {
             db.execSQL(FOLDER_OWNER_TABLE)
             try {
@@ -219,7 +244,12 @@ class DownloadStore(context: Context) :
                     arrayOf(folder, slug, fn, i),
                 )
             }
+            /* Bump the epoch too. Deleting the rows without it left a walk
+               already in flight passing the staleness check and writing its
+               listing — sorted by the order we just replaced — straight back
+               over the delete, where nothing would invalidate it again. */
             db.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))   // order changed
+            bumpChlistEpoch(folder, slug)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -306,10 +336,17 @@ class DownloadStore(context: Context) :
         return CachedChapterList(ordered, source, translated)
     }
 
-    fun clearChapterList(folder: String, slug: String) {
-        writableDatabase.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))
+    private fun bumpChlistEpoch(folder: String, slug: String) {
         val k = epochKey(folder, slug)
         chlistEpochs[k] = (chlistEpochs[k] ?: 0L) + 1
+    }
+
+    fun clearChapterList(folder: String, slug: String) {
+        /* Bump FIRST. Bumping after the delete left a window the width of a
+           database round-trip in which a walk could finish, read the old
+           epoch, pass the check and restore exactly what the delete removed. */
+        bumpChlistEpoch(folder, slug)
+        writableDatabase.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))
     }
 
     /* the compress pass rewrites refs across the whole library */
@@ -479,6 +516,24 @@ class DownloadStore(context: Context) :
             null, null, null,
         ).use { c -> if (c.moveToNext()) return c.getString(0) }
         return null
+    }
+
+    /* The directory this novel actually writes into. Recorded because it
+       cannot be re-derived: a novel pushed off a colliding name lives under
+       "Title (slug)", and recomputing the name from the title each run gives
+       the UNSUFFIXED one — which is another novel's folder. */
+    fun dirNameFor(folder: String, slug: String): String? {
+        readableDatabase.query(
+            "novels", arrayOf("dir_name"), "folder=? AND slug=?", arrayOf(folder, slug),
+            null, null, null,
+        ).use { c -> if (c.moveToNext()) return c.getString(0)?.ifEmpty { null } }
+        return null
+    }
+
+    fun setDirName(folder: String, slug: String, name: String) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET dir_name=? WHERE folder=? AND slug=?", arrayOf(name, folder, slug),
+        )
     }
 
     fun claimFolderName(folder: String, name: String, slug: String) {
@@ -741,6 +796,7 @@ class DownloadStore(context: Context) :
                 )
             }
             db.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))   // listing changed
+            bumpChlistEpoch(folder, slug)   // same reason as setChapterOrder
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()

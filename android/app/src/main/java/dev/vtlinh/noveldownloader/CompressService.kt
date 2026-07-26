@@ -99,11 +99,12 @@ class CompressService : Service() {
                     } catch (e: Exception) {
                         emptyList()
                     }
+                    var aborted = false
                     for (d in dirs) {
                         /* Per folder, not just per pass: a pass is a walk of
                            the whole library over SAF, so a download starting
                            part-way through wasn't stood aside for at all. */
-                        if (DownloadService.runningFlow.value) break
+                        if (DownloadService.runningFlow.value) { aborted = true; break }
                         val cur = prefs.getBoolean("compressNovels", true)
                         val changed = try {
                             if (cur) Zips.compressDir(this@CompressService, cr, treeUri, d)
@@ -122,6 +123,13 @@ class CompressService : Service() {
                     }
                     /* converged: a whole pass changed nothing and the target
                        held steady across it → every novel already matches */
+                    /* A pass cut short mid-library has NOT converged, whatever
+                       it managed to change. Standing aside for a download on
+                       the second of sixty novels left the other fifty-eight
+                       unconverted and then cleared the resume flag, so nothing
+                       ever picked the job back up — the library stayed half
+                       compressed until the user toggled the setting again. */
+                    if (aborted) break
                     if (!changedAny && prefs.getBoolean("compressNovels", true) == target) {
                         converged = true
                         break
