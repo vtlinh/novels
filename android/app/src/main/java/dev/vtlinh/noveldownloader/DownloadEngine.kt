@@ -162,17 +162,6 @@ class DownloadEngine(
         var filename: String? = null
     }
 
-    /* Links the site lists as chapters but that carry no readable chapter
-       number — none in the URL (no "chapter-N", no leading digits on the
-       slug) and none in the link text ("Chapter N" / "Chương N"). Without a
-       number there's no "Chapter N.txt" to save them as, so they can never
-       be downloaded and don't count towards the novel's total.
-
-       Name them in the log: that's the only way to tell a genuinely
-       unnumbered chapter — a prologue or an epilogue — from a stray
-       non-chapter link that happens to sit inside the listing container.
-       The first tells us the numbering needs to cope with it; the second
-       tells us the link test is too generous. */
     /* The site's own number for a chapter, used for the heading written
        inside the file. A link the site doesn't number — its own typo, or an
        unnumbered extra like an interlude — takes the number of the last
@@ -634,22 +623,6 @@ class DownloadEngine(
                     existing.add(n.removeSuffix(".gz"))
                     continue
                 }
-                if (Zips.isZipName(n)) {
-                    /* compressed chapters count as present (top-level entries
-                       are the Vietnamese sources) but stay out of the index */
-                    try {
-                        context.contentResolver.openInputStream(f.uri)?.use { ins ->
-                            java.util.zip.ZipInputStream(ins).use { z ->
-                                var e = z.nextEntry
-                                while (e != null) {
-                                    if (!e.isDirectory && !e.name.contains('/')) existing.add(e.name)
-                                    e = z.nextEntry
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {}
-                    continue
-                }
                 if (f.length() > 0) { existing.add(n); rows.add(n to f.uri.toString()) }
             }
             store.addAll(folderKey, slug, rows)
@@ -788,7 +761,7 @@ class DownloadEngine(
             try {
                 val docId = DocumentsContract.getDocumentId(dir.uri)
                 if (Zips.compressDir(context, context.contentResolver, treeUri, Saf.Entry(docId, folderName, true))) {
-                    log("Chapters compressed into ${Zips.NAME}")
+                    log("Chapters compressed")
                 }
             } catch (e: Exception) {
                 log("Compress failed — ${e.message}")

@@ -1855,7 +1855,6 @@ class ReaderActivity : AppCompatActivity() {
             ?: return null
         return withContext(Dispatchers.IO) {
             when {
-                Zips.isRef(ref) -> ch.zip?.let { Zips.read(it, Zips.entryOf(ref)) }
                 Zips.isGzRef(ref) -> Zips.readGz(contentResolver, treeUri!!, Zips.gzDocId(ref))
                 else -> Saf.readText(contentResolver, treeUri!!, ref)
             }

@@ -198,8 +198,8 @@ class NovelListActivity : AppCompatActivity() {
         val garbage = garbageSet()
         return byNorm.values.filter { normKey(it.slug) !in garbage }.map { rec ->
             val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
-            /* the cached resolved listing also counts chapters living inside
-               chapters.zip, which the index and the scan both miss */
+            /* the cached resolved listing also counts compressed chapters,
+               which the index and the scan both miss */
             val listCount = try { store.chapterListCount(folder, rec.slug) } catch (e: Exception) { 0 }
             Row(
                 rec,
