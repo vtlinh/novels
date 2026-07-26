@@ -264,6 +264,18 @@ class BrowserActivity : AppCompatActivity() {
         lifecycleScope.launch {
             DownloadService.queuedSlugsFlow.collectLatest { refreshDownloadButton() }
         }
+        /* chapters landing don't move either flow, but they change what the
+           banner should say and where it should go — statusFlow ticks per
+           chapter, so ride that, throttled */
+        var lastSync = 0L
+        lifecycleScope.launch {
+            DownloadService.statusFlow.collectLatest {
+                val now = System.currentTimeMillis()
+                if (now - lastSync < 3_000) return@collectLatest
+                lastSync = now
+                refreshDownloadButton()
+            }
+        }
 
         /* header back exits straight to the domain list, and off the list
            leaves browser mode; the system back button is the one that walks
@@ -465,42 +477,55 @@ class BrowserActivity : AppCompatActivity() {
         }
     }
 
-    /* ---- "already downloaded" banner ---- */
+    /* ---- library / download banner ---- */
 
-    /* Same banner, for a novel we're working on right now — it goes to the
-       novels list, which is where the progress actually shows. */
-    private fun showBusyBanner(active: Boolean) {
+    private fun showBanner(text: String, onTap: () -> Unit) {
         val banner = findViewById<TextView>(R.id.libraryBanner)
-        banner.text =
-            if (active) "Downloading this novel — tap to open your novels"
-            else "Queued for download — tap to open your novels"
+        banner.text = text
         banner.visibility = View.VISIBLE
-        banner.setOnClickListener {
-            startActivity(Intent(this, NovelListActivity::class.java))
-        }
+        banner.setOnClickListener { onTap() }
     }
 
-    /* show the green banner when this novel is already in the library, and
-       point it at that novel's chapter list */
+    private fun openNovels() = startActivity(Intent(this, NovelListActivity::class.java))
+
+    private fun openChapters(dir: String, title: String, slug: String) = startActivity(
+        Intent(this, ChapterListActivity::class.java)
+            .putExtra("dir", dir).putExtra("title", title).putExtra("slug", slug),
+    )
+
+    private fun busyText(active: Boolean, chapters: Int): String {
+        val what = if (active) "Downloading this novel" else "Queued for download"
+        return if (chapters > 0) "$what — $chapters chapter(s) ready, tap to open"
+        else "$what — tap to open your novels"
+    }
+
+    /* the banner as it reads before we know what's on disk — used the moment
+       a download is started, when nothing has landed yet */
+    private fun showBusyBanner(active: Boolean) =
+        showBanner(busyText(active, 0)) { openNovels() }
+
+    /* Show the banner for the open page and point the tap where it's most
+       useful: this novel's chapter list once ANY chapter is on disk (it
+       fills in as more arrive), the novels list while it's still starting. */
     private fun syncLibraryBanner(url: String) {
         val banner = findViewById<TextView>(R.id.libraryBanner)
         banner.visibility = View.GONE
         val site = Sites.forUrl(url) ?: return
         /* downloading right now takes precedence over "you already have it":
-           it's the newer truth, and re-downloading for new chapters hits both */
-        val busyKey = slugKeyFor(url)
-        if (DownloadService.isBusy(busyKey)) {
-            showBusyBanner(DownloadService.isActive(busyKey))
-            return
-        }
+           it's the newer truth, and re-downloading for new chapters is both */
+        val busy = DownloadService.isBusy(slugKeyFor(url))
+        val active = DownloadService.isActive(slugKeyFor(url))
+        if (busy) showBusyBanner(active)
+
         val folder = prefs.getString("tree", null) ?: return
         val (base, slug) = try { site.normalize(url) } catch (e: Exception) { return }
         if (slug.isEmpty()) return                       // a listing page, not a novel
         val slugKey = NovelListActivity.slugKeyFromUrl(base)
         if (slugKey.isEmpty()) return
-        /* garbage-marked novels aren't in the list, so don't advertise them */
+        /* garbage-marked novels aren't in the list, so don't advertise them —
+           though one being downloaded right now still earns its banner */
         val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()
-        if (slugKey in garbage) return
+        if (!busy && slugKey in garbage) return
 
         lifecycleScope.launch {
             val found = withContext(Dispatchers.IO) {
@@ -510,20 +535,21 @@ class BrowserActivity : AppCompatActivity() {
                     } ?: return@withContext null
                     val dir = store.getTitle(folder, rec.slug)
                         ?: Extractor.sanitize(rec.title.ifEmpty { rec.slug })
-                    Pair(rec, dir)
+                    Triple(rec, dir, store.chapterCount(folder, rec.slug))
                 } catch (e: Exception) { null }
             } ?: return@launch
             /* the page may have moved on while the lookup ran */
             if (currentUrl != url) return@launch
-            val (rec, dir) = found
-            banner.visibility = View.VISIBLE
-            banner.setOnClickListener {
-                startActivity(
-                    Intent(this@BrowserActivity, ChapterListActivity::class.java)
-                        .putExtra("dir", dir)
-                        .putExtra("title", rec.title.ifEmpty { rec.slug })
-                        .putExtra("slug", rec.slug),
-                )
+            val (rec, dir, chapters) = found
+            val title = rec.title.ifEmpty { rec.slug }
+            when {
+                /* something's on disk already → send them to it */
+                busy && chapters > 0 ->
+                    showBanner(busyText(active, chapters)) { openChapters(dir, title, rec.slug) }
+                busy -> {}   // banner's already up, still pointing at the list
+                else -> showBanner("Already in your novels — tap to open it") {
+                    openChapters(dir, title, rec.slug)
+                }
             }
         }
     }

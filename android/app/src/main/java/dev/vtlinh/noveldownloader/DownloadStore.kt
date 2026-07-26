@@ -450,6 +450,17 @@ class DownloadStore(context: Context) :
         }
     }
 
+    /* how many chapters are indexed for this novel — the cheap "has anything
+       landed yet?" test, without pulling every row back like get() does */
+    fun chapterCount(folder: String, slug: String): Int = try {
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM chapters WHERE folder=? AND slug=?",
+            arrayOf(folder, slug),
+        ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    } catch (e: Exception) {
+        0
+    }
+
     /* filename -> document URI for one novel, ordered by filename */
     fun get(folder: String, slug: String): LinkedHashMap<String, String> {
         val out = LinkedHashMap<String, String>()
