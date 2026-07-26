@@ -16,6 +16,8 @@ class Site(
     val maxPage: (Document, String) -> Int,                 // (doc, slug)
     val chapterNumFromUrl: (String) -> Int?,
     val isCompleted: (Document) -> Boolean,                 // novel page says finished
+    /* site publishes in English, so there is nothing to translate to English */
+    val english: Boolean = false,
     /* container of the REAL chapter list — pages also carry a "latest
        chapters" widget whose links must not pollute the chapter order */
     val listScope: String = "#list-chapter",
@@ -89,6 +91,7 @@ object Sites {
             isCompleted = { doc ->
                 doc.select("a[href*=/status/]").any { it.text().trim().equals("Completed", true) }
             },
+            english = true,
         ),
     )
 

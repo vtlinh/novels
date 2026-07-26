@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/browserRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -64,6 +65,37 @@
             app:cornerRadius="8dp"
             android:enabled="false" />
     </LinearLayout>
+
+    <!-- this novel is already downloaded: tap to jump to its chapter list -->
+    <TextView
+        android:id="@+id/libraryBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/ok_bg"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:text="Already in your novels — tap to open it"
+        android:textSize="13sp"
+        android:textColor="@color/ok_fg"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone" />
+
+    <!-- translate-on-download toggle; disabled outright on English sites -->
+    <CheckBox
+        android:id="@+id/browseTranslate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/card"
+        android:paddingStart="6dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="6dp"
+        android:text="Translate to English"
+        android:textSize="13sp"
+        android:textColor="@color/fg" />
 
     <FrameLayout
         android:layout_width="match_parent"
