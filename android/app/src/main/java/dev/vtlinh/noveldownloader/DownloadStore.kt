@@ -493,6 +493,22 @@ class DownloadStore(context: Context) :
         return out
     }
 
+    /* a chapter's file moved to a new name (the listing shifted under it) */
+    fun renameChapter(folder: String, slug: String, from: String, to: String, uri: String) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("chapters", "folder=? AND slug=? AND filename=?", arrayOf(folder, slug, to))
+            db.execSQL(
+                "UPDATE chapters SET filename=?, uri=? WHERE folder=? AND slug=? AND filename=?",
+                arrayOf(to, uri, folder, slug, from),
+            )
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     /* adopt a file downloaded before URLs were recorded */
     fun linkUrl(folder: String, slug: String, filename: String, url: String) {
         writableDatabase.execSQL(

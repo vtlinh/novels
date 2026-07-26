@@ -36,6 +36,15 @@ object Saf {
 
     fun rootId(treeUri: Uri): String = DocumentsContract.getTreeDocumentId(treeUri)
 
+    /* rename one document in place; returns its new docId (SAF may mint a
+       fresh one) or null if the provider refused */
+    fun rename(cr: ContentResolver, treeUri: Uri, docId: String, newName: String): String? = try {
+        val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+        DocumentsContract.renameDocument(cr, uri, newName)?.let { DocumentsContract.getDocumentId(it) }
+    } catch (e: Exception) {
+        null
+    }
+
     fun readText(cr: ContentResolver, treeUri: Uri, docId: String): String? = try {
         val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
         cr.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
