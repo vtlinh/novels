@@ -825,6 +825,11 @@ class DownloadEngine(
             store.addAll(folderKey, slug, rows)
         }
 
+        /* the same preference the post-download pass reads — taken once here
+           so each chapter is written in its final form rather than rewritten */
+        val compressOn = context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
+            .let { it.getBoolean("compressNovels", it.getBoolean("zipDownloads", true)) }
+
         val toFetch =
             if (refetchAll) chapters.filter { it.filename != null }
             else chapters.filter { it.filename != null && it.filename !in existing }
@@ -870,7 +875,7 @@ class DownloadEngine(
                                 val body = Extractor.parseChapter(
                                     Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
                                 )
-                                val uri = writeFile(dir, ch.filename!!, body)
+                                val uri = writeFile(dir, ch.filename!!, body, compressOn)
                                 /* record the page it came from: that mapping is
                                    what keeps this file's name stable if the site
                                    later relabels or renumbers the chapter */
@@ -988,7 +993,16 @@ class DownloadEngine(
         return eng.toDouble() / text.length > 0.5
     }
 
-    private fun writeFile(dir: DocumentFile, name: String, text: String): String {
+    /* With compression on, write the chapter gzipped in the first place
+       rather than saving it plain for the post-download pass to read back,
+       rewrite and delete — three times the I/O for the same file. Falls
+       back to a plain write if the provider won't take the .gz, and that
+       pass still catches anything left loose. */
+    private fun writeFile(dir: DocumentFile, name: String, text: String, compress: Boolean): String {
+        if (compress) {
+            Zips.writeGzDoc(context.contentResolver, dir.uri, "$name.gz", text)
+                ?.let { return it.toString() }
+        }
         val f = dir.createFile("text/plain", name)
             ?: throw RuntimeException("could not create $name")
         val out = context.contentResolver.openOutputStream(f.uri)
