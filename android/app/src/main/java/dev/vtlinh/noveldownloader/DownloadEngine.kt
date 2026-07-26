@@ -205,25 +205,33 @@ class DownloadEngine(
            and would corrupt the site order. Whole-document fallback when the
            scoped container is missing or yields nothing new. */
         fun addLinks(d: org.jsoup.nodes.Document) {
-            /* returns how many chapter links the container HOLDS, not how many
+            /* Returns how many chapter links the container HOLDS, not how many
                were new. A listing page whose chapters were all seen already is
                still a real chapter list — counting only new ones made it look
                empty and sent us to the whole-document fallback, which is
-               exactly where the "latest chapters" widget lives. */
-            fun collect(root: org.jsoup.nodes.Element): Int {
+               exactly where the "latest chapters" widget lives.
+
+               `inList` reads links from the site's own chapter list, where
+               being in that container is what identifies a chapter; the
+               whole-document fallback has no such evidence and falls back to
+               the stricter URL test. */
+            fun collect(root: org.jsoup.nodes.Element, inList: Boolean): Int {
                 var found = 0
                 for (a in root.select("a[href]")) {
                     val href = a.absUrl("href").substringBefore('#')
                     if (href.isEmpty()) continue
                     val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                    if (!site.isChapterPath(path, slug)) continue
+                    val isChapter =
+                        if (inList) site.isChapterInList(path, slug)
+                        else site.isChapterPath(path, slug)
+                    if (!isChapter) continue
                     found++
                     if (!seen.containsKey(href)) seen[href] = Chapter(href, a.text().trim())
                 }
                 return found
             }
             val scope = d.selectFirst(site.listScope)
-            if (scope == null || collect(scope) == 0) collect(d)
+            if (scope == null || collect(scope, inList = true) == 0) collect(d, inList = false)
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
@@ -309,25 +317,33 @@ class DownloadEngine(
            and would corrupt the site order. Whole-document fallback when the
            scoped container is missing or yields nothing new. */
         fun addLinks(d: org.jsoup.nodes.Document) {
-            /* returns how many chapter links the container HOLDS, not how many
+            /* Returns how many chapter links the container HOLDS, not how many
                were new. A listing page whose chapters were all seen already is
                still a real chapter list — counting only new ones made it look
                empty and sent us to the whole-document fallback, which is
-               exactly where the "latest chapters" widget lives. */
-            fun collect(root: org.jsoup.nodes.Element): Int {
+               exactly where the "latest chapters" widget lives.
+
+               `inList` reads links from the site's own chapter list, where
+               being in that container is what identifies a chapter; the
+               whole-document fallback has no such evidence and falls back to
+               the stricter URL test. */
+            fun collect(root: org.jsoup.nodes.Element, inList: Boolean): Int {
                 var found = 0
                 for (a in root.select("a[href]")) {
                     val href = a.absUrl("href").substringBefore('#')
                     if (href.isEmpty()) continue
                     val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                    if (!site.isChapterPath(path, slug)) continue
+                    val isChapter =
+                        if (inList) site.isChapterInList(path, slug)
+                        else site.isChapterPath(path, slug)
+                    if (!isChapter) continue
                     found++
                     if (!seen.containsKey(href)) seen[href] = Chapter(href, a.text().trim())
                 }
                 return found
             }
             val scope = d.selectFirst(site.listScope)
-            if (scope == null || collect(scope) == 0) collect(d)
+            if (scope == null || collect(scope, inList = true) == 0) collect(d, inList = false)
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
