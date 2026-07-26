@@ -22,7 +22,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
-import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -320,11 +319,12 @@ class BrowserActivity : AppCompatActivity() {
         } catch (e: Exception) { "" }
     }
 
-    /* re-sync for the page that's open; on the start screen there's no page,
-       and showRecentPanel already parked the button disabled */
+    /* re-sync button and banner for the page that's open; on the start
+       screen there's no page, and showRecentPanel already parked both */
     private fun refreshDownloadButton() {
         if (findViewById<View>(R.id.recentPanel).visibility == View.VISIBLE) return
         syncDownloadButton(currentUrl)
+        syncLibraryBanner(currentUrl)
     }
 
     /* the button goes dead while this novel is downloading or waiting its
@@ -454,16 +454,31 @@ class BrowserActivity : AppCompatActivity() {
                 .putExtra("forceTranslate", false)
                 .putExtra("apiKey", key),
         )
-        Snackbar.make(
-            findViewById<View>(R.id.browserRoot),
-            if (translate) "Download started — translating as it goes" else "Download started",
-            Snackbar.LENGTH_LONG,
-        ).setAction("Novels") {
-            startActivity(Intent(this, NovelListActivity::class.java))
-        }.show()
+        /* Say so in the banner straight away. The service publishes its own
+           state a moment later and the flow collectors correct this if it
+           landed differently; the button follows the same way, but disable it
+           here so a fast second tap has nothing to hit. */
+        showBusyBanner(active = !DownloadService.runningFlow.value)
+        findViewById<Button>(R.id.browseDownload).let {
+            it.isEnabled = false
+            it.text = "⋯"
+        }
     }
 
     /* ---- "already downloaded" banner ---- */
+
+    /* Same banner, for a novel we're working on right now — it goes to the
+       novels list, which is where the progress actually shows. */
+    private fun showBusyBanner(active: Boolean) {
+        val banner = findViewById<TextView>(R.id.libraryBanner)
+        banner.text =
+            if (active) "Downloading this novel — tap to open your novels"
+            else "Queued for download — tap to open your novels"
+        banner.visibility = View.VISIBLE
+        banner.setOnClickListener {
+            startActivity(Intent(this, NovelListActivity::class.java))
+        }
+    }
 
     /* show the green banner when this novel is already in the library, and
        point it at that novel's chapter list */
@@ -471,6 +486,13 @@ class BrowserActivity : AppCompatActivity() {
         val banner = findViewById<TextView>(R.id.libraryBanner)
         banner.visibility = View.GONE
         val site = Sites.forUrl(url) ?: return
+        /* downloading right now takes precedence over "you already have it":
+           it's the newer truth, and re-downloading for new chapters hits both */
+        val busyKey = slugKeyFor(url)
+        if (DownloadService.isBusy(busyKey)) {
+            showBusyBanner(DownloadService.isActive(busyKey))
+            return
+        }
         val folder = prefs.getString("tree", null) ?: return
         val (base, slug) = try { site.normalize(url) } catch (e: Exception) { return }
         if (slug.isEmpty()) return                       // a listing page, not a novel
