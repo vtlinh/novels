@@ -7,6 +7,9 @@
     <color name="muted">#9AA0A6</color>
     <color name="accent">#4F8CFF</color>
     <color name="err">#FF6B6B</color>
+    <!-- "already downloaded" banner: green fill dark enough for white text -->
+    <color name="ok_bg">#1E4D33</color>
+    <color name="ok_fg">#7EE2A8</color>
     <color name="btn_secondary">#2A313A</color>
     <color name="input_bg">#12161B</color>
     <color name="input_stroke">#333A42</color>
