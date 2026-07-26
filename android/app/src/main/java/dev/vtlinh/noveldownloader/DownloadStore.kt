@@ -558,7 +558,16 @@ class DownloadStore(context: Context) :
     }
 
     fun setFingerprint(folder: String, slug: String, filename: String, size: Long, hash: String) {
-        writableDatabase.execSQL(
+        val db = writableDatabase
+        /* The files this is called for are precisely the ones with no row —
+           dedupe hashes leftovers nothing has indexed. UPDATE alone matched
+           nothing, so the hash was thrown away and every later sweep re-read
+           and re-hashed the same files forever. Insert the row first. */
+        db.execSQL(
+            "INSERT OR IGNORE INTO chapters(folder,slug,filename,uri) VALUES(?,?,?,'')",
+            arrayOf(folder, slug, filename),
+        )
+        db.execSQL(
             "UPDATE chapters SET size=?, hash=? WHERE folder=? AND slug=? AND filename=?",
             arrayOf(size, hash, folder, slug, filename),
         )
@@ -567,6 +576,13 @@ class DownloadStore(context: Context) :
     fun removeChapter(folder: String, slug: String, filename: String) {
         writableDatabase.delete(
             "chapters", "folder=? AND slug=? AND filename=?", arrayOf(folder, slug, filename),
+        )
+        /* One fewer file on disk. Without this the Library kept counting it:
+           clearChapterList drops the resolved listing, so the row falls back
+           to disk_count, which a delete never lowered. */
+        writableDatabase.execSQL(
+            "UPDATE novels SET disk_count=disk_count-1 WHERE folder=? AND slug=? AND disk_count>0",
+            arrayOf(folder, slug),
         )
         clearChapterList(folder, slug)
     }
