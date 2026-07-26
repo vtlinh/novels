@@ -201,17 +201,49 @@ class ChapterListActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         load()
+        startLiveRefresh()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        liveJob?.cancel()
+        liveJob = null
     }
 
     private var loadedOnce = false
+    private var loading = false
+    private var liveJob: kotlinx.coroutines.Job? = null
 
-    private fun load() {
+    /* While this novel is downloading, fold newly saved chapters in as they
+       land. Every saved chapter invalidates the listing cache, so a refresh
+       re-walks the folder — hence the interval, the skip while one is still
+       running, and one final pass once the download stops. */
+    private fun startLiveRefresh() {
+        val slug = intent.getStringExtra("slug") ?: return
+        val key = slug.lowercase().filter { it.isLetterOrDigit() }
+        liveJob?.cancel()
+        liveJob = lifecycleScope.launch {
+            var wasBusy = DownloadService.isBusy(key)
+            while (true) {
+                kotlinx.coroutines.delay(5_000)
+                val busy = DownloadService.isBusy(key)
+                if (busy || wasBusy) load(preserveScroll = true)
+                wasBusy = busy
+            }
+        }
+    }
+
+    private fun load(preserveScroll: Boolean = false) {
         val dirName = intent.getStringExtra("dir") ?: return finish()
         val title = intent.getStringExtra("title") ?: dirName
         val status = findViewById<TextView>(R.id.statusText)
         val listView = findViewById<ListView>(R.id.chapterListView)
         val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null) ?: return finish()
 
+        /* a live refresh landing on top of an in-flight one would just walk
+           the folder twice — let the running one finish */
+        if (loading) return
+        loading = true
         if (!loadedOnce) status.text = "Loading…"
         loadedOnce = true
         val slug = intent.getStringExtra("slug")
@@ -223,6 +255,7 @@ class ChapterListActivity : AppCompatActivity() {
             load()
         }
         lifecycleScope.launch {
+          try {
             val chapters = withContext(Dispatchers.IO) {
                 val order = slug?.let {
                     try { DownloadStore(this@ChapterListActivity).getChapterOrder(folder, it) } catch (e: Exception) { null }
@@ -244,6 +277,10 @@ class ChapterListActivity : AppCompatActivity() {
                 ReaderActivity.resumeChapter(this@ChapterListActivity, it)
             }
             val currentPos = lastName?.let { ordered.indexOf(it) } ?: -1
+            /* swapping the adapter drops the scroll position; note where the
+               list is sitting so a live refresh can put it back */
+            val keepPos = listView.firstVisiblePosition
+            val keepTop = listView.getChildAt(0)?.top ?: 0
             listView.adapter = object : ArrayAdapter<String>(
                 this@ChapterListActivity, android.R.layout.simple_list_item_1, labels,
             ) {
@@ -263,7 +300,11 @@ class ChapterListActivity : AppCompatActivity() {
                     return v
                 }
             }
-            if (currentPos >= 0) {
+            if (preserveScroll) {
+                /* chapters arriving underneath shouldn't move the reader's
+                   place in the list */
+                listView.setSelectionFromTop(keepPos, keepTop)
+            } else if (currentPos >= 0) {
                 listView.post {
                     listView.setSelectionFromTop(currentPos, (listView.height * 0.2f).toInt())
                 }
@@ -282,6 +323,9 @@ class ChapterListActivity : AppCompatActivity() {
                         .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
                 )
             }
+          } finally {
+            loading = false
+          }
         }
     }
 }
