@@ -909,12 +909,19 @@ class Translator(
     /* The chapter number printed at the top of a saved chapter, read back off
        disk — what a translated reply's own heading has to agree with. */
     private fun readHeadingNum(store: DownloadStore, folder: String, slug: String, fn: String): Int? {
-        val ref = try { store.get(folder, slug)[fn] } catch (e: Exception) { null } ?: return null
-        val treeUri = try { Uri.parse(folder) } catch (e: Exception) { null } ?: return null
-        val text = try {
-            if (Zips.isGzRef(ref)) Zips.readGz(context.contentResolver, treeUri, Zips.gzDocId(ref))
-            else Saf.readText(context.contentResolver, treeUri, ref)
-        } catch (e: Exception) { null } ?: return null
+        /* `chapters.uri` holds a FULL document URI — every writer of the column
+           stores `uri.toString()` — not a document id and never a "gz::" ref
+           (that shape exists only inside ChapterListActivity's own listing).
+           Reading it as a docId built a nonsense URI out of the tree, threw,
+           and returned null for every chapter, always: the misnumbering guard
+           below was dead code. A bundle the collecting path rejected for
+           answering with the wrong chapter number was kept for recovery, and
+           recovery — running the same check with `srcNum` permanently null —
+           wrote it, so every chapter's English landed under its neighbour's
+           name, for good. `readText` is the reader that gets this right, and
+           it sniffs the gzip magic rather than trusting a name. */
+        val uri = try { store.get(folder, slug)[fn] } catch (e: Exception) { null } ?: return null
+        val text = readText(uri) ?: return null
         return Extractor.parseHeading(text.lineSequence().firstOrNull().orEmpty()).first
     }
 

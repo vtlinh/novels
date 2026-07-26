@@ -125,6 +125,19 @@ object Ownership {
        older than the column, sitting where it always has) — or if the index
        holds nobody else's either, which is what a reinstall on top of a
        restored folder looks like and is not somebody else's work. */
+    /* Slug equality has to survive punctuation drift. The folder scan derives
+       a slug from the folder NAME — "Library of Heaven's Path" sanitises and
+       slugifies to "library-of-heaven-s-path" — while the site's own slug is
+       "library-of-heavens-path". Compared as strings those are two different
+       novels, so the app treated its own book as somebody else's, stepped
+       aside into "Title (slug)" and downloaded and re-translated, at the
+       API's price, a library already complete on disk. Letters and digits
+       only; the Library screen keys its duplicate merge the same way, and the
+       two must not drift apart. */
+    fun normKey(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+
+    private fun sameSlug(a: String?, b: String) = a != null && normKey(a) == normKey(b)
+
     fun ours(
         slug: String,
         wanted: String,
@@ -133,9 +146,19 @@ object Ownership {
         myChapters: Int,
         indexKnowsOthers: Boolean,
     ): Boolean {
-        if (owner == slug) return true
+        /* The recorded directory FIRST — "the whole answer when there is one",
+           as stated above, which an `owner == slug` test in front of it made
+           untrue. Owning a name and living in it are different facts: a novel
+           whose folder was renamed Vietnamese → English keeps its claim on the
+           old name (nothing releases it), so on any later run that computes
+           the Vietnamese name back — translation switched off, a title batch
+           that failed — the claim said "ours", the folder was not there any
+           more, and a fresh EMPTY one was created and recorded. The run then
+           downloaded nothing (the index still resolved into the real folder),
+           the library pointed at the empty directory, and a translation pass
+           found nothing done and re-submitted the whole novel to the API. */
         if (recordedDir != null) return recordedDir == wanted
-        if (owner != null) return false
+        if (owner != null) return sameSlug(owner, slug)
         return myChapters > 0 || !indexKnowsOthers
     }
 
@@ -162,6 +185,16 @@ object Ownership {
            rather than recomputing our way back into somebody else's. */
         if (recordedDir != null && recordedDirOnDisk()) {
             return Choice(recordedDir, stepAside = false, recorded = true)
+        }
+        /* Claimed by US, and the directory we are on record as using is not
+           there any more. The claim is then the best evidence left, so take
+           the name: stepping aside would build a second folder beside our own
+           and re-download the book into it. (`ours` used to answer this one
+           before it ever looked at the recorded directory — the ordering that
+           has just been reversed — so the case has to be caught here instead
+           of falling through to the step-aside below.) */
+        if (sameSlug(owner, slug)) {
+            return Choice(wanted, stepAside = false, recorded = false)
         }
         /* Claimed, or unclaimed but already full: either way somebody else's
            work. The first of two colliding novels to run must not be able to

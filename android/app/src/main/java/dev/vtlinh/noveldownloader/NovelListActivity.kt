@@ -160,8 +160,13 @@ class NovelListActivity : AppCompatActivity() {
 
     /* Slug equality must survive punctuation drift: "Heaven's Path" is slug
        "library-of-heavens-path" on the site but the sanitized folder name
-       slugifies to "library-of-heaven-s-path". Letters+digits only. */
-    private fun normKey(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+       slugifies to "library-of-heaven-s-path". Letters+digits only.
+
+       One definition, shared with Ownership — which needs the same test to
+       decide whether a claimed folder is this novel's own, and had its own
+       exact-string comparison until the two dropping out of step was the bug
+       that sent a scan-adopted novel into a second folder. */
+    private fun normKey(s: String) = Ownership.normKey(s)
 
     /* set by rows(): how many entries each source contributed + any error,
        so an unexpectedly empty list can explain itself */
@@ -217,6 +222,27 @@ class NovelListActivity : AppCompatActivity() {
                 try { store.setDiskCount(folder, win.slug, lose.diskCount) } catch (e: Exception) {}
             }
             if (lose.url.isEmpty()) {
+                /* Hand the folder over before the row goes. They are the same
+                   novel, so the loser's directory IS the winner's — but the
+                   claim lives in folder_owner keyed on the losing slug, and
+                   removeNovel only deletes from `novels`. Left behind, the
+                   claim named a slug with no record anywhere: the folder was
+                   reserved for ever against the one novel whose chapters are
+                   inside it, so every later run saw the name taken by a
+                   stranger and stepped aside into "Title (slug)". */
+                try {
+                    val loseDir = store.dirNameFor(folder, lose.slug)
+                    if (loseDir != null) {
+                        /* only when the winner has no directory of its own —
+                           if it downloaded into a suffixed folder, that is
+                           where its chapters are and it must keep it */
+                        if (store.dirNameFor(folder, win.slug) == null) {
+                            store.setDirName(folder, win.slug, loseDir)
+                        }
+                        store.claimFolderName(folder, loseDir, win.slug)
+                    }
+                    store.releaseFolderName(folder, lose.slug)
+                } catch (e: Exception) {}
                 try { store.removeNovel(folder, lose.slug) } catch (e: Exception) {}
             }
         }
