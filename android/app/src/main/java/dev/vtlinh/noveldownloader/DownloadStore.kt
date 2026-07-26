@@ -501,15 +501,36 @@ class DownloadStore(context: Context) :
         val db = writableDatabase
         db.beginTransaction()
         try {
-            db.delete("chapters", "folder=? AND slug=? AND filename=?", arrayOf(folder, slug, to))
-            db.execSQL(
-                "UPDATE chapters SET filename=?, uri=? WHERE folder=? AND slug=? AND filename=?",
-                arrayOf(to, uri, folder, slug, from),
-            )
+            /* Called once per on-disk form — the plain file and its .gz — with
+               the SAME base names both times. Without this guard the second
+               call deletes the row the first one just migrated, taking the
+               url identity with it: exactly the loss the index is meant to
+               prevent, through a different door. */
+            val hasFrom = db.rawQuery(
+                "SELECT 1 FROM chapters WHERE folder=? AND slug=? AND filename=? LIMIT 1",
+                arrayOf(folder, slug, from),
+            ).use { it.moveToFirst() }
+            if (hasFrom) {
+                db.delete("chapters", "folder=? AND slug=? AND filename=?", arrayOf(folder, slug, to))
+                db.execSQL(
+                    "UPDATE chapters SET filename=?, uri=? WHERE folder=? AND slug=? AND filename=?",
+                    arrayOf(to, uri, folder, slug, from),
+                )
+            } else {
+                /* already migrated — just refresh where it lives */
+                db.execSQL(
+                    "UPDATE chapters SET uri=? WHERE folder=? AND slug=? AND filename=?",
+                    arrayOf(uri, folder, slug, to),
+                )
+            }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
+        /* the resolved listing caches names AND document ids; every other
+           mutator drops it, this one didn't — leaving the reader dead ids for
+           every chapter that moved */
+        clearChapterList(folder, slug)
     }
 
     /* filename -> (size, content hash) for everything we've fingerprinted.
