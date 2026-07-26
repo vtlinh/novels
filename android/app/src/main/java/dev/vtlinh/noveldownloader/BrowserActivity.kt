@@ -111,7 +111,6 @@ class BrowserActivity : AppCompatActivity() {
                     if (!urlEdit.hasFocus()) urlEdit.setText(url)
                     downloadBtn.isEnabled = Sites.forUrl(url) != null
                     findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.GONE
-                    findViewById<android.view.View>(R.id.browserHeader).visibility = android.view.View.VISIBLE
                     try {
                         java.net.URI(url).host?.let { if (it.isNotEmpty()) recordDomainVisit(it) }
                     } catch (e: Exception) {}
@@ -185,8 +184,13 @@ class BrowserActivity : AppCompatActivity() {
         /* start screen: the last 20 domains we visited, newest first. Tapping
            one opens its front page. With no history yet, load the old default
            start page directly. */
-        findViewById<android.view.View>(R.id.recentBack).setOnClickListener { finish() }
         if (domainHistory().isEmpty()) web.loadUrl(start) else showRecentPanel()
+
+        /* focusing the bar selects the whole URL, so typing replaces it
+           outright the way a real address bar does */
+        urlEdit.setOnFocusChangeListener { v, hasFocus ->
+            if (hasFocus) (v as EditText).selectAll()
+        }
 
         /* typing a URL and hitting Go navigates the WebView */
         urlEdit.setOnEditorActionListener { v, actionId, _ ->
@@ -222,19 +226,24 @@ class BrowserActivity : AppCompatActivity() {
             finish()
         }
 
-        /* header back exits straight to the domain list; the system back
-           button is the one that walks page history */
+        /* header back exits straight to the domain list, and off the list
+           leaves browser mode; the system back button is the one that walks
+           page history */
         findViewById<android.widget.TextView>(R.id.browseBack).setOnClickListener {
-            showRecentPanel()
+            if (findViewById<android.view.View>(R.id.recentPanel).visibility == android.view.View.VISIBLE) {
+                finish()
+            } else {
+                showRecentPanel()
+            }
         }
     }
 
     /* show the recent-domains start screen, rebuilt fresh so just-visited
-       domains appear; the browser header hides until a page loads again */
+       domains appear. The address bar stays up — cleared back to its hint, so
+       a URL can be typed here instead of only tapped from the list */
     private fun showRecentPanel() {
         val web = findViewById<WebView>(R.id.webview)
         val history = domainHistory().entries.sortedByDescending { it.value }.map { it.key }
-        if (history.isEmpty()) { finish(); return }
         val list = findViewById<android.widget.ListView>(R.id.recentList)
         list.adapter = object : android.widget.ArrayAdapter<String>(
             this, android.R.layout.simple_list_item_1, history,
@@ -252,7 +261,8 @@ class BrowserActivity : AppCompatActivity() {
         list.setOnItemClickListener { _, _, pos, _ ->
             web.loadUrl("https://${history[pos]}/")
         }
-        findViewById<android.view.View>(R.id.browserHeader).visibility = android.view.View.GONE
+        findViewById<EditText>(R.id.browseUrl).setText("")
+        findViewById<Button>(R.id.browseDownload).isEnabled = false
         findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.VISIBLE
     }
 
