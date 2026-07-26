@@ -60,7 +60,7 @@ object Updater {
             if (latest.first <= currentVersionCode(context)) return@launch
             /* a build this device already refused isn't news — offering it
                again just replaces the reason it failed with another prompt */
-            if (prefs(context).getLong(REJECTED_VERSION_KEY, -1L) == latest.first) return@launch
+            if (isRejected(context, latest.first)) return@launch
             val apk = ensureApk(context, latest.first) ?: return@launch
             if (apk.length() <= 0L) return@launch
             rememberPendingName(context, latest.second)
@@ -169,9 +169,19 @@ object Updater {
 
     fun cancelUpdateNotification(context: Context) {
         try {
-            context.getSystemService(NotificationManager::class.java)?.cancel(UPDATE_NOTIF_ID)
+            val nm = context.getSystemService(NotificationManager::class.java)
+            nm?.cancel(UPDATE_NOTIF_ID)
+            /* Clear the failure notice too. Splitting the ids stopped "update
+               ready" from overwriting the reason an install failed — but left
+               that reason with nothing to remove it, so it sat in the shade
+               after a later attempt had already succeeded. */
+            nm?.cancel(FAILED_NOTIF_ID)
         } catch (e: Exception) {}
     }
+
+    /* has this device already refused this exact build? */
+    fun isRejected(context: Context, versionCode: Long): Boolean =
+        versionCode >= 0 && prefs(context).getLong(REJECTED_VERSION_KEY, -1L) == versionCode
 
     /* The install didn't happen but the build is fine — a dismissed
        confirmation, or a session we abandoned ourselves. Put the "ready to
@@ -200,17 +210,34 @@ object Updater {
 
     /* Install the APK autoCheck already fetched — the Install tap's endpoint.
        Returns false if there's nothing newer waiting. */
-    fun installPending(context: Context): Boolean {
+    /* Why a commit didn't happen — null when it did. The caller needs to tell
+       "there is nothing to install" from "the system refused", because those
+       need opposite handling and the old shared `false` reported both as a
+       missing file while leaving a real failure permanently stuck. */
+    fun installPending(context: Context): String? {
         val cached = prefs(context).getLong(CACHED_VERSION_KEY, -1L)
-        if (cached <= currentVersionCode(context)) return false
+        if (cached <= currentVersionCode(context)) return "There is no newer version waiting."
         val f = apkFile(context)
-        if (!f.exists() || f.length() <= 0L) return false
+        if (!f.exists() || f.length() <= 0L) {
+            /* the cache directory is evictable and "Clear cache" wipes it,
+               while the marker in prefs survives — drop the marker so the
+               next check downloads it again instead of pointing at nothing */
+            prefs(context).edit().remove(CACHED_VERSION_KEY).remove(PENDING_NAME_KEY).apply()
+            return "The downloaded update was no longer on the device. It will be fetched again."
+        }
         return try {
             abandonSessions(context)
             install(context, f)
-            true
+            null
         } catch (e: Exception) {
-            false
+            /* createSession/openWrite/commit threw — low storage, or the
+               install permission revoked since we checked. Nothing here
+               cleared the cache, and fetchApk short-circuits on a cached
+               file, so the update was wedged for good. Drop it and let the
+               next check start clean. */
+            try { apkFile(context).delete() } catch (e2: Exception) {}
+            prefs(context).edit().remove(CACHED_VERSION_KEY).remove(PENDING_NAME_KEY).apply()
+            "The system refused to start the install (${e.message}). It will be downloaded again."
         }
     }
 

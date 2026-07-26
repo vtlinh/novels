@@ -182,6 +182,11 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val latest = Updater.latestVersion() ?: return@launch
             if (latest.first <= Updater.currentVersionCode(this@MainActivity)) return@launch
+            /* A build this device has already refused isn't news. The skip
+               lived only in the background check, so the banner — the update
+               path most people actually use — re-downloaded the same doomed
+               APK on every launch and offered it again. */
+            if (Updater.isRejected(this@MainActivity, latest.first)) return@launch
             updateFound = true
             latestVersionCode = latest.first
             val banner = findViewById<TextView>(R.id.updateBanner)
@@ -199,7 +204,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private var installRetries = 0
+    /* how long to let a commit run before offering a retry */
+    private val INSTALL_STUCK_MS = 45_000L
+
     private var installStuckCheck: Runnable? = null
     private val installHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -220,7 +227,6 @@ class MainActivity : AppCompatActivity() {
                 banner.visibility = View.VISIBLE
                 return@launch
             }
-            installRetries = 0
             commitInstall(apk)
         }
     }
@@ -271,20 +277,22 @@ class MainActivity : AppCompatActivity() {
                Still here, foreground, and installing → the install stalled. */
             if (!installInFlight) return@Runnable
             if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return@Runnable
-            if (installRetries < 2) {
-                installRetries++
-                commitInstall(apk)   // reuse the downloaded APK, no re-download
-            } else {
-                installInFlight = false
-                statusText.text = "Update didn't install — tap to retry."
-                banner.text = "Update ready — tap to install"
-                banner.visibility = View.VISIBLE
-            }
+            /* Offer a retry; never take one. Re-committing goes through
+               abandonSessions, which abandons EVERY session — including the
+               healthy one the system is still applying. On the silent path
+               (Android 12+, we own the package) nothing pauses this activity
+               while the system verifies and optimises the package, so a
+               perfectly good install was being aborted and recommitted until
+               it ran out of attempts and could never land. */
+            installInFlight = false
+            statusText.text = "Update is taking a while — tap to try again if nothing happens."
+            banner.text = "Update ready — tap to install"
+            banner.visibility = View.VISIBLE
         }
-        /* 4s: a healthy silent install kills the process well within this, and
-           a shown confirmation pauses us (blocking the retry via the RESUMED
-           check) — so still being here after 4s means the commit stalled */
-        installHandler.postDelayed(installStuckCheck!!, 4_000)
+        /* Generous on purpose: verification and dexopt of a multi-megabyte APK
+           routinely run past a few seconds on mid-range storage, and the old
+           4s deadline turned that into an abort. */
+        installHandler.postDelayed(installStuckCheck!!, INSTALL_STUCK_MS)
     }
 
     override fun onNewIntent(intent: Intent) {

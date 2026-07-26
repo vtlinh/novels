@@ -51,6 +51,12 @@ class DownloadService : Service() {
         @Volatile var engine: DownloadEngine? = null
         @Volatile private var currentUrl: String? = null
 
+        /* Counts download runs, so a run that is unwinding can tell whether it
+           still owns the shared flags above. A cancelled run does not stop at
+           once — the engine can sit in a socket read until it times out — and
+           by then a newer run may have taken over. */
+        private val runSeq = java.util.concurrent.atomic.AtomicLong(0)
+
         private fun prefs(ctx: android.content.Context) =
             ctx.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
 
@@ -184,6 +190,15 @@ class DownloadService : Service() {
            url/tree doesn't carry into the lambda */
         val firstUrl: String = url
         val treePath: String = tree
+        /* Which run this is. The flags below are static, and a cancelled run
+           does not stop instantly — the engine can be parked in a socket read
+           for up to the 30s timeout. By the time it unwinds, a NEW service
+           instance may have started the next novel, and clearing the flags
+           then would strand that one: the Library stops showing it as
+           downloading, Stop hits a null engine so it cannot be cancelled, and
+           the next start runs a second engine over the same folder instead of
+           queueing. Only the newest run may clear them. */
+        val myRun = runSeq.incrementAndGet()
         scope.launch {
             var curUrl = firstUrl
             var curTranslate = translate
@@ -236,11 +251,17 @@ class DownloadService : Service() {
                    on "Downloading…", the Browser refused to start it, and the
                    status sweep skipped it, until some OTHER download happened
                    to reassign the flag. The novel you were downloading became
-                   the one novel you could not download. */
-                currentUrl = null
-                activeSlugFlow.value = null
-                runningFlow.value = false
-                engine = null
+                   the one novel you could not download.
+
+                   ...but only if we are still the current run. A cancelled
+                   run can take until the socket timeout to unwind, by which
+                   point a newer one may own these. */
+                if (runSeq.get() == myRun) {
+                    currentUrl = null
+                    activeSlugFlow.value = null
+                    runningFlow.value = false
+                    engine = null
+                }
             }
             stopForeground(STOP_FOREGROUND_REMOVE)
             /* Pass the start id. A plain stopSelf() tears the service down

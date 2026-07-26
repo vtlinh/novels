@@ -104,10 +104,10 @@ class AboutActivity : AppCompatActivity() {
            on a slow device to earn an ANR. The receiver does it off-thread
            for the same reason; this path never did. */
         lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) { Updater.installPending(applicationContext) }
-            if (!ok) {
+            val why = withContext(Dispatchers.IO) { Updater.installPending(applicationContext) }
+            if (why != null) {
                 installInFlight = false
-                status.text = "Install failed — try again."
+                status.text = why
             }
         }
     }

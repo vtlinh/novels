@@ -943,12 +943,41 @@ class DownloadEngine(
                 log("! ${forgivable.size} listing pages at the end all report missing — treating that as a gap, not a miscount")
             }
         }
-        /* Before retrying, not only after: a page count that over-reads by one
-           is routine, and re-fetching a page that has never existed cost three
-           passes and 21 seconds of "retrying…" on every single download of
-           that novel. Worse, if the phantom page answered 404 first and got
-           throttled on the retries, it never became forgivable at all and the
-           whole run was downgraded to a partial one. */
+        /* Forgiving a page removes it from the retry list, so forgiving before
+           the retries meant a page that 404s ONCE was never asked again — and
+           a real last page that blips 404 had its fifty chapters deleted as
+           "no longer listed". But retrying a page that has never existed cost
+           three passes and 21 seconds on every download of a novel whose page
+           count over-reads by one. Ask once more, immediately and without the
+           wait: that is cheap enough to spend on a phantom page and enough to
+           unmask a transient one. Only what is still missing afterwards can
+           be forgiven. */
+        val tailSuspects = missed.filter { p ->
+            p in gone && p > (pageHtml.keys.maxOrNull() ?: 1)
+        }
+        if (tailSuspects.isNotEmpty() && !stopRequested) {
+            status("Confirming ${tailSuspects.size} listing page(s) that report missing…")
+            val htmls = arrayOfNulls<String>(tailSuspects.size)
+            coroutineScope {
+                val sem = Semaphore(conc)
+                for ((i, p) in tailSuspects.withIndex()) {
+                    launch {
+                        sem.withPermit {
+                            if (!stopRequested) htmls[i] = fetch(site.listPageUrl(base, slug, p)).html
+                        }
+                    }
+                }
+            }
+            for ((i, html) in htmls.withIndex()) {
+                if (html == null) continue
+                /* it was there after all — a real page, not an over-read */
+                val p = tailSuspects[i]
+                pageHtml[p] = html
+                gone.remove(p)
+                missed.remove(p)
+                last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
+            }
+        }
         forgiveOverRead()
 
         /* A page we couldn't read doesn't just hide its own chapters: every
