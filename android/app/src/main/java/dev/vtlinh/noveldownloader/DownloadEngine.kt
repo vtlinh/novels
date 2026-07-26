@@ -944,7 +944,15 @@ class DownloadEngine(
                             store.clearUris(folderKey, slug)
                             log("Renamed existing folder to \"$english\"")
                         } else {
-                            log("Could not rename folder — using \"$english\"")
+                            /* The chapters are still in the Vietnamese folder,
+                               so stay with it. Going ahead under the English
+                               name built an empty folder beside a full one:
+                               the index still resolved into the old folder, so
+                               the spot-check passed and nothing re-downloaded,
+                               while the translator saw an empty translated/
+                               and re-sent the entire novel to the API. */
+                            folderName = vietName
+                            log("Could not rename the folder — keeping \"$vietName\"")
                         }
                     }
                 }

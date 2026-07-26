@@ -8,13 +8,17 @@ import org.json.JSONArray
 /* One submitted-but-not-yet-collected Message Batch, kept so a batch orphaned
    by an app restart can be recovered on the next run (Anthropic retains
    results 29 days). `files` is the bundle's chapter filenames in order, so a
-   result's `n` maps to files[n-1]. */
+   result's `n` maps to files[n-1] — but a filename is a POSITION, and the
+   listing shifts under it. `urls` is the same list by page, which does not
+   move, so a batch collected after a renumber can still be filed correctly.
+   Empty for rows written before it was recorded. */
 data class PendingBatch(
     val batchId: String,
     val files: List<String>,
     val created: Long,
     val tries: Int,
     val wantTitle: String?,   // non-null on a title-translation batch (custom_id "title")
+    val urls: List<String> = emptyList(),
 )
 
 /* App-private SQLite index of downloaded chapters, keyed by (folder, slug).
@@ -46,7 +50,7 @@ class CachedChapterList(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 16) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 17) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -89,7 +93,7 @@ class DownloadStore(context: Context) :
         db.execSQL(
             "CREATE TABLE pending_batches (" +
                 "batch_id TEXT PRIMARY KEY, folder TEXT, slug TEXT, " +
-                "files TEXT, created INTEGER, tries INTEGER, want_title TEXT)",
+                "files TEXT, urls TEXT, created INTEGER, tries INTEGER, want_title TEXT)",
         )
         db.execSQL(
             "CREATE TABLE titles (" +
@@ -162,6 +166,12 @@ class DownloadStore(context: Context) :
            of the body now — drop the old ones rather than compare across
            two meanings. */
         if (oldVersion == 15) db.execSQL("UPDATE chapters SET hash=''")
+        /* the page each chapter in a submitted batch came from, so results
+           collected after the listing shifted are filed by identity rather
+           than by a filename that has since moved to another chapter */
+        if (oldVersion < 17) {
+            try { db.execSQL("ALTER TABLE pending_batches ADD COLUMN urls TEXT DEFAULT ''") } catch (e: Exception) {}
+        }
     }
 
     /* ---- site chapter order (reader sorts by this, not by filename) ---- */
@@ -397,18 +407,26 @@ class DownloadStore(context: Context) :
 
     /* ---- pending Message Batches (orphaned-batch recovery) ---- */
 
+    /* `files` is where each chapter lived when the batch was submitted, and a
+       filename is a position, not an identity — the listing shifts and the
+       renamer moves every file. `urls` records the page each one came from so
+       a batch collected days later can be re-pointed at wherever those
+       chapters live now. Rows written before this column carry no urls and
+       fall back to the filenames, which is what they always did. */
     fun addPending(
         folder: String,
         slug: String,
         batchId: String,
         files: List<String>,
+        urls: List<String>,
         created: Long,
         wantTitle: String? = null,
     ) {
         val arr = JSONArray().apply { for (f in files) put(f) }
+        val urlArr = JSONArray().apply { for (u in urls) put(u) }
         writableDatabase.execSQL(
-            "INSERT OR REPLACE INTO pending_batches(batch_id,folder,slug,files,created,tries,want_title) VALUES(?,?,?,?,?,0,?)",
-            arrayOf(batchId, folder, slug, arr.toString(), created, wantTitle),
+            "INSERT OR REPLACE INTO pending_batches(batch_id,folder,slug,files,urls,created,tries,want_title) VALUES(?,?,?,?,?,?,0,?)",
+            arrayOf(batchId, folder, slug, arr.toString(), urlArr.toString(), created, wantTitle),
         )
     }
 
@@ -416,18 +434,27 @@ class DownloadStore(context: Context) :
     fun pendingFor(folder: String, slug: String, now: Long): List<PendingBatch> {
         val out = ArrayList<PendingBatch>()
         readableDatabase.query(
-            "pending_batches", arrayOf("batch_id", "files", "created", "tries", "want_title"),
+            "pending_batches", arrayOf("batch_id", "files", "created", "tries", "want_title", "urls"),
             "folder=? AND slug=?", arrayOf(folder, slug), null, null, "created",
         ).use { c ->
             while (c.moveToNext()) {
                 val created = c.getLong(2)
                 if (now - created >= RETAIN_MS) continue
-                val files = ArrayList<String>()
-                try {
-                    val arr = JSONArray(c.getString(1))
-                    for (i in 0 until arr.length()) files.add(arr.getString(i))
-                } catch (e: Exception) {}
-                out.add(PendingBatch(c.getString(0), files, created, c.getInt(3), c.getString(4)))
+                fun jsonList(s: String?): ArrayList<String> {
+                    val out = ArrayList<String>()
+                    if (s.isNullOrEmpty()) return out
+                    try {
+                        val arr = JSONArray(s)
+                        for (i in 0 until arr.length()) out.add(arr.getString(i))
+                    } catch (e: Exception) {}
+                    return out
+                }
+                out.add(
+                    PendingBatch(
+                        c.getString(0), jsonList(c.getString(1)), created,
+                        c.getInt(3), c.getString(4), jsonList(c.getString(5)),
+                    ),
+                )
             }
         }
         return out

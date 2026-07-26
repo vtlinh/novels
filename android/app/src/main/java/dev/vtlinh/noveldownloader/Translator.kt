@@ -95,6 +95,10 @@ class Translator(
         body: JSONObject?,
         isStopped: () -> Boolean,
         ignoreStop: Boolean = false,
+        /* A dropped connection tells us nothing about whether the server acted.
+           That's fine to retry for a read, but re-sending a batch CREATE bills
+           the whole bundle again for a batch we'll never hold an id for. */
+        retryOnDrop: Boolean = true,
     ): String {
         var lastErr: Exception? = null
         for (i in 0 until MAX_RETRIES) {
@@ -122,6 +126,7 @@ class Translator(
                 throw e
             } catch (e: IOException) {
                 if (!ignoreStop && isStopped()) throw StoppedException()
+                if (!retryOnDrop) throw e
                 lastErr = e
             }
             backoff(i, isStopped, ignoreStop)
@@ -158,13 +163,20 @@ class Translator(
         folder: String,
         slug: String,
         files: List<String>,
+        urls: List<String>,
         isStopped: () -> Boolean,
         wantTitle: String? = null,
     ): BatchRun {
         if (isStopped()) throw StoppedException()
-        val submitted = JSONObject(call("POST", "/v1/messages/batches", JSONObject().put("requests", requests), isStopped))
+        /* Not retried on a dropped connection. Creating a batch is not
+           idempotent and the API offers no idempotency key, so a response lost
+           after the server accepted it would be re-sent as a SECOND paid batch
+           that nothing ever polls. One orphan is bad; three is worse. */
+        val submitted = JSONObject(
+            call("POST", "/v1/messages/batches", JSONObject().put("requests", requests), isStopped, retryOnDrop = false),
+        )
         val id = submitted.getString("id")
-        store.addPending(folder, slug, id, files, System.currentTimeMillis(), wantTitle)
+        store.addPending(folder, slug, id, files, urls, System.currentTimeMillis(), wantTitle)
         log("[$label] batch submitted (${requests.length()} request(s)); polling…")
 
         var cancelSent = false
@@ -431,9 +443,11 @@ class Translator(
                     ),
                 )
             val reqs = JSONArray().put(JSONObject().put("custom_id", "title").put("params", params))
-            val submitted = JSONObject(call("POST", "/v1/messages/batches", JSONObject().put("requests", reqs), isStopped))
+            val submitted = JSONObject(
+                call("POST", "/v1/messages/batches", JSONObject().put("requests", reqs), isStopped, retryOnDrop = false),
+            )
             val id = submitted.getString("id")
-            store.addPending(folder, slug, id, emptyList(), now, vietTitle)
+            store.addPending(folder, slug, id, emptyList(), emptyList(), now, vietTitle)
             log("[title] batch submitted; translating title…")
             val eng = collectTitle(id, isStopped)
             store.removePending(id)
@@ -494,13 +508,24 @@ class Translator(
            record when it can't be collected this run, so submitting them
            again would pay for the same translation twice. */
         val inFlight = try {
-            store.pendingFor(folder, slug, System.currentTimeMillis())
-                .flatMap { it.files }.toHashSet()
+            val nowNamed = store.urlMap(folder, slug)
+            store.pendingFor(folder, slug, System.currentTimeMillis()).flatMap { rec ->
+                /* by page where we have it: a record naming "Chapter 5.txt"
+                   from before a shift would otherwise hold back whichever
+                   chapter sits at 5 today and leave the real one unsent */
+                rec.files.mapIndexed { i, fn ->
+                    rec.urls.getOrNull(i)?.takeIf { it.isNotEmpty() }?.let { nowNamed[it] } ?: fn
+                }
+            }.toHashSet()
         } catch (e: Exception) { hashSetOf<String>() }
         if (inFlight.isNotEmpty()) {
             log("${inFlight.size} chapter(s) are still with an unfinished batch — leaving them for it")
         }
         val uris = store.get(folder, slug)   // filename -> source document URI
+        /* A batch can outlive the naming it was submitted under. Record the
+           page each chapter came from so results collected later are filed by
+           what the chapter IS, not by where it happened to sit. */
+        val pageOf = try { store.fileUrls(folder, slug) } catch (e: Exception) { hashMapOf<String, String>() }
         var unreadable = 0
         val pending = filenames.filter { it !in done && it !in inFlight }.mapNotNull { fn ->
             val uri = uris[fn]?.takeIf { it.isNotEmpty() }
@@ -535,7 +560,8 @@ class Translator(
 
                 val run = runBatch(
                     bundleRequest(bundle, glossary), "translate $bundleNo",
-                    folder, slug, bundle.map { it.first }, isStopped,
+                    folder, slug, bundle.map { it.first },
+                    bundle.map { pageOf[it.first] ?: "" }, isStopped,
                 )
                 val msg = run.results["bundle"]
 
@@ -565,6 +591,7 @@ class Translator(
                 mergeNames(parsed, glossary, store, folder, slug)
 
                 val chapters = parsed.optJSONArray("chapters")
+                var wrote = 0
                 if (chapters != null) {
                     for (i in 0 until chapters.length()) {
                         val o = chapters.optJSONObject(i) ?: continue
@@ -573,16 +600,33 @@ class Translator(
                         val ch = bundle.getOrNull(n - 1)
                         if (ch == null || text.isBlank() || done.contains(ch.first)) continue
                         if (writeTranslated(tdir, ch.first, text)) {
-                            done.add(ch.first); saved++
+                            done.add(ch.first); saved++; wrote++
                             log("saved  translated/${ch.first}")
                         } else {
                             failed++
                         }
                     }
                 }
+                /* The loop walks the RESPONSE, so a chapter the model left out
+                   of the array was never visited — neither saved nor failed.
+                   Counting only what came back reported "N ok, 0 failed" on a
+                   short bundle and talked the user out of the re-run that
+                   would have fixed it. Reconcile against what we submitted. */
+                val missing = bundle.count { it.first !in done }
+                if (missing > 0) {
+                    failed += missing
+                    log("! bundle $bundleNo: $missing chapter(s) missing from the reply — left for a re-run")
+                }
                 /* written — now the record can go. Anything short of this and
-                   it stays, so recovery can still collect the batch. */
-                store.removePending(run.id)
+                   it stays, so recovery can still collect the batch. A bundle
+                   whose writes all failed (full disk, ejected card) must keep
+                   its record: the batch id is the only handle on results we
+                   have already paid for. */
+                if (wrote > 0 || chapters == null || chapters.length() == 0) {
+                    store.removePending(run.id)
+                } else {
+                    log("! bundle $bundleNo: nothing could be written — keeping the batch for recovery")
+                }
                 log("Bundle $bundleNo: ${glossary.size} names known")
             }
         } catch (e: StoppedException) {
@@ -610,6 +654,13 @@ class Translator(
         val mine = store.pendingFor(folder, slug, now).filter { it.wantTitle == null }
         if (mine.isEmpty()) return
         val done = tdir.listFiles().mapNotNull { it.name?.removeSuffix(".gz") }.toHashSet()
+        /* Where each chapter lives NOW. The names in the record are where they
+           lived when the batch went out, and a rename pass — from a download
+           or from a plain Check status — moves every file after an inserted or
+           dropped chapter. Filing the results under the old names wrote each
+           chapter's English over its neighbour, which nothing downstream could
+           detect: the reader keys translations by filename alone. */
+        val nowNamed = try { store.urlMap(folder, slug) } catch (e: Exception) { hashMapOf<String, String>() }
         log("Found ${mine.size} unfinished batch(es) from a previous session — recovering…")
         for (rec in mine) {
             if (isStopped()) throw StoppedException()
@@ -625,24 +676,40 @@ class Translator(
                 }
                 val results = fetchResults(rec.batchId, "recover", isStopped)
                 val msg = results["bundle"]
+                var n = 0
+                var unwritable = 0
                 if (msg != null && msg.optString("stop_reason") != "max_tokens") {
                     val parsed = parseBundle(messageText(msg))
                     if (parsed != null) {
                         mergeNames(parsed, glossary, store, folder, slug)
-                        var n = 0
                         val chapters = parsed.optJSONArray("chapters")
                         if (chapters != null) {
                             for (i in 0 until chapters.length()) {
                                 val o = chapters.optJSONObject(i) ?: continue
                                 val idx = o.optInt("n", -1) - 1
                                 val text = o.optString("text")
-                                val fn = rec.files.getOrNull(idx) ?: continue
+                                /* the page is the identity; the recorded name
+                                   is only a fallback for rows written before
+                                   pages were kept */
+                                val url = rec.urls.getOrNull(idx)?.takeIf { it.isNotEmpty() }
+                                val fn = url?.let { nowNamed[it] }
+                                    ?: rec.files.getOrNull(idx) ?: continue
                                 if (text.isBlank() || done.contains(fn)) continue
                                 if (writeTranslated(tdir, fn, text)) { done.add(fn); n++; log("saved  translated/$fn (recovered)") }
+                                else unwritable++
                             }
                         }
                         log("Recovered bundle: $n chapter(s)")
                     }
+                }
+                /* Retiring the record throws away the batch id, and that id is
+                   the only handle on results already paid for. If every write
+                   failed — full disk, ejected card, revoked grant — keep it
+                   and try again next run rather than pay for them twice. */
+                if (n == 0 && unwritable > 0) {
+                    log("! nothing from batch …${rec.batchId.takeLast(8)} could be written — keeping it for the next run")
+                    retryLater(store, rec, "could not write results")
+                    continue
                 }
                 store.removePending(rec.batchId)
             } catch (e: StoppedException) {
