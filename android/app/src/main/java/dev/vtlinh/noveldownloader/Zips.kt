@@ -98,7 +98,22 @@ object Zips {
                 java.util.zip.GZIPOutputStream(os).use { write(it) }
             }
             val renamed = DocumentsContract.renameDocument(cr, u, name)
-            renamed ?: throw java.io.IOException("could not name $name")
+                ?: throw java.io.IOException("could not name $name")
+            /* renameDocument runs the display name through buildUniqueFile
+               exactly as createDocument does. A name already taken does NOT
+               fail it — it comes back MINTED, "Chapter 5.txt (1).gz", and the
+               call returns a perfectly valid Uri. Taking that as success
+               recorded the minted file in the index as the chapter, while the
+               reader kept serving the old file under the real name and the
+               new one matched no pattern in the app: invisible to the reader,
+               the dedupe and the sweep, and impossible to overwrite. Ask what
+               we actually got. */
+            val got = docName(cr, renamed)
+            if (got != null && got != name) {
+                try { DocumentsContract.deleteDocument(cr, renamed) } catch (e: Exception) {}
+                throw java.io.IOException("$name is taken")
+            }
+            renamed
         } catch (e: Exception) {
             try { DocumentsContract.deleteDocument(cr, u) } catch (e2: Exception) {}
             null
@@ -112,6 +127,15 @@ object Zips {
        file, not authoring one, so it must not reinterpret the encoding */
     fun writeGzBytes(cr: ContentResolver, parentDocUri: Uri, name: String, bytes: ByteArray): Boolean =
         writeGzUnder(cr, parentDocUri, name) { it.write(bytes) } != null
+
+    /* What the provider actually called the document. SAF is free to rewrite
+       a display name — buildUniqueFile on a collision, an extension forced to
+       match the mime type — so the name we asked for is not the name we got. */
+    fun docName(cr: ContentResolver, uri: Uri): String? = try {
+        cr.query(uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    } catch (e: Exception) { null }
 
     fun docSize(cr: ContentResolver, uri: Uri): Long = try {
         cr.query(uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use {
