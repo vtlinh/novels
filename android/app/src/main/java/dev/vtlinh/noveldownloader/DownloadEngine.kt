@@ -204,6 +204,18 @@ class DownloadEngine(
         if (byUrl.isEmpty() && onRecord.isEmpty()) return    // nothing downloaded yet
         val legacy = legacyNames(inSiteOrder)
 
+        /* Work out what has to move BEFORE listing anything: a library-wide
+           status check runs this per novel, and most of them need no moves
+           at all — those should cost a DB read, not a directory walk. */
+        val pending = LinkedHashMap<String, String>()
+        for (ch in inSiteOrder.asReversed()) {           // last chapter first
+            val want = ch.filename ?: continue
+            val have = byUrl[ch.url] ?: legacy[ch.url]?.takeIf { it in onRecord } ?: continue
+            if (have != want) pending[have] = want
+            else if (ch.url !in byUrl) store.linkUrl(folderKey, slug, have, ch.url)
+        }
+        if (pending.isEmpty()) return
+
         val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return }
         val files = HashMap<String, String>()                // name -> docId
         var translatedId: String? = null
@@ -214,16 +226,6 @@ class DownloadEngine(
         translatedId?.let { id ->
             for (e in Saf.children(cr, treeUri, id)) if (!e.isDir) translated[e.name] = e.docId
         }
-
-        /* what has to move, walked from the last chapter back */
-        val pending = LinkedHashMap<String, String>()
-        for (ch in inSiteOrder.asReversed()) {
-            val want = ch.filename ?: continue
-            val have = byUrl[ch.url] ?: legacy[ch.url]?.takeIf { it in onRecord } ?: continue
-            if (have != want) pending[have] = want
-            else if (ch.url !in byUrl) store.linkUrl(folderKey, slug, have, ch.url)
-        }
-        if (pending.isEmpty()) return
 
         fun occupied(n: String) = files.containsKey(n) || files.containsKey("$n.gz")
 
@@ -285,6 +287,30 @@ class DownloadEngine(
             if (parked > inSiteOrder.size) break     // safety valve
         }
         if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
+    }
+
+    /* The novel's folder, as the download names it: the stored English
+       title when there is one, otherwise the site's own title sanitised.
+       Null when it isn't there yet — nothing downloaded, nothing to fix. */
+    private fun novelDir(
+        treeUri: Uri,
+        store: DownloadStore,
+        folderKey: String,
+        slug: String,
+        doc: org.jsoup.nodes.Document,
+    ): DocumentFile? = try {
+        val name = store.getTitle(folderKey, slug) ?: Extractor.sanitize(
+            Extractor.stripAuthor(
+                doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
+                    ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
+                    ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
+                    ?: slug,
+                Sites.author(doc),
+            ),
+        )
+        DocumentFile.fromTreeUri(context, treeUri)?.findFile(name)?.takeIf { it.isDirectory }
+    } catch (e: Exception) {
+        null
     }
 
     /* Chapter files nothing in the listing points at — left behind when an
@@ -482,19 +508,21 @@ class DownloadEngine(
         val siteOrdered = seen.values.toList()
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
-        /* Report the name each chapter actually lives under, so the order
-           recorded here matches the files on disk. A status check doesn't
-           move anything — renaming a whole library is the download's job —
-           so a chapter that has shifted keeps its old name until then, and
-           only a chapter with no file yet takes its positional one. */
+        /* Names follow the page, exactly as a download would set them. */
+        for ((i, ch) in siteOrdered.withIndex()) ch.filename = "Chapter ${i + 1}.txt"
+        /* ...and the files are brought into line here too, so a library is
+           tidied by a status check without having to re-download every
+           novel to get it. Both passes leave early when there's nothing to
+           do, which is the normal case for most novels in a sweep. */
         val store = DownloadStore(context)
-        val byUrl = store.urlMap(folderKey, slug)
-        val onRecord = store.get(folderKey, slug)
-        val legacy = legacyNames(siteOrdered)
-        for ((i, ch) in siteOrdered.withIndex()) {
-            ch.filename = byUrl[ch.url]
-                ?: legacy[ch.url]?.takeIf { it in onRecord }
-                ?: "Chapter ${i + 1}.txt"
+        val treeUri = Uri.parse(folderKey)
+        val dir = novelDir(treeUri, store, folderKey, slug, doc)
+        if (dir != null) {
+            renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
+            dedupeExtras(
+                treeUri, dir, store, folderKey, slug,
+                siteOrdered.mapNotNull { it.filename }.toSet(),
+            )
         }
         SiteStatus(
             siteOrdered.size, site.isCompleted(doc), Sites.author(doc),
