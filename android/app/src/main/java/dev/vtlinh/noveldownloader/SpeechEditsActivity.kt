@@ -598,21 +598,34 @@ class SpeechEditsActivity : AppCompatActivity() {
                 testResult.text = "Invalid pattern"
                 return
             }
-            testResult.text = try {
-                if (applyAll.isChecked) {
-                    /* mirror the reader's cleanForSpeech: trailing space so
-                       end-anchored rules fire, one bad rule skipped not fatal */
-                    var s = testInput.text.toString() + " "
-                    for ((re, rep) in allActiveRules(compiled)) {
-                        s = try { re.replace(s, rep) } catch (e: Exception) { s }
+            /* This runs on every keystroke while a pattern is being TYPED, so
+               it sees every half-finished nested quantifier on the way to a
+               real rule — against a real paragraph, which is the worst case
+               for backtracking. On the main thread that is a frozen editor
+               and an ANR, and a catch cannot help because a hang is not an
+               exception. Off-thread with a budget: a rule that doesn't come
+               back says so instead. */
+            val input = testInput.text.toString()
+            val rules = if (applyAll.isChecked) allActiveRules(compiled) else listOf(compiled)
+            val done = SpeechEdits.within(300L) {
+                try {
+                    if (applyAll.isChecked) {
+                        /* mirror the reader's cleanForSpeech: trailing space so
+                           end-anchored rules fire, one bad rule skipped not fatal */
+                        var s = "$input "
+                        for ((re, rep) in rules) {
+                            s = try { re.replace(s, rep) } catch (e: Exception) { s }
+                        }
+                        s.replace(Regex("\\s+"), " ").trim()
+                    } else {
+                        compiled.first.replace(input, compiled.second)
                     }
-                    s.replace(Regex("\\s+"), " ").trim()
-                } else {
-                    compiled.first.replace(testInput.text.toString(), compiled.second)
+                } catch (e: Exception) {
+                    "Invalid pattern"
                 }
-            } catch (e: Exception) {
-                "Invalid pattern"
             }
+            if (done == null) testResult.setTextColor(getColor(R.color.err))
+            testResult.text = done ?: "This pattern is too slow to run"
         }
         applyAll.setOnCheckedChangeListener { _, _ -> updateTest() }
         val watcher = object : TextWatcher {
