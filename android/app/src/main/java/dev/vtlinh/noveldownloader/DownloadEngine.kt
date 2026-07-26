@@ -368,6 +368,7 @@ class DownloadEngine(
         folderKey: String,
         slug: String,
         assigned: Set<String>,
+        listedUrls: Set<String>,
     ): Int {
         val cr = context.contentResolver
         val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return 0 }
@@ -422,20 +423,13 @@ class DownloadEngine(
             return out
         }
 
-        var removed = 0
-        var kept = 0
-        for (x in extras) {
-            val candidates = nearBySize(x.size)
-            val xh = if (candidates.isEmpty()) null else bodyHash(x)
-            val twin = if (xh == null) null else candidates.firstOrNull { bodyHash(it) == xh }
-            if (twin == null) { kept++; log("  extra kept (text found nowhere else): ${x.name}"); continue }
-            /* same bytes as a chapter we're keeping — drop the copy */
+        fun remove(x: OnDisk): Boolean {
             val ok = try {
                 DocumentsContract.deleteDocument(
                     cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, x.docId),
                 )
             } catch (e: Exception) { false }
-            if (!ok) continue
+            if (!ok) return false
             translatedId?.let { tid ->
                 for (t in Saf.children(cr, treeUri, tid)) {
                     if (!t.isDir && t.name == x.name) {
@@ -448,10 +442,42 @@ class DownloadEngine(
                 }
             }
             store.removeChapter(folderKey, slug, x.base)
-            removed++
+            return true
+        }
+
+        var removed = 0
+        var kept = 0
+        /* filename -> the page it came from: what turns "some file nothing
+           points at" into an answerable question */
+        val fileUrl = store.fileUrls(folderKey, slug)
+        var dropped = 0
+        for (x in extras) {
+            val from = fileUrl[x.base]
+            if (from != null && from !in listedUrls) {
+                /* We know exactly which chapter this is, and the site no
+                   longer lists it. Not a mystery and not a duplicate — a
+                   chapter that has been removed, so its file goes with it.
+                   No content check: identity already answered the question. */
+                if (remove(x)) { dropped++; continue }
+            }
+            if (from != null) {
+                /* Its chapter IS listed, so the file is live — the rename
+                   pass just couldn't place it (a name still held, most
+                   likely). Leave it; next run it moves. */
+                kept++
+                log("  kept, still listed but not yet in place: ${x.name}")
+                continue
+            }
+            val candidates = nearBySize(x.size)
+            val xh = if (candidates.isEmpty()) null else bodyHash(x)
+            val twin = if (xh == null) null else candidates.firstOrNull { bodyHash(it) == xh }
+            if (twin == null) { kept++; log("  extra kept (text found nowhere else): ${x.name}"); continue }
+            /* same bytes as a chapter we're keeping — drop the copy */
+            if (remove(x)) removed++
         }
         if (removed > 0) log("removed $removed duplicate chapter file(s) — same text as a chapter we kept")
-        if (kept > 0) log("$kept extra file(s) left alone — their text is not a duplicate")
+        if (dropped > 0) log("removed $dropped chapter file(s) the site no longer lists")
+        if (kept > 0) log("$kept file(s) left alone — see above for why")
         return kept
     }
 
@@ -628,6 +654,7 @@ class DownloadEngine(
             dedupeExtras(
                 treeUri, dir, store, folderKey, slug,
                 siteOrdered.mapNotNull { it.filename }.toSet(),
+                siteOrdered.map { it.url }.toSet(),
             )
         }
         SiteStatus(
@@ -792,7 +819,9 @@ class DownloadEngine(
                     if (existingEng == null && existingViet != null) {
                         val ok = try { existingViet.renameTo(english) } catch (e: Exception) { false }
                         if (ok) {
-                            store.clear(folderKey, slug)   // rename changes child URIs — rebuild the index
+                            /* the folder moved, so the cached URIs are stale —
+                               but each file is still the chapter it was */
+                            store.clearUris(folderKey, slug)
                             log("Renamed existing folder to \"$english\"")
                         } else {
                             log("Could not rename folder — using \"$english\"")
@@ -817,10 +846,17 @@ class DownloadEngine(
            on disk under its own name, and whatever is left over is surplus.
            The index is dropped with it — a wrong index is one reason a file
            goes unrecognised in the first place — and rebuilt from the saves. */
-        val unexplained = dedupeExtras(treeUri, dir, store, folderKey, slug, assigned)
-        val refetchAll = unexplained > 0
+        val listedUrls = siteOrdered.map { it.url }.toSet()
+        val unexplained = dedupeExtras(treeUri, dir, store, folderKey, slug, assigned, listedUrls)
+        /* Re-fetching a whole novel is the last resort, not the repair. Every
+           file we can identify is settled by its recorded page — kept,
+           dropped, or matched — and a chapter that turns out to be missing is
+           simply one of the chapters this run fetches anyway. Only a novel
+           with no recorded identity at all has nothing to reconcile against,
+           and there the fetch is the only way to establish what's real. */
+        val refetchAll = unexplained > 0 && store.fileUrls(folderKey, slug).isEmpty()
         if (refetchAll) {
-            log("$unexplained file(s) can't be placed or matched — re-fetching the whole novel to settle it")
+            log("$unexplained file(s) and nothing on record to identify them — fetching the novel again")
             try { store.clear(folderKey, slug) } catch (e: Exception) {}
         }
         log("Saving to: $folderName/")
