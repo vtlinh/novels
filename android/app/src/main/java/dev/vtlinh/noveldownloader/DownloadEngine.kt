@@ -173,17 +173,11 @@ class DownloadEngine(
        non-chapter link that happens to sit inside the listing container.
        The first tells us the numbering needs to cope with it; the second
        tells us the link test is too generous. */
-    /* A link the site lists but doesn't number — its own typo ("Chpater
-       3848" sitting between C3847 and C3849), or a genuinely unnumbered
-       extra like an interlude or a side story — still has a place on the
-       page: the one it sits in. Give it the number of the last numbered
-       chapter before it and let the duplicate suffix drop it in right
-       there. Position in the listing is what the site is actually telling
-       us; the name is a label, and a site is free to get it wrong.
-
-       A listing that opens with unnumbered links leaves those unnamed —
-       there's nothing ahead of them to anchor to — and reportUnnamed says
-       so rather than inventing a position. */
+    /* The site's own number for a chapter, used for the heading written
+       inside the file. A link the site doesn't number — its own typo, or an
+       unnumbered extra like an interlude — takes the number of the last
+       numbered chapter ahead of it, which is where the page puts it.
+       Nothing about the FILE depends on this any more. */
     private fun numberByPosition(inSiteOrder: List<Chapter>) {
         var last: Int? = null
         for (ch in inSiteOrder) {
@@ -191,14 +185,73 @@ class DownloadEngine(
         }
     }
 
-    private fun reportUnnamed(all: List<Chapter>) {
-        val unnamed = all.filter { it.filename == null }
-        if (unnamed.isEmpty()) return
-        log("${unnamed.size} listed link(s) have no readable chapter number — can't be downloaded:")
-        for (ch in unnamed.take(20)) {
-            log("  \"${ch.text.trim().ifEmpty { "(no title)" }}\" — ${ch.url}")
+    /* Filenames are identity, not meaning. A chapter keeps the file it was
+       first saved under — found by its page URL — and anything new takes the
+       next free "Chapter N.txt", counting from 1 in listing order. Nothing
+       is read out of the site's labels, so a typo or an unnumbered extra
+       can't cost a chapter its file or its place.
+
+       Where a chapter SITS is a separate fact, held in chapter_order and
+       rewritten from the listing on every download and status check. That's
+       what lets a chapter inserted mid-novel take its position and shift
+       everything after it, without renaming a single file on disk.
+
+       Files saved before URLs were recorded are adopted under their old
+       derived name, so an existing library keeps what it has rather than
+       downloading itself again as Chapter 1..N. */
+    private fun assignFilenames(
+        store: DownloadStore,
+        folderKey: String,
+        slug: String,
+        inSiteOrder: List<Chapter>,
+    ) {
+        val byUrl = store.urlMap(folderKey, slug)
+        val onRecord = store.get(folderKey, slug).keys
+        val used = HashSet<String>(onRecord)
+        used.addAll(byUrl.values)
+        val legacy = legacyNames(inSiteOrder)
+        var adopted = 0
+        /* Count on from the highest name already in use rather than filling
+           gaps below it. A fresh novel still numbers 1, 2, 3… in listing
+           order; a library carrying files named for the site's own numbering
+           gets its next chapter after those, instead of a new chapter
+           appearing as "Chapter 1" halfway down the list. */
+        var next = 1 + (
+            used.mapNotNull { Regex("^Chapter (\\d+)").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+                .maxOrNull() ?: 0
+            )
+        for (ch in inSiteOrder) {
+            val mapped = byUrl[ch.url]
+            if (mapped != null) { ch.filename = mapped; continue }
+            val old = legacy[ch.url]
+            if (old != null && old in onRecord) {
+                ch.filename = old
+                store.linkUrl(folderKey, slug, old, ch.url)
+                adopted++
+                continue
+            }
+            var name = "Chapter $next.txt"
+            while (name in used) { next++; name = "Chapter $next.txt" }
+            used.add(name)
+            next++
+            ch.filename = name
         }
-        if (unnamed.size > 20) log("  …and ${unnamed.size - 20} more")
+        if (adopted > 0) log("matched $adopted existing chapter file(s) to their page")
+    }
+
+    /* How chapters were named before the URL map existed: the site's own
+       number, plus a suffix for a repeat. Only used to recognise files
+       already on disk so they aren't downloaded again under new names. */
+    private fun legacyNames(inSiteOrder: List<Chapter>): Map<String, String> {
+        val counts = HashMap<Int, Int>()
+        val out = HashMap<String, String>()
+        for (ch in inSiteOrder.filter { it.num != null }.sortedBy { it.num }) {
+            val n = ch.num ?: continue
+            val c = (counts[n] ?: 0) + 1
+            counts[n] = c
+            out[ch.url] = "Chapter $n" + (if (c > 1) "-$c" else "") + ".txt"
+        }
+        return out
     }
 
     /* fetch the novel-page cover once into app-private storage (non-fatal) */
@@ -231,7 +284,7 @@ class DownloadEngine(
        same way run() would and return the site chapter count, finished flag,
        author, and the chapters' filenames in the SITE's order — or null if
        the URL doesn't load as a novel page. */
-    suspend fun checkStatus(novelUrl: String): SiteStatus? = withContext(Dispatchers.IO) {
+    suspend fun checkStatus(novelUrl: String, folderKey: String): SiteStatus? = withContext(Dispatchers.IO) {
         val site = Sites.forUrl(novelUrl) ?: return@withContext null
         val (base, slug) = site.normalize(novelUrl)
         val first = fetch(base)
@@ -292,27 +345,14 @@ class DownloadEngine(
             fetched = batch.last()
         }
         if (seen.isEmpty()) return@withContext null
-        /* assign filenames exactly like run(): numeric sort decides the
-           duplicate suffixes, site order is what we report */
+        /* Name them exactly as run() would, off the same identity map, so
+           the order this reports lines up with the files on disk. */
         val siteOrdered = seen.values.toList()
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
-        val sorted = siteOrdered.sortedBy { it.num ?: Int.MAX_VALUE }
-        val counts = HashMap<Int, Int>()
-        for (ch in sorted) {
-            val n = ch.num ?: continue
-            val c = (counts[n] ?: 0) + 1
-            counts[n] = c
-            ch.filename = "Chapter $n" + (if (c > 1) "-$c" else "") + ".txt"
-        }
-        /* Check status reports them too, so they can be seen without
-           committing to a whole download */
-        reportUnnamed(siteOrdered)
+        assignFilenames(DownloadStore(context), folderKey, slug, siteOrdered)
         SiteStatus(
-            /* only the ones we could name: a link with no readable chapter
-               number can never be fetched, so counting it would leave the
-               library short of a total it can never reach */
-            siteOrdered.count { it.filename != null }, site.isCompleted(doc), Sites.author(doc),
+            siteOrdered.size, site.isCompleted(doc), Sites.author(doc),
             siteOrdered.mapNotNull { it.filename },
         )
     }
@@ -420,27 +460,16 @@ class DownloadEngine(
         }
         if (stopRequested) { status("Stopped."); return@withContext }
 
+        val store = DownloadStore(context)
+        val folderKey = treeUri.toString()
         val chapters = seen.values.toMutableList()
-        /* the site's exact order (listing-page sequence) — captured before the
-           numeric sort so the reader can present chapters as the site does */
+        /* the site's exact order (listing-page sequence): this is where each
+           chapter belongs. The filename is only its identity on disk. */
         val siteOrdered = chapters.toList()
+        /* the site's own number, still wanted for the heading inside the file */
         for (ch in chapters) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
-        chapters.sortBy { it.num ?: Int.MAX_VALUE }
-        val counts = HashMap<Int, Int>()
-        for (ch in chapters) {
-            val n = ch.num ?: continue
-            val c = (counts[n] ?: 0) + 1
-            counts[n] = c
-            ch.filename = "Chapter $n" + (if (c > 1) "-$c" else "") + ".txt"
-        }
-        /* A link whose chapter number can't be read gets no filename, so it
-           can never be fetched. Counting it would leave the library parked at
-           N-2/N with a Download button that can't make progress, and it would
-           be reported as "already downloaded" every run. Drop it from the
-           working set — naming the ones we can is what the total means. */
-        reportUnnamed(chapters)
-        chapters.retainAll { it.filename != null }
+        assignFilenames(store, folderKey, slug, siteOrdered)
         if (chapters.isEmpty()) {
             log("No chapters found — site layout may have changed")
             status("Error: no chapters found")
@@ -454,8 +483,6 @@ class DownloadEngine(
             status("Error: folder unavailable")
             return@withContext
         }
-        val store = DownloadStore(context)
-        val folderKey = treeUri.toString()
         /* register for the List Novels screen (first run keeps its timestamp;
            last_dl always bumps so the list sorts newest download first) */
         store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
@@ -601,7 +628,10 @@ class DownloadEngine(
                                     Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
                                 )
                                 val uri = writeFile(dir, ch.filename!!, body)
-                                store.add(folderKey, slug, ch.filename!!, uri)
+                                /* record the page it came from: that mapping is
+                                   what keeps this file's name stable if the site
+                                   later relabels or renumbers the chapter */
+                                store.add(folderKey, slug, ch.filename!!, uri, ch.url)
                                 saved.incrementAndGet()
                                 noteSaved()
                             }

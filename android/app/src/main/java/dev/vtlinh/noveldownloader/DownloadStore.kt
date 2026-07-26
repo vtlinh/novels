@@ -47,7 +47,7 @@ class CachedChapterList(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 13) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 14) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -78,7 +78,7 @@ class DownloadStore(context: Context) :
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE chapters (" +
-                "folder TEXT, slug TEXT, filename TEXT, uri TEXT, " +
+                "folder TEXT, slug TEXT, filename TEXT, uri TEXT, url TEXT DEFAULT '', " +
                 "PRIMARY KEY(folder, slug, filename))",
         )
         db.execSQL(
@@ -135,6 +135,13 @@ class DownloadStore(context: Context) :
         if (oldVersion < 13) {
             db.execSQL("DELETE FROM chapter_order")
             db.execSQL("DELETE FROM chlist")
+        }
+        /* a chapter's page URL, so its file keeps the same name for life
+           however the site relabels or renumbers it. Blank for everything
+           downloaded before this column existed; the engine fills those in
+           as it recognises them. */
+        if (oldVersion < 14) {
+            try { db.execSQL("ALTER TABLE chapters ADD COLUMN url TEXT DEFAULT ''") } catch (e: Exception) {}
         }
     }
 
@@ -472,10 +479,32 @@ class DownloadStore(context: Context) :
         return out
     }
 
-    fun add(folder: String, slug: String, filename: String, uri: String) {
+    /* page URL -> the filename that chapter lives under. This is the novel's
+       identity map: a chapter keeps its file for life, so the site is free to
+       relabel or renumber it without us downloading it again under a new
+       name. Rows written before the url column existed are skipped. */
+    fun urlMap(folder: String, slug: String): HashMap<String, String> {
+        val out = HashMap<String, String>()
+        readableDatabase.query(
+            "chapters", arrayOf("url", "filename"),
+            "folder=? AND slug=? AND url IS NOT NULL AND url<>''", arrayOf(folder, slug),
+            null, null, null,
+        ).use { c -> while (c.moveToNext()) out[c.getString(0)] = c.getString(1) }
+        return out
+    }
+
+    /* adopt a file downloaded before URLs were recorded */
+    fun linkUrl(folder: String, slug: String, filename: String, url: String) {
         writableDatabase.execSQL(
-            "INSERT OR REPLACE INTO chapters(folder,slug,filename,uri) VALUES(?,?,?,?)",
-            arrayOf(folder, slug, filename, uri),
+            "UPDATE chapters SET url=? WHERE folder=? AND slug=? AND filename=?",
+            arrayOf(url, folder, slug, filename),
+        )
+    }
+
+    fun add(folder: String, slug: String, filename: String, uri: String, url: String = "") {
+        writableDatabase.execSQL(
+            "INSERT OR REPLACE INTO chapters(folder,slug,filename,uri,url) VALUES(?,?,?,?,?)",
+            arrayOf(folder, slug, filename, uri, url),
         )
         clearChapterList(folder, slug)   // listing changed
     }
