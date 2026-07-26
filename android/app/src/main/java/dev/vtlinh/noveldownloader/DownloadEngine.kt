@@ -332,9 +332,9 @@ class DownloadEngine(
         folderKey: String,
         slug: String,
         assigned: Set<String>,
-    ) {
+    ): Int {
         val cr = context.contentResolver
-        val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return }
+        val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return 0 }
         val re = ChapterListActivity.CHAPTER_RE
 
         class OnDisk(val name: String, val base: String, val docId: String, val size: Long)
@@ -346,7 +346,7 @@ class DownloadEngine(
             if (re.matches(base)) chapterFiles.add(OnDisk(e.name, base, e.docId, e.size))
         }
         val extras = chapterFiles.filter { it.base !in assigned }
-        if (extras.isEmpty()) return
+        if (extras.isEmpty()) return 0
 
         /* Fingerprint the BODY, not the file. Every chapter is written as
            "<heading>\n<content>" and the heading carries the chapter number,
@@ -416,6 +416,57 @@ class DownloadEngine(
         }
         if (removed > 0) log("removed $removed duplicate chapter file(s) — same text as a chapter we kept")
         if (kept > 0) log("$kept extra file(s) left alone — their text is not a duplicate")
+        return kept
+    }
+
+    /* After a forced full re-download every listed chapter is on disk under
+       its assigned name, verified by the download itself. At that point a
+       chapter file nothing points at isn't a maybe-duplicate — it is simply
+       not part of the novel any more, and can go without inspecting its
+       text. This is the only place that deletes on "unreferenced" alone,
+       and it is only reachable once the fetch has proved the alternative. */
+    private fun purgeUnreferenced(
+        treeUri: Uri,
+        dir: DocumentFile,
+        store: DownloadStore,
+        folderKey: String,
+        slug: String,
+        assigned: Set<String>,
+    ): Int {
+        val cr = context.contentResolver
+        val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return 0 }
+        val re = ChapterListActivity.CHAPTER_RE
+        var translatedId: String? = null
+        val doomed = ArrayList<Pair<String, String>>()      // name -> docId
+        for (e in Saf.children(cr, treeUri, dirId)) {
+            if (e.isDir) { if (e.name == "translated") translatedId = e.docId; continue }
+            val base = e.name.removeSuffix(".gz")
+            if (re.matches(base) && base !in assigned) doomed.add(Pair(base, e.docId))
+        }
+        if (doomed.isEmpty()) return 0
+        val translated = HashMap<String, String>()
+        translatedId?.let { id ->
+            for (e in Saf.children(cr, treeUri, id)) if (!e.isDir) translated[e.name.removeSuffix(".gz")] = e.docId
+        }
+        var gone = 0
+        for ((base, docId) in doomed) {
+            val ok = try {
+                DocumentsContract.deleteDocument(
+                    cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
+                )
+            } catch (e: Exception) { false }
+            if (!ok) continue
+            translated[base]?.let { tid ->
+                try {
+                    DocumentsContract.deleteDocument(
+                        cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, tid),
+                    )
+                } catch (e: Exception) {}
+            }
+            store.removeChapter(folderKey, slug, base)
+            gone++
+        }
+        return gone
     }
 
     /* How chapters were named before the URL map existed: the site's own
@@ -723,7 +774,19 @@ class DownloadEngine(
             return@withContext
         }
         renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
-        dedupeExtras(treeUri, dir, store, folderKey, slug, siteOrdered.mapNotNull { it.filename }.toSet())
+        val assigned = siteOrdered.mapNotNull { it.filename }.toSet()
+        /* Files we can neither place nor prove are copies. Rather than leave
+           the novel in a state nobody can explain, fetch every chapter again
+           and let the download settle it: afterwards each listed chapter is
+           on disk under its own name, and whatever is left over is surplus.
+           The index is dropped with it — a wrong index is one reason a file
+           goes unrecognised in the first place — and rebuilt from the saves. */
+        val unexplained = dedupeExtras(treeUri, dir, store, folderKey, slug, assigned)
+        val refetchAll = unexplained > 0
+        if (refetchAll) {
+            log("$unexplained file(s) can't be placed or matched — re-fetching the whole novel to settle it")
+            try { store.clear(folderKey, slug) } catch (e: Exception) {}
+        }
         log("Saving to: $folderName/")
 
         status("Checking already-downloaded chapters…")
@@ -762,7 +825,9 @@ class DownloadEngine(
             store.addAll(folderKey, slug, rows)
         }
 
-        val toFetch = chapters.filter { it.filename != null && it.filename !in existing }
+        val toFetch =
+            if (refetchAll) chapters.filter { it.filename != null }
+            else chapters.filter { it.filename != null && it.filename !in existing }
         val skipped = chapters.size - toFetch.size
         if (skipped > 0) log("skip $skipped already-downloaded chapter(s)")
 
@@ -862,8 +927,17 @@ class DownloadEngine(
            download time (not only when the user taps Check status). Complete =
            the site says finished AND every listed chapter is on disk after
            this run (nothing failed, nothing stopped). */
+        val allOnDisk = !stopRequested && failed.isEmpty()
+        /* The re-fetch has just written every listed chapter under its own
+           name, so what remains unclaimed is settled: not part of the novel.
+           Only trust that if the fetch actually finished — a stopped or
+           partly-failed run proves nothing, and the guarded pass keeps
+           looking after those files instead. */
+        if (refetchAll && allOnDisk) {
+            val gone = purgeUnreferenced(treeUri, dir, store, folderKey, slug, assigned)
+            if (gone > 0) log("removed $gone file(s) the novel no longer contains")
+        }
         try {
-            val allOnDisk = !stopRequested && failed.isEmpty()
             store.updateNovelCheck(folderKey, slug, chapters.size, site.isCompleted(doc) && allOnDisk)
             /* ...and the authoritative on-disk count. The Library can't derive
                it for a compressed novel — the chapters index only tracks loose
@@ -872,7 +946,8 @@ class DownloadEngine(
                here: the chapters that were already present plus what we saved. */
             store.setDiskCount(
                 folderKey, slug,
-                chapters.count { it.filename != null && it.filename in existing } + saved.get(),
+                if (refetchAll) saved.get()
+                else chapters.count { it.filename != null && it.filename in existing } + saved.get(),
             )
         } catch (e: Exception) {}
 
