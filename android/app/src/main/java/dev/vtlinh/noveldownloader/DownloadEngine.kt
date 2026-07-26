@@ -162,6 +162,27 @@ class DownloadEngine(
         var filename: String? = null
     }
 
+    /* Links the site lists as chapters but that carry no readable chapter
+       number — none in the URL (no "chapter-N", no leading digits on the
+       slug) and none in the link text ("Chapter N" / "Chương N"). Without a
+       number there's no "Chapter N.txt" to save them as, so they can never
+       be downloaded and don't count towards the novel's total.
+
+       Name them in the log: that's the only way to tell a genuinely
+       unnumbered chapter — a prologue or an epilogue — from a stray
+       non-chapter link that happens to sit inside the listing container.
+       The first tells us the numbering needs to cope with it; the second
+       tells us the link test is too generous. */
+    private fun reportUnnamed(all: List<Chapter>) {
+        val unnamed = all.filter { it.filename == null }
+        if (unnamed.isEmpty()) return
+        log("${unnamed.size} listed link(s) have no readable chapter number — can't be downloaded:")
+        for (ch in unnamed.take(20)) {
+            log("  \"${ch.text.trim().ifEmpty { "(no title)" }}\" — ${ch.url}")
+        }
+        if (unnamed.size > 20) log("  …and ${unnamed.size - 20} more")
+    }
+
     /* fetch the novel-page cover once into app-private storage (non-fatal) */
     private fun saveCover(slug: String, doc: org.jsoup.nodes.Document) {
         try {
@@ -265,6 +286,9 @@ class DownloadEngine(
             counts[n] = c
             ch.filename = "Chapter $n" + (if (c > 1) "-$c" else "") + ".txt"
         }
+        /* Check status reports them too, so they can be seen without
+           committing to a whole download */
+        reportUnnamed(siteOrdered)
         SiteStatus(
             /* only the ones we could name: a link with no readable chapter
                number can never be fetched, so counting it would leave the
@@ -395,12 +419,8 @@ class DownloadEngine(
            N-2/N with a Download button that can't make progress, and it would
            be reported as "already downloaded" every run. Drop it from the
            working set — naming the ones we can is what the total means. */
-        val unnamed = chapters.filter { it.filename == null }
-        if (unnamed.isNotEmpty()) {
-            log("ignoring ${unnamed.size} listed link(s) with no readable chapter number")
-            unnamed.take(3).forEach { log("  ${it.url}") }
-            chapters.retainAll { it.filename != null }
-        }
+        reportUnnamed(chapters)
+        chapters.retainAll { it.filename != null }
         if (chapters.isEmpty()) {
             log("No chapters found — site layout may have changed")
             status("Error: no chapters found")
