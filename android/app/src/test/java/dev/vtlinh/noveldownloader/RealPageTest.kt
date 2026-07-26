@@ -31,11 +31,13 @@ import org.junit.Test
    measured at capture time by a separate script — not by this app's parser —
    so the assertions below are a cross-check rather than an echo.
 
-   novelfull.com sits behind a JS challenge that neither curl nor a headless
-   browser gets through from CI, so its pages were captured from novelfull.net,
-   which serves the same application (same #list-chapter container, same
-   /slug/chapter-name.html links, same ?page=N pagination). The manifest
-   records the exact URL each fixture came from. */
+   novelfull.com answers a direct curl with a JS challenge, so these were
+   fetched through the dev Worker (tools/README.md), which reaches it fine.
+   Three short novels are the exception: .com's catalogue does not carry them
+   at all, so those came from novelfull.net, which serves the same application
+   (same #list-chapter container, same /slug/chapter-name.html links, same
+   ?page=N pagination). The manifest records where each fixture came from and
+   which URL the app itself would use. */
 class RealPageTest {
 
     private class Fixture(
