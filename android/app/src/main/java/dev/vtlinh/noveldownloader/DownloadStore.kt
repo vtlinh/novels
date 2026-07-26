@@ -46,7 +46,7 @@ class CachedChapterList(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 14) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 15) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -78,6 +78,7 @@ class DownloadStore(context: Context) :
         db.execSQL(
             "CREATE TABLE chapters (" +
                 "folder TEXT, slug TEXT, filename TEXT, uri TEXT, url TEXT DEFAULT '', " +
+                "size INTEGER DEFAULT 0, hash TEXT DEFAULT '', " +
                 "PRIMARY KEY(folder, slug, filename))",
         )
         db.execSQL(
@@ -141,6 +142,12 @@ class DownloadStore(context: Context) :
            as it recognises them. */
         if (oldVersion < 14) {
             try { db.execSQL("ALTER TABLE chapters ADD COLUMN url TEXT DEFAULT ''") } catch (e: Exception) {}
+        }
+        /* size + content hash, so a duplicate left behind by an earlier
+           naming scheme can be recognised as the same chapter and dropped */
+        if (oldVersion < 15) {
+            try { db.execSQL("ALTER TABLE chapters ADD COLUMN size INTEGER DEFAULT 0") } catch (e: Exception) {}
+            try { db.execSQL("ALTER TABLE chapters ADD COLUMN hash TEXT DEFAULT ''") } catch (e: Exception) {}
         }
     }
 
@@ -498,6 +505,33 @@ class DownloadStore(context: Context) :
         } finally {
             db.endTransaction()
         }
+    }
+
+    /* filename -> (size, content hash) for everything we've fingerprinted.
+       Hashing costs a read, so it's only ever done for files we suspect of
+       being duplicates, and remembered here so a later pass never repeats
+       it. */
+    fun fingerprints(folder: String, slug: String): HashMap<String, Pair<Long, String>> {
+        val out = HashMap<String, Pair<Long, String>>()
+        readableDatabase.query(
+            "chapters", arrayOf("filename", "size", "hash"),
+            "folder=? AND slug=? AND hash<>''", arrayOf(folder, slug), null, null, null,
+        ).use { c -> while (c.moveToNext()) out[c.getString(0)] = Pair(c.getLong(1), c.getString(2)) }
+        return out
+    }
+
+    fun setFingerprint(folder: String, slug: String, filename: String, size: Long, hash: String) {
+        writableDatabase.execSQL(
+            "UPDATE chapters SET size=?, hash=? WHERE folder=? AND slug=? AND filename=?",
+            arrayOf(size, hash, folder, slug, filename),
+        )
+    }
+
+    fun removeChapter(folder: String, slug: String, filename: String) {
+        writableDatabase.delete(
+            "chapters", "folder=? AND slug=? AND filename=?", arrayOf(folder, slug, filename),
+        )
+        clearChapterList(folder, slug)
     }
 
     /* adopt a file downloaded before URLs were recorded */

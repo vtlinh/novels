@@ -287,6 +287,92 @@ class DownloadEngine(
         if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
     }
 
+    /* Chapter files nothing in the listing points at — left behind when an
+       earlier build named the same chapter differently and downloaded it a
+       second time. An extra is only removed once its CONTENT is shown to
+       match a file we're keeping: same size, then same hash. Anything whose
+       bytes are unique stays put and is reported, because a file no longer
+       referenced is not the same thing as a file that's safe to delete.
+
+       Hashing costs a read, so it's confined to orphans and the kept files
+       that share their exact size, and every hash computed is remembered so
+       later passes don't repeat the work. */
+    private fun dedupeExtras(
+        treeUri: Uri,
+        dir: DocumentFile,
+        store: DownloadStore,
+        folderKey: String,
+        slug: String,
+        assigned: Set<String>,
+    ) {
+        val cr = context.contentResolver
+        val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return }
+        val re = ChapterListActivity.CHAPTER_RE
+
+        class OnDisk(val name: String, val base: String, val docId: String, val size: Long)
+        val chapterFiles = ArrayList<OnDisk>()
+        var translatedId: String? = null
+        for (e in Saf.children(cr, treeUri, dirId)) {
+            if (e.isDir) { if (e.name == "translated") translatedId = e.docId; continue }
+            val base = e.name.removeSuffix(".gz")
+            if (re.matches(base)) chapterFiles.add(OnDisk(e.name, base, e.docId, e.size))
+        }
+        val extras = chapterFiles.filter { it.base !in assigned }
+        if (extras.isEmpty()) return
+
+        val keptBySize = HashMap<Long, MutableList<OnDisk>>()
+        for (f in chapterFiles) {
+            if (f.base in assigned) keptBySize.getOrPut(f.size) { ArrayList() }.add(f)
+        }
+
+        val known = store.fingerprints(folderKey, slug)
+        fun hashOf(f: OnDisk): String? {
+            known[f.base]?.let { if (it.first == f.size) return it.second }
+            val text = (
+                if (f.name.endsWith(".gz")) Zips.readGz(cr, treeUri, f.docId)
+                else Saf.readText(cr, treeUri, f.docId)
+                ) ?: return null
+            val h = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(text.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            known[f.base] = Pair(f.size, h)
+            store.setFingerprint(folderKey, slug, f.base, f.size, h)
+            return h
+        }
+
+        var removed = 0
+        var kept = 0
+        for (x in extras) {
+            val sameSize = keptBySize[x.size]
+            if (sameSize.isNullOrEmpty()) { kept++; log("  extra kept (nothing matches it): ${x.name}"); continue }
+            val xh = hashOf(x)
+            val twin = if (xh == null) null else sameSize.firstOrNull { hashOf(it) == xh }
+            if (twin == null) { kept++; log("  extra kept (content differs): ${x.name}"); continue }
+            /* same bytes as a chapter we're keeping — drop the copy */
+            val ok = try {
+                DocumentsContract.deleteDocument(
+                    cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, x.docId),
+                )
+            } catch (e: Exception) { false }
+            if (!ok) continue
+            translatedId?.let { tid ->
+                for (t in Saf.children(cr, treeUri, tid)) {
+                    if (!t.isDir && t.name == x.name) {
+                        try {
+                            DocumentsContract.deleteDocument(
+                                cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, t.docId),
+                            )
+                        } catch (e: Exception) {}
+                    }
+                }
+            }
+            store.removeChapter(folderKey, slug, x.base)
+            removed++
+        }
+        if (removed > 0) log("removed $removed duplicate chapter file(s)")
+        if (kept > 0) log("$kept extra file(s) left alone — their content is not a duplicate")
+    }
+
     /* How chapters were named before the URL map existed: the site's own
        number, plus a suffix for a repeat. Only used to recognise files
        already on disk so they aren't downloaded again under new names. */
@@ -590,6 +676,7 @@ class DownloadEngine(
             return@withContext
         }
         renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
+        dedupeExtras(treeUri, dir, store, folderKey, slug, siteOrdered.mapNotNull { it.filename }.toSet())
         log("Saving to: $folderName/")
 
         status("Checking already-downloaded chapters…")
