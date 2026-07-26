@@ -109,7 +109,7 @@ object Zips {
                the dedupe and the sweep, and impossible to overwrite. Ask what
                we actually got. */
             val got = docName(cr, renamed)
-            if (got != null && got != name) {
+            if (got != null && isMinted(name, got)) {
                 try { DocumentsContract.deleteDocument(cr, renamed) } catch (e: Exception) {}
                 throw java.io.IOException("$name is taken")
             }
@@ -127,6 +127,22 @@ object Zips {
        file, not authoring one, so it must not reinterpret the encoding */
     fun writeGzBytes(cr: ContentResolver, parentDocUri: Uri, name: String, bytes: ByteArray): Boolean =
         writeGzUnder(cr, parentDocUri, name) { it.write(bytes) } != null
+
+    /* Did the provider mint a UNIQUE name around ours? buildUniqueFile appends
+       " (1)" to the stem on a collision.
+
+       Any other rewrite is the provider normalising — an extension forced to
+       match the mime type, which the code here relies on elsewhere. Treating
+       every difference as a collision would delete the file just written and
+       fail EVERY chapter on such a provider, so the test has to be this
+       specific rather than "the name changed". */
+    fun isMinted(want: String, got: String): Boolean {
+        if (want == got) return false
+        val wantStem = want.substringBeforeLast('.')
+        val gotStem = got.substringBeforeLast('.')
+        return Regex(".+ \\(\\d+\\)$").matches(gotStem) &&
+            gotStem.substringBeforeLast(" (") == wantStem
+    }
 
     /* What the provider actually called the document. SAF is free to rewrite
        a display name — buildUniqueFile on a collision, an extension forced to

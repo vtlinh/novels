@@ -1067,7 +1067,14 @@ class ReaderActivity : AppCompatActivity() {
        user would notice between two spoken lines */
     private val RULE_BUDGET_MS = 150L
 
+    /* Latched once a rule blows its budget. Without it, reloadSpeechRules in
+       onResume put the runaway straight back — a screen off/on, a call, a trip
+       to the chapter list — and from then on every single sentence paid the
+       timeout and abandoned another spinning thread. */
+    private var rulesTooSlow = false
+
     private fun reloadSpeechRules() {
+        if (rulesTooSlow) { speechRules = emptyList(); return }
         speechRules = try { SpeechEdits.enabledRules(this) } catch (e: Exception) { emptyList() }
     }
 
@@ -1096,6 +1103,7 @@ class ReaderActivity : AppCompatActivity() {
             s.replace(collapseWs, " ").trim()
         }
         if (out == null) {
+            rulesTooSlow = true
             speechRules = emptyList()
             android.widget.Toast.makeText(
                 this, "A speech-edit rule is too slow — rules turned off for now", android.widget.Toast.LENGTH_LONG,
