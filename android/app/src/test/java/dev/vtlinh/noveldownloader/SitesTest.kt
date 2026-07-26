@@ -129,6 +129,14 @@ class ChapterNameTest {
         assertFalse(Zips.isPartName("my.particulars.doc"))
         assertFalse(Zips.isPartName("Chapter 5.txt"))
         assertFalse(Zips.isPartName("Chapter 5.txt.gz"))
+        /* ".part" IS the common convention for a partial download, so
+           anchoring the match at the end was not enough on its own: every one
+           of these ends in it, and the sweep visits every folder under the
+           tree. What makes a file ours is the chapter name UNDER the mark. */
+        assertFalse("the file the sweep must never touch", Zips.isPartName("movie.mp4.part"))
+        assertFalse(Zips.isPartName("ubuntu.iso.part"))
+        assertFalse(Zips.isPartName("archive.tar.part.gz"))
+        assertFalse("not ours just because it starts the same way", Zips.isPartName("part~notes.txt"))
     }
 
     /* An UNCOMPRESSED chapter can't carry the mark as a suffix: SAF forces

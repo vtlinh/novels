@@ -94,8 +94,27 @@ class CompressService : Service() {
                     if (DownloadService.runningFlow.value) break
                     val target = prefs.getBoolean("compressNovels", true)
                     var changedAny = false
+                    /* OUR novels' folders, not every directory in the tree.
+                       The tree is whatever folder the user picked, which can
+                       be a shared one they keep other things in — and the pass
+                       rewrites and deletes files inside each directory it
+                       visits. The per-file guards mean it only ever touched a
+                       file named exactly like a chapter, but the user's own
+                       "Chapter 1.txt" in their own folder is not ours to gzip,
+                       and the half-written sweep runs on the whole listing.
+
+                       An EMPTY set falls back to the old whole-tree walk: a
+                       library predating these columns records neither, and
+                       skipping everything would leave it uncompressed for ever
+                       with nothing to say so. */
+                    val owned = try {
+                        DownloadStore(this@CompressService).ownedDirNames(treeStr)
+                    } catch (e: Exception) {
+                        emptySet<String>()
+                    }
                     val dirs = try {
-                        Saf.children(cr, treeUri, Saf.rootId(treeUri)).filter { it.isDir }
+                        Saf.children(cr, treeUri, Saf.rootId(treeUri))
+                            .filter { it.isDir && (owned.isEmpty() || it.name in owned) }
                     } catch (e: Exception) {
                         emptyList()
                     }

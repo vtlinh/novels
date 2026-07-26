@@ -358,13 +358,40 @@ class DownloadStore(context: Context) :
 
     /* the compress pass rewrites refs across the whole library */
     fun clearAllChapterLists(folder: String) {
-        writableDatabase.delete("chlist", "folder=?", arrayOf(folder))
         /* One library-wide counter, added to every novel's. Bumping only the
            keys already in the map missed every novel no walk had touched yet
            in this process — including one being walked right now under an
            implicit 0 — so the compress pass could finish mid-walk and the
-           stale listing, full of pre-gzip document ids, was written back. */
+           stale listing, full of pre-gzip document ids, was written back.
+
+           Bumped FIRST, for the reason clearChapterList states and this one
+           had inverted: after the delete there is a window the width of a
+           database round-trip in which a walk finishes, reads the old epoch,
+           passes the check and writes back exactly what was just deleted —
+           and here that is the whole library's worth of stale document ids,
+           which is the one thing this call exists to get rid of. */
         chlistEpochAll.incrementAndGet()
+        writableDatabase.delete("chlist", "folder=?", arrayOf(folder))
+    }
+
+    /* Every directory in the tree this library actually owns.
+       `dir_name` is where each novel writes; `folder_owner` additionally holds
+       names claimed by novels whose rows have since been merged away. The
+       compress pass walks the tree the user picked, which can be a shared
+       folder they keep other things in, and needs to stay inside these. */
+    fun ownedDirNames(folder: String): Set<String> {
+        val out = HashSet<String>()
+        readableDatabase.rawQuery(
+            "SELECT dir_name FROM novels WHERE folder=?", arrayOf(folder),
+        ).use { c ->
+            while (c.moveToNext()) c.getString(0)?.takeIf { it.isNotEmpty() }?.let { out.add(it) }
+        }
+        readableDatabase.query(
+            "folder_owner", arrayOf("name"), "folder=?", arrayOf(folder), null, null, null,
+        ).use { c ->
+            while (c.moveToNext()) c.getString(0)?.takeIf { it.isNotEmpty() }?.let { out.add(it) }
+        }
+        return out
     }
 
     fun getChapterOrder(folder: String, slug: String): Map<String, Int> {
