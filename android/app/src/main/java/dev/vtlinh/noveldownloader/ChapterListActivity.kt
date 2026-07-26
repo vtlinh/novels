@@ -245,6 +245,10 @@ class ChapterListActivity : AppCompatActivity() {
 
     private var loadedOnce = false
     private var loading = false
+
+    /* how many rows the last render put up, so a live refresh can tell how
+       many chapters arrived and which way they shifted the indices */
+    private var renderedCount = 0
     private var liveJob: kotlinx.coroutines.Job? = null
 
     /* While this novel is downloading, fold newly saved chapters in as they
@@ -303,6 +307,8 @@ class ChapterListActivity : AppCompatActivity() {
                 return@launch
             }
             status.text = "${ordered.size} chapter(s)"
+            val lastRenderedCount = renderedCount
+            renderedCount = ordered.size
             val labels = ordered.map { it.removeSuffix(".txt") }
             /* the chapter currently being read: highlighted and scrolled into
                view (at ~20% of the list height) */
@@ -334,9 +340,15 @@ class ChapterListActivity : AppCompatActivity() {
                 }
             }
             if (preserveScroll) {
-                /* chapters arriving underneath shouldn't move the reader's
-                   place in the list */
-                listView.setSelectionFromTop(keepPos, keepTop)
+                /* Chapters arriving underneath shouldn't move the reader's
+                   place in the list. Ascending, they land at the end and every
+                   index keeps its meaning — but newest-first PREPENDS them, so
+                   restoring the same index walked the list backwards by the
+                   number that arrived, visibly jumping every few seconds for
+                   the length of a download. Shift by how many appeared. */
+                val grew = ordered.size - lastRenderedCount
+                val shift = if (grew > 0 && prefs.getBoolean(descKey, false)) grew else 0
+                listView.setSelectionFromTop(keepPos + shift, keepTop)
             } else if (currentPos >= 0) {
                 listView.post {
                     listView.setSelectionFromTop(currentPos, (listView.height * 0.2f).toInt())

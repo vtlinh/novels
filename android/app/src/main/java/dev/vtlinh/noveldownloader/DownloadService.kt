@@ -11,7 +11,9 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /* Foreground service hosting the download: keeps running with the screen off
@@ -70,6 +72,24 @@ class DownloadService : Service() {
             queuedSlugsFlow.value = out
         }
 
+        /* The queue lives in prefs and is read-modify-written from two
+           threads: enqueue on the main thread from onStartCommand, popQueue
+           on IO from the download loop. Interleaved, one write lands on top
+           of the other — a novel left sitting in the queue with nothing
+           running (stuck on "Queued" until the app is backgrounded and
+           reopened), or an already-popped one resurrected and downloaded
+           twice. Every touch of the queue goes through this. */
+        private val queueLock = Any()
+
+        /* Assigning a StateFlow's value is atomic; reading it, appending, and
+           assigning back is not — and this is called from up to fifty fetch
+           coroutines at once, plus three at a time from the status sweep. Lost
+           lines are only cosmetic, but they are lost precisely when the log is
+           busiest, which is when it is being read. */
+        fun appendLog(line: String) {
+            logFlow.update { (it + line).takeLast(400) }
+        }
+
         /* add a request to the back of the queue; false if that novel is
            already downloading or already waiting */
         private fun enqueue(
@@ -77,7 +97,7 @@ class DownloadService : Service() {
             url: String,
             translate: Boolean,
             force: Boolean,
-        ): Boolean {
+        ): Boolean = synchronized(queueLock) {
             if (url == currentUrl) return false
             val arr = queueArr(ctx)
             for (i in 0 until arr.length()) {
@@ -92,7 +112,7 @@ class DownloadService : Service() {
             return true
         }
 
-        private fun popQueue(ctx: android.content.Context): org.json.JSONObject? {
+        private fun popQueue(ctx: android.content.Context): org.json.JSONObject? = synchronized(queueLock) {
             val arr = queueArr(ctx)
             if (arr.length() == 0) return null
             val first = arr.optJSONObject(0) ?: return null
@@ -103,7 +123,7 @@ class DownloadService : Service() {
             return first
         }
 
-        private fun clearQueue(ctx: android.content.Context) {
+        private fun clearQueue(ctx: android.content.Context) = synchronized(queueLock) {
             prefs(ctx).edit().remove(QUEUE_KEY).apply()
             publishQueue(ctx)
         }
@@ -149,7 +169,7 @@ class DownloadService : Service() {
         /* a download is already running → line this novel up next */
         if (runningFlow.value) {
             if (enqueue(this, url, translate, forceTranslate)) {
-                logFlow.value = (logFlow.value + "Queued next: $url").takeLast(400)
+                appendLog("Queued next: $url")
                 maybeNotify(statusFlow.value, 0, 0)   // refresh the "+N queued" hint
             }
             return START_NOT_STICKY
@@ -174,7 +194,7 @@ class DownloadService : Service() {
                 activeSlugFlow.value = NovelListActivity.slugKeyFromUrl(curUrl)
                 val eng = DownloadEngine(
                     applicationContext,
-                    log = { line -> logFlow.value = (logFlow.value + line).takeLast(400) },
+                    log = { line -> appendLog(line) },
                     status = { s ->
                         statusFlow.value = s
                         maybeNotify(s, 0, 0)
@@ -185,7 +205,7 @@ class DownloadService : Service() {
                 try {
                     eng.run(curUrl, Uri.parse(treePath), curTranslate, curKey, curForce)
                 } catch (e: Exception) {
-                    logFlow.value = logFlow.value + "ERROR: ${e.message}"
+                    appendLog("ERROR: ${e.message}")
                     statusFlow.value = "Error: ${e.message}"
                 }
                 /* next in line — unless the user pressed Stop (which also
@@ -197,16 +217,29 @@ class DownloadService : Service() {
                 curTranslate = next.optBoolean("translate")
                 curForce = next.optBoolean("force")
                 curKey = p.getString("apiKey", "") ?: ""
-                logFlow.value = (logFlow.value + "— next novel: $curUrl —").takeLast(400)
+                appendLog("— next novel: $curUrl —")
             }
             currentUrl = null
             activeSlugFlow.value = null
             runningFlow.value = false
             engine = null
             stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            /* Pass the start id. A plain stopSelf() tears the service down
+               even if a new download arrived while we were finishing — that
+               one would clear `engine` (killing its Stop button), take away
+               its notification, and leave it running unprotected in a service
+               the system has already destroyed. With the id, a later start
+               cancels the stop. */
+            stopSelfResult(startId)
         }
         return START_NOT_STICKY
+    }
+
+    /* the scope outlives onStartCommand, so a destroyed service must not
+       leave a download running with nothing tracking it */
+    override fun onDestroy() {
+        super.onDestroy()
+        if (!runningFlow.value) scope.coroutineContext[kotlinx.coroutines.Job]?.cancelChildren()
     }
 
     private fun createChannel() {

@@ -961,8 +961,31 @@ class ReaderActivity : AppCompatActivity() {
     private var speechRules: List<Pair<Regex, String>> = emptyList()
     private val collapseWs = Regex("\\s+")
 
+    /* generous for any sane rule on one sentence, far short of a stall the
+       user would notice between two spoken lines */
+    private val RULE_BUDGET_MS = 150L
+
     private fun reloadSpeechRules() {
         speechRules = try { SpeechEdits.enabledRules(this) } catch (e: Exception) { emptyList() }
+    }
+
+    /* Speech rules are arbitrary user-authored regexes, imported wholesale
+       from @Voice files, and they run on the MAIN thread between sentences.
+       A pattern with nested quantifiers backtracks exponentially — and that
+       is not an exception, it is a hang, so the try/catch below could not
+       catch it and the app just froze mid-chapter. The matcher only advances
+       by reading characters, so a CharSequence that refuses to be read past a
+       deadline turns the hang into an exception the existing per-rule catch
+       already handles: that one rule is skipped, the read continues. */
+    private class Deadline(private val s: CharSequence, private val until: Long) : CharSequence {
+        override val length get() = s.length
+        override fun get(index: Int): Char {
+            if (System.currentTimeMillis() > until) throw IllegalStateException("rule too slow")
+            return s[index]
+        }
+        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence =
+            Deadline(s.subSequence(startIndex, endIndex), until)
+        override fun toString() = s.toString()
     }
 
     private fun cleanForSpeech(sentence: String, lang: String): String {
@@ -970,9 +993,12 @@ class ReaderActivity : AppCompatActivity() {
         return try {
             var s = "$sentence "   // trailing space so end-anchored rules fire
             for ((re, rep) in speechRules) {
-                /* one bad rule (e.g. a replacement with an out-of-range $group)
-                   must never crash the read — skip it and keep going */
-                s = try { re.replace(s, rep) } catch (e: Exception) { s }
+                /* one bad rule (e.g. a replacement with an out-of-range $group,
+                   or one that backtracks forever) must never crash or stall the
+                   read — skip it and keep going */
+                s = try {
+                    re.replace(Deadline(s, System.currentTimeMillis() + RULE_BUDGET_MS), rep)
+                } catch (e: Exception) { s }
             }
             s.replace(collapseWs, " ").trim()
         } catch (e: Exception) {
