@@ -171,7 +171,20 @@ class NovelListActivity : AppCompatActivity() {
     private fun rows(): List<Row> {
         val folder = folderKey ?: return emptyList()
         var err = ""
-        if (!store.isScanned(folder)) err += scanFolder(folder)
+        /* After the first successful scan this screen never touches the
+           filesystem again — every row comes from SQLite. So a folder the
+           user deleted, an SD card that came out, or a grant revoked in
+           system settings all presented as a perfectly healthy library with
+           live Download buttons, and the failure only surfaced deep in a
+           download log. Confirm we still hold the grant; it's one cheap
+           lookup against a list the system already keeps. */
+        val granted = try {
+            contentResolver.persistedUriPermissions.any {
+                it.isReadPermission && it.uri.toString() == folder
+            }
+        } catch (e: Exception) { true }   // can't tell → don't cry wolf
+        if (!granted) err += " folder-access-lost"
+        if (granted && !store.isScanned(folder)) err += scanFolder(folder)
 
         val all = LinkedHashMap<String, NovelRec>()
         try {
@@ -329,6 +342,16 @@ class NovelListActivity : AppCompatActivity() {
         if (folderKey == null) {
             list.removeAllViews()
             status.text = "Pick a download folder first."
+            return
+        }
+        val stillGranted = try {
+            contentResolver.persistedUriPermissions.any {
+                it.isReadPermission && it.uri.toString() == folderKey
+            }
+        } catch (e: Exception) { true }
+        if (!stillGranted) {
+            list.removeAllViews()
+            status.text = "The download folder is no longer available — pick it again in Settings."
             return
         }
         status.text = "Loading…"
@@ -636,7 +659,7 @@ class NovelListActivity : AppCompatActivity() {
            the only way to see them is to run a full download. */
         val engine = DownloadEngine(
             this,
-            { line -> DownloadService.logFlow.value = (DownloadService.logFlow.value + line).takeLast(400) },
+            { line -> DownloadService.appendLog(line) },
             {},
             { _, _ -> },
         )

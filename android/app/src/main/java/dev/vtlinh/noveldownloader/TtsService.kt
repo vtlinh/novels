@@ -71,6 +71,18 @@ class TtsService : Service() {
         if (intent?.action == Intent.ACTION_MEDIA_BUTTON) {
             postNotification(lastTitle, lastSpeaking, lastToken, lastSlug)
             handleMediaButton(intent)
+            /* Nothing here reads: a media key can start this service long
+               after the reader is gone (the manifest receiver is exported and
+               the process may have been killed since), and the toggle it
+               broadcasts is only listened for by a live ReaderActivity. Left
+               alone, that posted an ongoing "Reading aloud" notification with
+               a Pause button that did nothing and no way to dismiss it —
+               nothing would ever call stop(). If no reader took the key, take
+               the notification back down. */
+            if (lastTitle == null) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf(startId)
+            }
             return START_NOT_STICKY
         }
 

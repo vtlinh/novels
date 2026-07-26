@@ -67,8 +67,17 @@ class BrowserActivity : AppCompatActivity() {
     private val store by lazy { DownloadStore(this) }
     private var currentUrl: String = "https://truyenfull.today/"
 
-    /* novel URL waiting on a download folder being picked */
-    private var pendingDownload: String? = null
+    /* Novel URL waiting on a download folder being picked. Kept in prefs, not
+       a field: the picker is a separate activity, so rotating (or the system
+       reclaiming us) behind it destroys this one. The result callback is
+       re-delivered on the new instance, but a plain field is gone by then —
+       the folder got saved and the download the user asked for silently never
+       started. */
+    private var pendingDownload: String?
+        get() = prefs.getString("pendingDownloadUrl", null)
+        set(v) {
+            prefs.edit().apply { if (v == null) remove("pendingDownloadUrl") else putString("pendingDownloadUrl", v) }.apply()
+        }
 
     private val pickFolder =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->

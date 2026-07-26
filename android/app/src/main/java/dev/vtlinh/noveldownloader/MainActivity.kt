@@ -65,7 +65,12 @@ class MainActivity : AppCompatActivity() {
 
         val urlInput = findViewById<EditText>(R.id.urlInput)
         urlInput.setText(prefs.getString("url", ""))
-        handleShare(intent)
+        /* Only on a fresh start. getIntent() still returns the original
+           ACTION_SEND after a recreation, so rotating once the shared novel
+           had downloaded re-handled the share and re-fired the whole listing
+           and rename pass. The reading-resume path three lines up already
+           guards on this; the share path never did. */
+        if (savedInstanceState == null) handleShare(intent)
 
         // translation toggle (the API key itself lives in Settings)
         val translateCheck = findViewById<android.widget.CheckBox>(R.id.translateCheck)
