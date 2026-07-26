@@ -584,6 +584,7 @@ class DownloadEngine(
         val doc = Jsoup.parse(first.html, base)
         saveCover(slug, doc)
         val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
+        var listingComplete = true
         /* Collect chapter links from the REAL chapter list only — pages also
            carry a "latest chapters" widget whose links come first in the HTML
            and would corrupt the site order. Whole-document fallback when the
@@ -630,13 +631,22 @@ class DownloadEngine(
                 }
             }
             for (html in htmls) {
-                val d = Jsoup.parse(html ?: continue, base)
+                if (html == null) { listingComplete = false; continue }
+                val d = Jsoup.parse(html, base)
                 addLinks(d)
                 last = maxOf(last, site.maxPage(d, slug))
             }
             fetched = batch.last()
         }
         if (seen.isEmpty()) return@withContext null
+        /* A status check renames and deletes but never downloads, so nothing
+           here self-corrects. Acting on a listing with a page missing would
+           renumber the library against a short list and delete the chapters
+           the gap hid. Report nothing rather than something wrong. */
+        if (!listingComplete) {
+            log("! ${'$'}slug: a listing page failed to load — skipping this novel rather than acting on a partial list")
+            return@withContext null
+        }
         val siteOrdered = seen.values.toList()
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
@@ -742,6 +752,12 @@ class DownloadEngine(
         /* fetch all remaining listing pages in parallel (Semaphore-capped);
            parse in page order so chapter discovery stays deterministic. A
            later page can raise the page count, so loop until none are left. */
+        /* Every destructive decision below — which files are surplus, where
+           each chapter belongs — reads this listing as the whole truth. A
+           page we failed to fetch would make it a LIE by omission: chapters
+           beyond the gap look unlisted, and identity-based removal deletes
+           them outright. Track it, and refuse to act on a partial answer. */
+        var listingComplete = true
         var fetched = 1
         while (fetched < last && !stopRequested) {
             val batch = ((fetched + 1)..last).toList()
@@ -758,13 +774,17 @@ class DownloadEngine(
                 }
             }
             for (html in htmls) {
-                val d = Jsoup.parse(html ?: continue, base)
+                if (html == null) { listingComplete = false; continue }
+                val d = Jsoup.parse(html, base)
                 addLinks(d)
                 last = maxOf(last, site.maxPage(d, slug))
             }
             fetched = batch.last()
         }
         if (stopRequested) { status("Stopped."); return@withContext }
+        if (!listingComplete) {
+            log("! some listing pages could not be fetched — the chapter list is incomplete")
+        }
 
         val store = DownloadStore(context)
         val folderKey = treeUri.toString()
@@ -838,8 +858,8 @@ class DownloadEngine(
             status("Error: could not create the novel folder")
             return@withContext
         }
-        renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
         val assigned = siteOrdered.mapNotNull { it.filename }.toSet()
+        if (listingComplete) renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
         /* Files we can neither place nor prove are copies. Rather than leave
            the novel in a state nobody can explain, fetch every chapter again
            and let the download settle it: afterwards each listed chapter is
@@ -847,7 +867,9 @@ class DownloadEngine(
            The index is dropped with it — a wrong index is one reason a file
            goes unrecognised in the first place — and rebuilt from the saves. */
         val listedUrls = siteOrdered.map { it.url }.toSet()
-        val unexplained = dedupeExtras(treeUri, dir, store, folderKey, slug, assigned, listedUrls)
+        val unexplained =
+            if (listingComplete) dedupeExtras(treeUri, dir, store, folderKey, slug, assigned, listedUrls)
+            else 0
         /* Re-fetching a whole novel is the last resort, not the repair. Every
            file we can identify is settled by its recorded page — kept,
            dropped, or matched — and a chapter that turns out to be missing is
@@ -897,8 +919,16 @@ class DownloadEngine(
             for (f in dir.listFiles()) {
                 val n = f.name ?: continue
                 if (Zips.isGzName(n)) {
-                    /* per-chapter compressed file counts as its .txt */
-                    existing.add(n.removeSuffix(".gz"))
+                    /* A compressed chapter IS that chapter — index it under
+                       its plain name against the .gz document. Counting it as
+                       present without recording it left the row with no
+                       location, and the translator, which reaches chapters
+                       through the index, then found nothing to translate and
+                       reported the novel already done. Chapters are written
+                       gzipped now, so this was every chapter. */
+                    val base = n.removeSuffix(".gz")
+                    existing.add(base)
+                    if (f.length() > 0) rows.add(base to f.uri.toString())
                     continue
                 }
                 if (f.length() > 0) { existing.add(n); rows.add(n to f.uri.toString()) }
@@ -956,7 +986,7 @@ class DownloadEngine(
                                 val body = Extractor.parseChapter(
                                     Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
                                 )
-                                val uri = writeFile(dir, ch.filename!!, body, compressOn)
+                                val uri = writeFile(dir, ch.filename!!, body, compressOn, replace = refetchAll)
                                 /* record the page it came from: that mapping is
                                    what keeps this file's name stable if the site
                                    later relabels or renumbers the chapter */
@@ -1019,12 +1049,16 @@ class DownloadEngine(
            Only trust that if the fetch actually finished — a stopped or
            partly-failed run proves nothing, and the guarded pass keeps
            looking after those files instead. */
-        if (refetchAll && allOnDisk) {
+        if (refetchAll && allOnDisk && listingComplete) {
             val gone = purgeUnreferenced(treeUri, dir, store, folderKey, slug, assigned)
             if (gone > 0) log("removed $gone file(s) the novel no longer contains")
         }
         try {
-            store.updateNovelCheck(folderKey, slug, chapters.size, site.isCompleted(doc) && allOnDisk)
+            /* a count taken from a partial listing would mark the novel
+               complete at the wrong total */
+            if (listingComplete) {
+                store.updateNovelCheck(folderKey, slug, chapters.size, site.isCompleted(doc) && allOnDisk)
+            }
             /* ...and the authoritative on-disk count. The Library can't derive
                it for a compressed novel — the chapters index only tracks loose
                files, and the folder scan is one-time — so without this the row
@@ -1079,7 +1113,17 @@ class DownloadEngine(
        rewrite and delete — three times the I/O for the same file. Falls
        back to a plain write if the provider won't take the .gz, and that
        pass still catches anything left loose. */
-    private fun writeFile(dir: DocumentFile, name: String, text: String, compress: Boolean): String {
+    private fun writeFile(dir: DocumentFile, name: String, text: String, compress: Boolean, replace: Boolean = false): String {
+        /* SAF does not overwrite: creating a name that already exists yields
+           "Chapter 5 (1).txt", which matches no pattern the app knows — the
+           reader can't see it and the surplus sweep would delete the copy we
+           just fetched. Clear the old document first when we know one is
+           there. (Only then: findFile is a query per call, and the normal
+           path never collides.) */
+        if (replace) {
+            try { dir.findFile(name)?.delete() } catch (e: Exception) {}
+            try { dir.findFile("$name.gz")?.delete() } catch (e: Exception) {}
+        }
         if (compress) {
             Zips.writeGzDoc(context.contentResolver, dir.uri, "$name.gz", text)
                 ?.let { return it.toString() }

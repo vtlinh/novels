@@ -160,7 +160,7 @@ class Translator(
         files: List<String>,
         isStopped: () -> Boolean,
         wantTitle: String? = null,
-    ): Map<String, JSONObject> {
+    ): BatchRun {
         if (isStopped()) throw StoppedException()
         val submitted = JSONObject(call("POST", "/v1/messages/batches", JSONObject().put("requests", requests), isStopped))
         val id = submitted.getString("id")
@@ -187,10 +187,16 @@ class Translator(
             sleepPoll(if (cancelSent) 2000L else POLL_MS, isStopped, ignoreStop = true)
         }
 
-        val results = fetchResults(id, label, isStopped)
-        store.removePending(id)
-        return results
+        /* The record is NOT retired here. Fetching the results is not the
+           same as having them on disk: a crash between the two would lose a
+           batch we have already paid for, with nothing left to recover it
+           from. The caller drops it once the chapters are written. */
+        return BatchRun(id, fetchResults(id, label, isStopped))
     }
+
+    /* a submitted batch's id alongside its results, so the record can be
+       retired at the right moment rather than the convenient one */
+    private class BatchRun(val id: String, val results: Map<String, JSONObject>)
 
     private suspend fun fetchResults(
         id: String,
@@ -484,13 +490,35 @@ class Translator(
            meant a compressed translation looked missing and was sent to the
            API again — the whole novel, every run, at cost. */
         val done = tdir.listFiles().mapNotNull { it.name?.removeSuffix(".gz") }.toHashSet()
+        /* Chapters a batch is still holding. Recovery keeps that batch's
+           record when it can't be collected this run, so submitting them
+           again would pay for the same translation twice. */
+        val inFlight = try {
+            store.pendingFor(folder, slug, System.currentTimeMillis())
+                .flatMap { it.files }.toHashSet()
+        } catch (e: Exception) { hashSetOf<String>() }
+        if (inFlight.isNotEmpty()) {
+            log("${inFlight.size} chapter(s) are still with an unfinished batch — leaving them for it")
+        }
         val uris = store.get(folder, slug)   // filename -> source document URI
-        val pending = filenames.filter { it !in done }.mapNotNull { fn ->
-            val uri = uris[fn] ?: return@mapNotNull null
-            val text = readText(uri) ?: return@mapNotNull null
+        var unreadable = 0
+        val pending = filenames.filter { it !in done && it !in inFlight }.mapNotNull { fn ->
+            val uri = uris[fn]?.takeIf { it.isNotEmpty() }
+            if (uri == null) { unreadable++; return@mapNotNull null }
+            val text = readText(uri)
+            if (text == null) { unreadable++; return@mapNotNull null }
             Pair(fn, text)
         }
-        if (pending.isEmpty()) { log("Translation: everything already translated."); return@withContext }
+        /* Say so rather than calling the novel translated: a chapter we can't
+           read is not a chapter that needs no work. */
+        if (unreadable > 0) log("! $unreadable chapter(s) could not be read from the index — not translated")
+        if (pending.isEmpty()) {
+            log(
+                if (unreadable > 0) "Translation: nothing translatable this run."
+                else "Translation: everything already translated.",
+            )
+            return@withContext
+        }
 
         val queue = chunk(pending)
         log("Translating ${pending.size} chapter(s) with $OPUS (Batches API) in ${queue.size} bundle(s)")
@@ -505,11 +533,11 @@ class Translator(
                 bundleNo++
                 status("Translating bundle $bundleNo (${bundle.size} chapter(s))…")
 
-                val results = runBatch(
+                val run = runBatch(
                     bundleRequest(bundle, glossary), "translate $bundleNo",
                     folder, slug, bundle.map { it.first }, isStopped,
                 )
-                val msg = results["bundle"]
+                val msg = run.results["bundle"]
 
                 /* a truncated bundle is unparseable structured JSON — split and
                    retry the halves so its total output fits under the ceiling */
@@ -523,12 +551,15 @@ class Translator(
                         failed += bundle.size
                         log("! bundle $bundleNo: ${if (msg != null) "truncated even for one chapter" else "no result"}; not saved")
                     }
+                    store.removePending(run.id)   // consumed: split halves are new batches
                     continue
                 }
 
                 val parsed = parseBundle(messageText(msg))
                 if (parsed == null) {
-                    log("! bundle $bundleNo: could not parse response"); failed += bundle.size; continue
+                    log("! bundle $bundleNo: could not parse response"); failed += bundle.size
+                    store.removePending(run.id)   // consumed, unusable
+                    continue
                 }
 
                 mergeNames(parsed, glossary, store, folder, slug)
@@ -549,6 +580,9 @@ class Translator(
                         }
                     }
                 }
+                /* written — now the record can go. Anything short of this and
+                   it stays, so recovery can still collect the batch. */
+                store.removePending(run.id)
                 log("Bundle $bundleNo: ${glossary.size} names known")
             }
         } catch (e: StoppedException) {
