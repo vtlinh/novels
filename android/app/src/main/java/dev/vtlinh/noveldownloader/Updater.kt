@@ -58,6 +58,9 @@ object Updater {
         scope.launch {
             val latest = latestVersion() ?: return@launch
             if (latest.first <= currentVersionCode(context)) return@launch
+            /* a build this device already refused isn't news — offering it
+               again just replaces the reason it failed with another prompt */
+            if (prefs(context).getLong(REJECTED_VERSION_KEY, -1L) == latest.first) return@launch
             val apk = ensureApk(context, latest.first) ?: return@launch
             if (apk.length() <= 0L) return@launch
             rememberPendingName(context, latest.second)
@@ -69,6 +72,14 @@ object Updater {
 
     private const val UPDATE_CHANNEL = "updates"
     private const val UPDATE_NOTIF_ID = 4711
+    /* Its own slot. Sharing 4711 meant the next foreground's "update ready"
+       overwrote the explanation of why the last install failed — and with a
+       build the OS keeps rejecting, that is an endless nag the user can never
+       read the reason for. */
+    private const val FAILED_NOTIF_ID = 4712
+    /* the versionCode of a build this device refused to install, so we stop
+       offering that exact one */
+    private const val REJECTED_VERSION_KEY = "rejectedUpdateCode"
     const val ACTION_INSTALL_UPDATE = "dev.vtlinh.noveldownloader.INSTALL_UPDATE"
     private const val PENDING_NAME_KEY = "pendingUpdateName"
 
@@ -143,7 +154,7 @@ object Updater {
                 flags,
             )
             nm.notify(
-                UPDATE_NOTIF_ID,
+                FAILED_NOTIF_ID,
                 NotificationCompat.Builder(context, UPDATE_CHANNEL)
                     .setSmallIcon(android.R.drawable.stat_notify_error)
                     .setContentTitle("Update could not be installed")
@@ -160,6 +171,21 @@ object Updater {
         try {
             context.getSystemService(NotificationManager::class.java)?.cancel(UPDATE_NOTIF_ID)
         } catch (e: Exception) {}
+    }
+
+    /* The OS rejected this exact build — a signing mismatch, an incompatible
+       or malformed package. Re-committing the same bytes will be refused
+       again just as flatly, so drop them and stop offering it. A later
+       versionCode is a different question and downloads normally. */
+    fun rejectPendingUpdate(context: Context) {
+        val cached = prefs(context).getLong(CACHED_VERSION_KEY, -1L)
+        try { apkFile(context).delete() } catch (e: Exception) {}
+        prefs(context).edit()
+            .remove(CACHED_VERSION_KEY)
+            .remove(PENDING_NAME_KEY)
+            .putLong(REJECTED_VERSION_KEY, cached)
+            .apply()
+        cancelUpdateNotification(context)
     }
 
     /* Install the APK autoCheck already fetched — the Install tap's endpoint.
@@ -258,10 +284,17 @@ object Updater {
            complete APK belongs */
         val part = File(context.cacheDir, "$APK_NAME.part")
         return try {
-            prefs(context).edit().remove(CACHED_VERSION_KEY).apply()
             client.newCall(Request.Builder().url(APK_URL).build()).execute().use { r ->
+                /* Not before we know the download can happen. The release's
+                   version.json and its APK are published as separate uploads,
+                   so there is a window on every release where the new version
+                   is advertised and the APK is still going up — and clearing
+                   the marker first threw away a perfectly good APK the user
+                   was one tap from installing, orphaning it in the cache
+                   where nothing would reclaim it. */
                 if (!r.isSuccessful) return null
                 val stream = r.body?.byteStream() ?: return null
+                prefs(context).edit().remove(CACHED_VERSION_KEY).apply()
                 stream.use { input -> part.outputStream().use { out -> input.copyTo(out) } }
             }
             if (part.length() <= 0L) return null

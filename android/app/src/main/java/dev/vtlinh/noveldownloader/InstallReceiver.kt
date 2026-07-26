@@ -22,14 +22,27 @@ class InstallReceiver : BroadcastReceiver() {
                 try { context.startActivity(confirm) } catch (e: Exception) {}
             }
             PackageInstaller.STATUS_SUCCESS -> Updater.cancelUpdateNotification(context)
+            /* Every commit shares one PendingIntent, so a session abandoned to
+               clear a stalled install reports ABORTED down the same channel as
+               a real failure — and saying "the install was cancelled" while
+               the replacement session is committing normally is just noise.
+               A genuine user cancellation comes back around as a retry. */
+            PackageInstaller.STATUS_FAILURE_ABORTED -> return
             /* Everything else is a failure, and every one of them used to
                land here and stop. The tap that started the install is long
                gone by now, so nothing was left saying the update didn't
                happen — the app just carried on as the old version. */
-            else -> Updater.notifyInstallFailed(
-                context,
-                describe(status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)),
-            )
+            else -> {
+                /* Refusals of the package itself will refuse it identically
+                   every time, so keeping the bytes and re-offering them is an
+                   endless loop the user can't break. Storage and the like are
+                   about this moment, not this build — those keep it. */
+                if (status in TERMINAL) Updater.rejectPendingUpdate(context)
+                Updater.notifyInstallFailed(
+                    context,
+                    describe(status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)),
+                )
+            }
         }
     }
 
@@ -47,5 +60,15 @@ class InstallReceiver : BroadcastReceiver() {
         return if (msg.isNullOrBlank()) what else "$what ($msg)"
     }
 
-    private companion object { const val NO_STATUS = Int.MIN_VALUE }
+    private companion object {
+        const val NO_STATUS = Int.MIN_VALUE
+
+        /* verdicts on the package, not on the moment — retrying these with
+           the same bytes gets the same answer */
+        val TERMINAL = setOf(
+            PackageInstaller.STATUS_FAILURE_INVALID,
+            PackageInstaller.STATUS_FAILURE_CONFLICT,
+            PackageInstaller.STATUS_FAILURE_INCOMPATIBLE,
+        )
+    }
 }

@@ -90,5 +90,11 @@ jobs:
           # app-debug.apk is a legacy alias: updaters installed before the
           # switch to release builds still download that fixed filename
           cp android/app/build/outputs/apk/release/app-release.apk app-debug.apk
+          # version.json is what tells the app a new build exists, so it must
+          # land LAST. Uploaded together, gh sends the assets concurrently and
+          # the 60-byte manifest is live long before the APK finishes going
+          # up — a whole window per release where every app that checks is
+          # told about a version it then fails to download.
           gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber \
-            android/app/build/outputs/apk/release/app-release.apk app-debug.apk version.json
+            android/app/build/outputs/apk/release/app-release.apk app-debug.apk
+          gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber version.json

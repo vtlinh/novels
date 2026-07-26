@@ -22,7 +22,20 @@ class UpdateReceiver : BroadcastReceiver() {
         val done = goAsync()
         val app = context.applicationContext
         Thread {
-            try { Updater.installPending(app) } finally { done.finish() }
+            try {
+                /* The notification is already gone by now, so a commit that
+                   never happens leaves the tap looking like it worked and
+                   nothing to try again from. The APK lives in cacheDir, which
+                   the system evicts and "Clear cache" wipes while the marker
+                   in prefs survives — so "nothing to install" is a real
+                   outcome, not a theoretical one. Say so. */
+                if (!Updater.installPending(app)) {
+                    Updater.notifyInstallFailed(
+                        app,
+                        "The downloaded update was no longer on the device. It will be fetched again.",
+                    )
+                }
+            } finally { done.finish() }
         }.start()
     }
 }
