@@ -404,7 +404,16 @@ class Translator(
         isStopped: () -> Boolean,
     ): String? = withContext(Dispatchers.IO) {
         this@Translator.store = store
-        store.getTitle(folder, slug)?.let { return@withContext it }
+        /* A cached title that is just the sanitised Vietnamese name is not a
+           translation — it is the folder name a since-fixed build wrote into
+           this column while claiming folder ownership. Trusting it returned
+           here immediately, so the novel could never be translated again, on
+           any later run, silently. Checking the value rather than deleting
+           the row repairs those libraries without touching a genuine
+           "English (Vietnamese)" title, which never equals this. */
+        store.getTitle(folder, slug)
+            ?.takeIf { it != Extractor.sanitize(vietTitle) }
+            ?.let { return@withContext it }
 
         val now = System.currentTimeMillis()
         store.prunePending(now)

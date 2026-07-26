@@ -822,8 +822,14 @@ class DownloadEngine(
            carry a "latest chapters" widget whose links come first in the HTML
            and would corrupt the site order. Whole-document fallback when the
            scoped container is missing or yields nothing new. */
-        fun addLinks(d: org.jsoup.nodes.Document) {
-            /* Returns how many chapter links the container HOLDS, not how many
+        /* Returns how many chapter links this page held, so the caller can
+           tell a real listing page from one that answered 200 with nothing on
+           it — a soft 404, a WAF interstitial, a layout change. Those never
+           entered `missed`, so the listing looked complete while a page of
+           chapters was simply absent, and the dedupe then deleted their files
+           as chapters the site no longer lists. */
+        fun addLinks(d: org.jsoup.nodes.Document): Int {
+            /* Counts how many chapter links the container HOLDS, not how many
                were new. A listing page whose chapters were all seen already is
                still a real chapter list — counting only new ones made it look
                empty and sent us to the whole-document fallback, which is
@@ -849,7 +855,8 @@ class DownloadEngine(
                 return found
             }
             val scope = d.selectFirst(site.listScope)
-            if (scope == null || collect(scope, inList = true) == 0) collect(d, inList = false)
+            val inScope = if (scope == null) 0 else collect(scope, inList = true)
+            return if (inScope == 0) collect(d, inList = false) else inScope
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
@@ -900,8 +907,9 @@ class DownloadEngine(
                        — enough for the rename pass to renumber the novel
                        around them and the dedupe to delete them as chapters
                        the site no longer lists. Record it; the check below
-                       forgives it once we know nothing followed. */
+                       forgives it only once we know nothing real followed. */
                     missed.add(p)
+                    if (codes[i] == 404 || codes[i] == 410) gone.add(p)
                     continue
                 }
                 pageHtml[p] = html
@@ -909,6 +917,40 @@ class DownloadEngine(
             }
             fetched = batch.last()
         }
+        /* Forgiving a page that says "not there" is how an over-read page
+           count stops blocking a novel — but only just barely, because
+           everything forgiven is a page whose chapters we then treat as never
+           having existed, and the dedupe deletes their files. Three
+           conditions, all necessary:
+             - nothing real after it, so it can only be past the end;
+             - a contiguous run back to the last page that did load, so a 404
+               island inside the book is never swallowed;
+             - and few enough to be a miscount. A tail of eleven 404s on a
+               ninety-page novel is not the pagination being off by one, it is
+               550 chapters going quiet — and forgiving that wholesale deleted
+               every one of their files. That also covers the case where NOTHING
+               past page 1 loads: the whole tail is "gone", far too much to
+               excuse, so the listing is short rather than falsely complete. */
+        fun forgiveOverRead() {
+            val lastReal = pageHtml.keys.maxOrNull() ?: 1
+            val forgivable = missed.filter { p ->
+                p in gone && p > lastReal && ((lastReal + 1) until p).all { it in gone }
+            }
+            if (forgivable.isEmpty()) return
+            if (forgivable.size <= maxOf(1, last / 20)) {
+                missed.removeAll(forgivable.toSet())
+            } else {
+                log("! ${forgivable.size} listing pages at the end all report missing — treating that as a gap, not a miscount")
+            }
+        }
+        /* Before retrying, not only after: a page count that over-reads by one
+           is routine, and re-fetching a page that has never existed cost three
+           passes and 21 seconds of "retrying…" on every single download of
+           that novel. Worse, if the phantom page answered 404 first and got
+           throttled on the retries, it never became forgivable at all and the
+           whole run was downgraded to a partial one. */
+        forgiveOverRead()
+
         /* A page we couldn't read doesn't just hide its own chapters: every
            chapter after it moves up a position, and position is the filename.
            Retry the holes before drawing any conclusion from the listing. */
@@ -954,13 +996,11 @@ class DownloadEngine(
             }
         }
         if (stopRequested) { status("Stopped."); return@withContext }
-        /* A page that says "not there" and has nothing after it is the page
-           count over-reading the pagination — no chapters were ever there, so
-           it isn't a hole. One with real pages beyond it is a hole whatever
-           status it returned. */
-        val lastReal = pageHtml.keys.maxOrNull() ?: 1
-        missed.removeAll { it in gone && it > lastReal }
-        val listingComplete = missed.isEmpty()
+        forgiveOverRead()
+        var listingComplete = missed.isEmpty()
+        /* the highest page that actually came back, so "no chapters on it" can
+           be told apart from "there is simply nothing after here" */
+        val lastLoaded = pageHtml.keys.maxOrNull() ?: 1
         /* A hole doesn't invalidate the whole listing — only what comes AFTER
            it. Chapters discovered before the first missing page are still at
            the positions they belong to, so take that prefix and leave the rest
@@ -969,8 +1009,24 @@ class DownloadEngine(
            the full set would have written every later chapter over its
            neighbour. Everything destructive is already gated on
            listingComplete, so a prefix run only ever adds. */
-        val firstGap = missed.minOrNull() ?: (last + 1)
-        for (p in 2 until firstGap) pageHtml[p]?.let { addLinks(Jsoup.parse(it, base)) }
+        var firstGap = missed.minOrNull() ?: (last + 1)
+        /* A page can fail without failing: HTTP 200 carrying a "not found"
+           body, a WAF interstitial, or a layout the selectors no longer match.
+           Those never reached `missed`, so the listing read as COMPLETE while
+           a page of chapters was simply absent — and the dedupe then deleted
+           those chapters' files as ones the site no longer lists. A real
+           listing page holds chapter links; one that holds none, with real
+           pages after it, is a hole whatever status it returned. */
+        for (p in 2 until firstGap) {
+            val html = pageHtml[p] ?: continue
+            if (addLinks(Jsoup.parse(html, base)) == 0 && p < lastLoaded) {
+                log("! listing page $p came back with no chapters on it — treating it as a gap")
+                missed.add(p)
+                listingComplete = false
+                firstGap = p
+                break
+            }
+        }
         if (!listingComplete) {
             log("! ${missed.size} listing page(s) would not load — the chapter list is incomplete")
             log(
@@ -1068,8 +1124,15 @@ class DownloadEngine(
            however it came to be — an old library predates the ownership
            table entirely, and evicting THAT novel from the folder it has been
            using would abandon every file in it and re-download the lot. */
-        val ours = owner == slug ||
-            (owner == null && try { store.chapterCount(folderKey, slug) > 0 } catch (e: Exception) { false })
+        /* Chapters recorded under this slug are stronger evidence than any
+           ownership row — they are files we actually put there. Requiring the
+           row to be ABSENT before believing them meant a mis-seeded row could
+           evict the novel that has been living in the folder all along, into
+           a new empty one it would then never fill: the index still resolves
+           into the old folder, so every chapter reads as already present and
+           nothing downloads. */
+        val mine = try { store.chapterCount(folderKey, slug) > 0 } catch (e: Exception) { false }
+        val ours = owner == slug || mine
         if (!ours) {
             /* Unclaimed but already full is somebody else's work — the first
                of two colliding novels to run must not be able to claim, and

@@ -189,6 +189,7 @@ class DownloadService : Service() {
             var curTranslate = translate
             var curForce = forceTranslate
             var curKey = apiKey
+            try {
             while (true) {
                 currentUrl = curUrl
                 activeSlugFlow.value = NovelListActivity.slugKeyFromUrl(curUrl)
@@ -227,10 +228,20 @@ class DownloadService : Service() {
                 curKey = p.getString("apiKey", "") ?: ""
                 appendLog("— next novel: $curUrl —")
             }
-            currentUrl = null
-            activeSlugFlow.value = null
-            runningFlow.value = false
-            engine = null
+            } finally {
+                /* Must run even when the loop leaves by cancellation. Skipping
+                   it left activeSlugFlow pinned to the interrupted novel, and
+                   that flag is what the whole app reads as "this one is
+                   already being downloaded" — so the Library showed it stuck
+                   on "Downloading…", the Browser refused to start it, and the
+                   status sweep skipped it, until some OTHER download happened
+                   to reassign the flag. The novel you were downloading became
+                   the one novel you could not download. */
+                currentUrl = null
+                activeSlugFlow.value = null
+                runningFlow.value = false
+                engine = null
+            }
             stopForeground(STOP_FOREGROUND_REMOVE)
             /* Pass the start id. A plain stopSelf() tears the service down
                even if a new download arrived while we were finishing — that
