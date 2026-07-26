@@ -205,15 +205,22 @@ class DownloadEngine(
            and would corrupt the site order. Whole-document fallback when the
            scoped container is missing or yields nothing new. */
         fun addLinks(d: org.jsoup.nodes.Document) {
+            /* returns how many chapter links the container HOLDS, not how many
+               were new. A listing page whose chapters were all seen already is
+               still a real chapter list — counting only new ones made it look
+               empty and sent us to the whole-document fallback, which is
+               exactly where the "latest chapters" widget lives. */
             fun collect(root: org.jsoup.nodes.Element): Int {
-                var added = 0
+                var found = 0
                 for (a in root.select("a[href]")) {
                     val href = a.absUrl("href").substringBefore('#')
-                    if (href.isEmpty() || seen.containsKey(href)) continue
+                    if (href.isEmpty()) continue
                     val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                    if (site.isChapterPath(path, slug)) { seen[href] = Chapter(href, a.text().trim()); added++ }
+                    if (!site.isChapterPath(path, slug)) continue
+                    found++
+                    if (!seen.containsKey(href)) seen[href] = Chapter(href, a.text().trim())
                 }
-                return added
+                return found
             }
             val scope = d.selectFirst(site.listScope)
             if (scope == null || collect(scope) == 0) collect(d)
@@ -302,15 +309,22 @@ class DownloadEngine(
            and would corrupt the site order. Whole-document fallback when the
            scoped container is missing or yields nothing new. */
         fun addLinks(d: org.jsoup.nodes.Document) {
+            /* returns how many chapter links the container HOLDS, not how many
+               were new. A listing page whose chapters were all seen already is
+               still a real chapter list — counting only new ones made it look
+               empty and sent us to the whole-document fallback, which is
+               exactly where the "latest chapters" widget lives. */
             fun collect(root: org.jsoup.nodes.Element): Int {
-                var added = 0
+                var found = 0
                 for (a in root.select("a[href]")) {
                     val href = a.absUrl("href").substringBefore('#')
-                    if (href.isEmpty() || seen.containsKey(href)) continue
+                    if (href.isEmpty()) continue
                     val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
-                    if (site.isChapterPath(path, slug)) { seen[href] = Chapter(href, a.text().trim()); added++ }
+                    if (!site.isChapterPath(path, slug)) continue
+                    found++
+                    if (!seen.containsKey(href)) seen[href] = Chapter(href, a.text().trim())
                 }
-                return added
+                return found
             }
             val scope = d.selectFirst(site.listScope)
             if (scope == null || collect(scope) == 0) collect(d)

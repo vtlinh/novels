@@ -47,7 +47,7 @@ class CachedChapterList(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 12) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 13) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -126,6 +126,16 @@ class DownloadStore(context: Context) :
            purge so downloads / Check status re-index with correct scoping */
         if (oldVersion == 10) db.execSQL("DELETE FROM chapter_order")
         if (oldVersion < 12) db.execSQL(CHLIST_TABLE)
+        /* v12 orders were polluted the same way v10's were: the scoped
+           chapter list was consulted only for links we hadn't seen, so a
+           listing page of already-seen chapters counted as empty and fell
+           through to the whole document — where the "latest chapters" widget
+           lives. Purge the orders and the cached listings built from them so
+           both re-index cleanly. */
+        if (oldVersion < 13) {
+            db.execSQL("DELETE FROM chapter_order")
+            db.execSQL("DELETE FROM chlist")
+        }
     }
 
     /* ---- site chapter order (reader sorts by this, not by filename) ---- */

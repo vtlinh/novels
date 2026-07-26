@@ -136,41 +136,26 @@ class ChapterListActivity : AppCompatActivity() {
                 }
             }
             translated.keys.retainAll(source.keys)
-            /* The site's listing order wins wherever we have it. A chapter it
-               doesn't cover — one the site added after the order was recorded,
-               or left behind by an older build — still has to land in its
-               numeric place rather than at the very end, so slot it right
-               after the last listed chapter that precedes it by number. With
-               no recorded order at all this falls back to a numeric sort. */
+            /* The chapter number decides the order, not the site's recorded
+               listing sequence. Every chapter on disk has a number — one
+               whose number can't be read never gets a filename, so it is
+               never downloaded — which makes this a total order. The site
+               sequence can't be trusted for it: a "latest chapters" widget
+               leaking into the listing pins those chapters, newest first, at
+               whatever position they were first seen. The -N suffix on a
+               repeated number keeps those in the sequence they were found,
+               and the site order only breaks ties beyond that. */
             val numberOf = { n: String ->
                 CHAPTER_RE.find(n)?.groupValues?.get(1)?.toIntOrNull()
             }
-            val ordinalByNumber = java.util.TreeMap<Int, Int>()
-            for ((fn, ord) in siteOrder) {
-                val n = numberOf(fn) ?: continue
-                val prev = ordinalByNumber[n]
-                if (prev == null || ord < prev) ordinalByNumber[n] = ord
-            }
-            /* (slot, tie-break) per chapter, computed once rather than on
-               every comparison. A listed chapter ties at 0 so an unlisted one
-               sharing its slot always follows it, and both stay ahead of the
-               next listed chapter. */
-            val rank = HashMap<String, Pair<Int, Int>>(source.size)
-            for (name in source.keys) {
-                val listed = siteOrder[name]
-                rank[name] = if (listed != null) {
-                    Pair(listed, 0)
-                } else {
-                    val n = numberOf(name)
-                    if (n == null) Pair(Int.MAX_VALUE, Int.MAX_VALUE)
-                    else Pair(ordinalByNumber.floorEntry(n)?.value ?: -1, n)
-                }
+            val repeatOf = { n: String ->
+                CHAPTER_RE.find(n)?.groupValues?.getOrNull(2)?.toIntOrNull() ?: 0
             }
             val ordered = source.keys.sortedWith(
                 compareBy(
-                    { rank[it]?.first ?: Int.MAX_VALUE },
-                    { rank[it]?.second ?: Int.MAX_VALUE },
                     { numberOf(it) ?: Int.MAX_VALUE },
+                    { repeatOf(it) },
+                    { siteOrder[it] ?: Int.MAX_VALUE },
                     { it },
                 ),
             )
