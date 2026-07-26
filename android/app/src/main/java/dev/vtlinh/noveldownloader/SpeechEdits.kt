@@ -178,6 +178,13 @@ object SpeechEdits {
             var pat = e.pattern
             if (e.wholeWord) {
                 pat = if (regex) "\\b(?:$pat)\\b" else "\\b\\Q$pat\\E\\b"
+                /* Wrapping forces this out as a regex, and a regex rule is
+                   read back as case-SENSITIVE — so exporting and re-importing
+                   (the documented backup route) quietly stopped a
+                   case-insensitive whole-word rule from matching "MC", the
+                   form that actually appears in the text. Carry the
+                   insensitivity in the pattern itself, where it survives. */
+                if (e.type == 0) pat = "(?i)$pat"
                 regex = true
             }
             val prefix = when {
@@ -231,6 +238,12 @@ object SpeechEdits {
             val rest = line.substring(i.coerceAtMost(line.length)).trim()
             val flags = rest.toIntOrNull() ?: 0
             val type = if (regex) 2 else if (caseSensitive) 1 else 0
+            /* An empty pattern compiles to a regex that matches at EVERY
+               position, so the replacement gets spliced between every pair of
+               characters in every sentence read aloud — and the rule shows as
+               a blank row, so it isn't obvious which one to delete. The editor
+               already refuses one; the import path didn't. */
+            if (pat.isEmpty()) continue
             out.add(
                 SpeechEdit(
                     newId(), "", type, false,

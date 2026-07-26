@@ -423,6 +423,19 @@ class DownloadStore(context: Context) :
         )
     }
 
+    /* Which novel already answers to this folder name, if any. Folder names
+       come from sanitised titles, and sanitising folds away tone marks — on a
+       Vietnamese site two genuinely different novels routinely reduce to the
+       same name. Chapters are named by position, so the second novel writes
+       Chapter 1..N straight over the first one's. */
+    fun slugOwningName(folder: String, name: String): String? {
+        readableDatabase.query(
+            "titles", arrayOf("slug"), "folder=? AND english=?", arrayOf(folder, name),
+            null, null, null,
+        ).use { c -> if (c.moveToNext()) return c.getString(0) }
+        return null
+    }
+
     /* ---- pending Message Batches (orphaned-batch recovery) ---- */
 
     /* `files` is where each chapter lived when the batch was submitted, and a

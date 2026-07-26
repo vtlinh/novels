@@ -953,7 +953,7 @@ class DownloadEngine(
            folder. If a plain Vietnamese-named folder already exists from an
            earlier non-translated run, rename it in place instead of starting
            a fresh one. */
-        val vietName = Extractor.sanitize(title)
+        val vietName = Extractor.folderName(title, slug)
         var folderName = vietName
         if (translate && apiKey.isNotBlank() && !stopRequested) {
             status("Translating title…")
@@ -989,6 +989,17 @@ class DownloadEngine(
             }
         }
 
+        /* Sanitising folds tone marks away, so "Thần Y" and "Thân Y" — two
+           different novels — both land on "Than Y". Reusing a folder by name
+           alone let the second one write Chapter 1..N straight over the
+           first's, and the reader then showed the wrong book's text. Names are
+           owned by the slug that claimed them; a different owner means make a
+           new folder rather than move in. */
+        val owner = try { store.slugOwningName(folderKey, folderName) } catch (e: Exception) { null }
+        if (owner != null && owner != slug) {
+            folderName = "$folderName ($slug)"
+            log("Another novel already uses that folder name — saving to \"$folderName\"")
+        }
         val dir = root.findFile(folderName)?.takeIf { it.isDirectory }
             ?: root.createDirectory(folderName)
         if (dir == null) {
@@ -996,6 +1007,9 @@ class DownloadEngine(
             status("Error: could not create the novel folder")
             return@withContext
         }
+        /* Claim the name, so the next novel that sanitises to the same thing
+           is told to go elsewhere instead of writing over this one. */
+        try { store.setTitle(folderKey, slug, folderName) } catch (e: Exception) {}
         val assigned = siteOrdered.mapNotNull { it.filename }.toSet()
         if (listingComplete) renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
         /* Files we can neither place nor prove are copies. Rather than leave
