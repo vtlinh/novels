@@ -214,11 +214,28 @@ class DownloadEngine(
            status check runs this per novel, and most of them need no moves
            at all — those should cost a DB read, not a directory walk. */
         val pending = LinkedHashMap<String, String>()
+        /* Files that already answer for a chapter. The legacy fallback below
+           guesses at a name from the site's own numbering, and the two schemes
+           share one namespace — so where the site's number and the listing
+           position differ, that guess can land on a file another chapter has
+           already proved is its own, and rename it away from that chapter. A
+           recorded page beats a guess. */
+        val spokenFor = byUrl.values.toHashSet()
+        val claimedUrl = HashMap<String, String>()   // legacy-matched name -> its page
         for (ch in inSiteOrder.asReversed()) {           // last chapter first
             val want = ch.filename ?: continue
-            val have = byUrl[ch.url] ?: legacy[ch.url]?.takeIf { it in onRecord } ?: continue
-            if (have != want) pending[have] = want
-            else if (ch.url !in byUrl) store.linkUrl(folderKey, slug, have, ch.url)
+            val have = byUrl[ch.url]
+                ?: legacy[ch.url]?.takeIf { it in onRecord && it !in spokenFor }
+                ?: continue
+            if (have != want) {
+                pending[have] = want
+                /* Recognised by guesswork, so record the page once the move
+                   lands: otherwise the row stays url-less and every later run
+                   has to guess again from the same ambiguous namespace. */
+                if (ch.url !in byUrl) claimedUrl[have] = ch.url
+            } else if (ch.url !in byUrl) {
+                store.linkUrl(folderKey, slug, have, ch.url)
+            }
         }
         if (pending.isEmpty()) return
 
@@ -328,6 +345,11 @@ class DownloadEngine(
             pending.remove(e.key)
             pending[park] = e.value
             if (parked > inSiteOrder.size) break     // safety valve
+        }
+        /* A file matched by guesswork has now proved where it went, so give it
+           its page and it never has to be guessed at again. */
+        for ((orig, finalName) in applied) {
+            claimedUrl[orig]?.let { store.linkUrl(folderKey, slug, finalName, it) }
         }
         remapSavedSpot(slug, applied)
         if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
@@ -835,11 +857,11 @@ class DownloadEngine(
             for ((i, html) in htmls.withIndex()) {
                 val p = batch[i]
                 if (html == null) {
-                    /* 4xx means the page isn't there — the page count over-read
-                       the pagination. It holds no chapters, so nothing shifts
-                       and nothing is missing. Only a page that exists and
-                       wouldn't load leaves a hole. */
-                    if (codes[i] !in 400..499) missed.add(p)
+                    /* Gone means gone: the page count over-read the pagination,
+                       so there are no chapters there and nothing shifts. Every
+                       other refusal — blocked, throttled, unauthorised — is a
+                       page that exists and wouldn't load, which is a hole. */
+                    if (codes[i] != 404 && codes[i] != 410) missed.add(p)
                     continue
                 }
                 pageHtml[p] = html
