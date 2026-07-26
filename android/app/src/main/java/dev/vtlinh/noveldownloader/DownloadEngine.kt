@@ -927,8 +927,14 @@ class DownloadEngine(
                        reported the novel already done. Chapters are written
                        gzipped now, so this was every chapter. */
                     val base = n.removeSuffix(".gz")
-                    existing.add(base)
-                    if (f.length() > 0) rows.add(base to f.uri.toString())
+                    /* An empty .gz is a chapter that never finished writing.
+                       Counting it as present kept it out of every later fetch,
+                       so it stayed broken for good — the loose branch has
+                       always guarded on length; this one didn't. */
+                    if (f.length() > 0) {
+                        existing.add(base)
+                        rows.add(base to f.uri.toString())
+                    }
                     continue
                 }
                 if (f.length() > 0) { existing.add(n); rows.add(n to f.uri.toString()) }
