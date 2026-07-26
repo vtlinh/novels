@@ -867,8 +867,14 @@ class DownloadEngine(
                chapters" widget — a handful, in the wrong order. That is not a
                short listing, it is a different document, and treating it as
                the truth deleted the rest of the novel. */
-            fellBack = true
-            return collect(d, inList = false)
+            /* ...and only if it actually produced links. A page that yields
+               nothing either way is a blank page, which the gap logic already
+               accounts for — poisoning the whole run for it would leave a
+               novel with one over-read tail page permanently un-renamed and
+               un-deduped. What is dangerous is ACTING on widget links. */
+            val loose = collect(d, inList = false)
+            if (loose > 0) fellBack = true
+            return loose
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
@@ -1097,9 +1103,12 @@ class DownloadEngine(
             val inScope = if (scope == null) 0 else collect(scope, inList = true)
             if (inScope > 0) return inScope
             /* see checkStatus: a whole-document fallback is the "latest
-               chapters" widget, not the chapter list */
-            fellBack = true
-            return collect(d, inList = false)
+               chapters" widget, not the chapter list — but a page that yields
+               nothing either way is just a blank page, and the gap logic
+               already handles those */
+            val loose = collect(d, inList = false)
+            if (loose > 0) fellBack = true
+            return loose
         }
         addLinks(doc)
         var last = site.maxPage(doc, slug)
