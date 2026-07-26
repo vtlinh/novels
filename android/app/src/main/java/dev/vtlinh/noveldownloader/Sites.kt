@@ -70,10 +70,18 @@ object Sites {
                     t.equals("Full", true) || t.contains("Hoàn", true)
                 }
             },
-            /* in the chapter list, anything under the novel is a chapter
-               except the listing's own page links */
+            /* In the chapter list, anything under the novel is a chapter
+               except the listing's own page links. "Under" has to mean
+               something actually follows: the pagination block sits INSIDE
+               the chapter-list container, and its link back to page 1 is the
+               novel's own canonical URL — which is not /trang-N and so read
+               as a chapter, one bogus entry mid-listing that pushed every
+               chapter after it a position out of place. */
             listedChapterPath = { path, slug ->
-                path.contains("/$slug/") && !Regex("/trang-\\d+").containsMatchIn(path)
+                val marker = "/$slug/"
+                val i = path.indexOf(marker)
+                i >= 0 && path.length > i + marker.length &&
+                    !Regex("/trang-\\d+").containsMatchIn(path)
             },
         ),
         Site(
