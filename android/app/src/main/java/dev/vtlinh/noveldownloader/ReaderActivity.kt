@@ -262,6 +262,20 @@ class ReaderActivity : AppCompatActivity() {
                indices we hold, so keep both and leave the gate shut until an
                open rebuilds them together. */
             val d = shift ?: return@launch
+            /* Re-checked HERE, not only at the top. headingsIn suspends on a
+               SAF read for every candidate shift, and openAt / appendChapters
+               / prependChapters all mutate the buffer from their own
+               coroutines meanwhile — so a guard before the probes does not
+               cover the case it was written for. If the buffer is not still
+               the one we measured, element for element, the shift we worked
+               out does not describe it: leave both alone and let the next
+               resume do it properly. */
+            if (loading ||
+                loadedChapters.size != loaded.size ||
+                loadedChapters.indices.any { loadedChapters[it] !== loaded[it] }
+            ) {
+                return@launch
+            }
             chapters = fresh
             drawerAdapter?.clear()
             drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })

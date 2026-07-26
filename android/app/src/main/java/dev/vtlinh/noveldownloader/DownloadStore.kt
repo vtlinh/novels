@@ -604,6 +604,23 @@ class DownloadStore(context: Context) :
         )
     }
 
+    /* Claim a name only if nobody already holds it.
+
+       The folder scan adopts directories it finds on disk and invents a slug
+       from the directory name, so it must not be able to take a name from the
+       novel that really owns it — that pushed the real one into a fresh folder
+       and re-downloaded it. But it must still record that the folder is SPOKEN
+       FOR: without any claim, `Ownership.ours` sees no owner, no recorded
+       directory and no chapters in the index (the scan writes none) and hands
+       the folder to the next novel whose title sanitises to the same name,
+       which then adopts the other book's chapters as its own. */
+    fun claimFolderNameIfFree(folder: String, name: String, slug: String) {
+        writableDatabase.execSQL(
+            "INSERT OR IGNORE INTO folder_owner(folder,name,slug) VALUES(?,?,?)",
+            arrayOf(folder, name, slug),
+        )
+    }
+
     /* The novel is gone and its folder with it — let go of the name, or it
        stays reserved for a slug that no longer exists and the next novel that
        sanitises to it is pushed into a "Title (slug)" folder for nothing. */

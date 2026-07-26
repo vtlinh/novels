@@ -743,7 +743,18 @@ class DownloadEngine(
         try {
             val tdir = dir.findFile("translated")?.takeIf { it.isDirectory } ?: return
             for (n in listOf(name, "$name.gz")) {
-                tdir.findFile(n)?.let { try { it.delete() } catch (e: Exception) {} }
+                val f = try { tdir.findFile(n) } catch (e: Exception) { null } ?: continue
+                val ok = try { f.delete() } catch (e: Exception) { false }
+                /* A refusal is REPORTED, not thrown. This runs after the source
+                   has already been overwritten, so a delete that quietly failed
+                   leaves the PREVIOUS chapter's English under a name that now
+                   holds different text — served as this chapter's translation
+                   for good, and never re-bought because the name exists. It
+                   cannot be fixed from here; say so, since nothing downstream
+                   can detect it. */
+                if (!ok && (try { f.exists() } catch (e: Exception) { true })) {
+                    log("! could not remove the old translation of $n — it may show the previous chapter's text")
+                }
             }
         } catch (e: Exception) {}
     }
@@ -915,8 +926,12 @@ class DownloadEngine(
         accountForRange()
         missed.removeAll(Listing.forgivableTailPages(missed, gone, pageHtml.keys, last).toSet())
         /* Collected in page order — discovery order is the site's order, and
-           the site's order is what names every file. */
-        for (p in 2..last) {
+           the site's order is what names every file. Bounded by the first gap,
+           the same as the download: the refusal below already stops a holed
+           listing, but the two must not describe the range differently — that
+           divergence is what put a private copy of this logic in each of them
+           and let them drift apart in the first place. */
+        for (p in 2 until Listing.firstGap(missed, last)) {
             val html = pageHtml[p] ?: continue
             if (addLinks(Jsoup.parse(html, base)) > 0) continue
             /* No chapters on it: not read, whatever it answered — and NOT
