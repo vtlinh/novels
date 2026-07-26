@@ -239,30 +239,20 @@ class DownloadEngine(
         /* Work out what has to move BEFORE listing anything: a library-wide
            status check runs this per novel, and most of them need no moves
            at all — those should cost a DB read, not a directory walk. */
-        val pending = LinkedHashMap<String, String>()
-        /* Files that already answer for a chapter. The legacy fallback below
-           guesses at a name from the site's own numbering, and the two schemes
-           share one namespace — so where the site's number and the listing
-           position differ, that guess can land on a file another chapter has
-           already proved is its own, and rename it away from that chapter. A
-           recorded page beats a guess. */
-        val spokenFor = byUrl.values.toHashSet()
-        val claimedUrl = HashMap<String, String>()   // legacy-matched name -> its page
-        for (ch in inSiteOrder.asReversed()) {           // last chapter first
-            val want = ch.filename ?: continue
-            val have = byUrl[ch.url]
-                ?: legacy[ch.url]?.takeIf { it in onRecord && it !in spokenFor }
-                ?: continue
-            if (have != want) {
-                pending[have] = want
-                /* Recognised by guesswork, so record the page once the move
-                   lands: otherwise the row stays url-less and every later run
-                   has to guess again from the same ambiguous namespace. */
-                if (ch.url !in byUrl) claimedUrl[have] = ch.url
-            } else if (ch.url !in byUrl) {
-                store.linkUrl(folderKey, slug, have, ch.url)
-            }
-        }
+        /* The decision itself lives in Renumber.plan, away from the I/O, so it
+           can be tested directly — this is the logic that decides which file
+           becomes which chapter, and reasoning about it in place is what kept
+           getting it wrong. */
+        val plan = Renumber.plan(
+            inSiteOrder.map { Renumber.Slot(it.url, it.filename) },
+            byUrl,
+            onRecord.keys,
+            legacy,
+        )
+        val pending = plan.pending
+        val claimedUrl = plan.claimedUrl
+        /* files already in place whose page simply wasn't recorded yet */
+        for ((name, url) in plan.linkNow) store.linkUrl(folderKey, slug, name, url)
         if (pending.isEmpty()) return
 
         val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return }
@@ -939,15 +929,16 @@ class DownloadEngine(
                past page 1 loads: the whole tail is "gone", far too much to
                excuse, so the listing is short rather than falsely complete. */
         fun forgiveOverRead() {
-            val lastReal = pageHtml.keys.maxOrNull() ?: 1
-            val forgivable = missed.filter { p ->
-                p in gone && p > lastReal && ((lastReal + 1) until p).all { it in gone }
-            }
-            if (forgivable.isEmpty()) return
-            if (forgivable.size <= maxOf(1, last / 20)) {
+            /* the rule itself is in Listing.forgivableTailPages, so it can be
+               tested without a network — see ListingTest */
+            val forgivable = Listing.forgivableTailPages(missed, gone, pageHtml.keys, last)
+            if (forgivable.isNotEmpty()) {
                 missed.removeAll(forgivable.toSet())
-            } else {
-                log("! ${forgivable.size} listing pages at the end all report missing — treating that as a gap, not a miscount")
+                return
+            }
+            val looked = missed.count { it in gone }
+            if (looked > 0) {
+                log("! $looked listing page(s) at the end all report missing — treating that as a gap, not a miscount")
             }
         }
         /* Forgiving a page removes it from the retry list, so forgiving before
@@ -1045,7 +1036,7 @@ class DownloadEngine(
            the full set would have written every later chapter over its
            neighbour. Everything destructive is already gated on
            listingComplete, so a prefix run only ever adds. */
-        var firstGap = missed.minOrNull() ?: (last + 1)
+        var firstGap = Listing.firstGap(missed, last)
         /* A page can fail without failing: HTTP 200 carrying a "not found"
            body, a WAF interstitial, or a layout the selectors no longer match.
            Those never reached `missed`, so the listing read as COMPLETE while

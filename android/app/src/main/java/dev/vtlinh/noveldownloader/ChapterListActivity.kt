@@ -19,7 +19,9 @@ class ChapterListActivity : AppCompatActivity() {
     companion object {
         /* accepts "Chapter 70.txt", "Chapter 70-71.txt" AND legacy names
            with a title suffix like "Chapter 70 - Hoan chinh van.txt" */
-        val CHAPTER_RE = Regex("Chapter (\\d+)(?:-(\\d+))?.*\\.txt")
+        /* lives in ChapterName so it can be unit-tested without loading an
+           Activity; kept here because every call site already reads it here */
+        val CHAPTER_RE = ChapterName.RE
 
         /* how many places in a cached listing to spot-check before trusting it */
         private const val CACHE_PROBES = 5
