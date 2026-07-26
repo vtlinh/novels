@@ -724,6 +724,14 @@ class DownloadEngine(
         } catch (e: Exception) {}
     }
 
+    /* The listing had a hole in it, so the check refused to act. Distinct
+       from "this URL isn't this novel" — which the caller answers by asking
+       the site's other host — because the right answer here is to stop
+       asking. Another host's listing names its chapters with its own URLs, so
+       every recorded page reads as unlisted against it, and the very deletion
+       this refusal exists to prevent is what happens instead. */
+    class PartialListing : Exception()
+
     class SiteStatus(
         val total: Int,
         val completed: Boolean,
@@ -867,7 +875,7 @@ class DownloadEngine(
            the gap hid. Report nothing rather than something wrong. */
         if (missed.isNotEmpty()) {
             log("! $slug: listing page ${missed.first()} would not load — skipping this novel rather than acting on a partial list")
-            return@withContext null
+            throw PartialListing()
         }
         val siteOrdered = seen.values.toList()
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
@@ -881,7 +889,16 @@ class DownloadEngine(
         val store = DownloadStore(context)
         val treeUri = Uri.parse(folderKey)
         val dir = novelDir(treeUri, store, folderKey, slug, doc)
-        if (dir != null) {
+        /* Ask again, here. The caller tests "is this novel downloading?"
+           before calling, but the listing fetch above is tens of seconds of
+           paginated requests, and the queue can pop this very novel inside
+           that window — so the rename pass moved files under a live download
+           that was holding their locations. Reading the listing costs nothing;
+           acting on a stale answer costs chapters. */
+        val busy = try {
+            DownloadService.isBusy(slug.lowercase().filter { it.isLetterOrDigit() })
+        } catch (e: Exception) { false }
+        if (dir != null && !busy) {
             renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
             dedupeExtras(
                 treeUri, dir, store, folderKey, slug,

@@ -61,7 +61,7 @@ class CompressService : Service() {
         val treeStr = prefs.getString("tree", null)
         if (treeStr == null) {
             prefs.edit().putBoolean("compressJobActive", false).apply()
-            stopSelf()
+            stopSelfResult(startId)
             return START_NOT_STICKY
         }
 
@@ -147,7 +147,15 @@ class CompressService : Service() {
             } finally {
                 runningFlow.value = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                /* stopSelfResult, not stopSelf. A start that lands between the
+                   flag going false and this line passes the "already running"
+                   check above, takes the foreground and launches a second
+                   pass — and a bare stopSelf then destroys the service out
+                   from under it: no notification, no foreground protection,
+                   and the flag left true so the NEXT start returns early
+                   without ever calling startForeground. Comparing start ids
+                   makes the teardown apply only to our own start. */
+                stopSelfResult(startId)
             }
         }
         return START_NOT_STICKY

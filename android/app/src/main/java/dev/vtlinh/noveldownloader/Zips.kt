@@ -222,11 +222,23 @@ object Zips {
 
         fun unGzChildren(parentDocId: String) {
             val kids = Saf.children(cr, treeUri, parentDocId)
-            val names = kids.map { it.name }.toHashSet()
             val parentUri = docUri(treeUri, parentDocId)
+            /* Half-written files from a killed run, swept here as the compress
+               direction sweeps them — this pass is the only one that walks the
+               folder when compression is off. */
             for (f in kids) {
-                if (f.isDir || !isGzName(f.name)) continue
+                if (!f.isDir && isPartName(f.name)) deleteDoc(cr, docUri(treeUri, f.docId))
+            }
+            for (f in kids) {
+                if (f.isDir || isPartName(f.name) || !isGzName(f.name)) continue
                 val target = f.name.removeSuffix(".gz")
+                /* OUR files only. The compress direction has always checked the
+                   name against the chapter pattern; this one asked nothing but
+                   ".txt.gz" — and the tree it walks is whatever folder the user
+                   picked, one level down, which can be a shared folder they
+                   keep other things in. Their own "notes.txt.gz" was
+                   decompressed and the original deleted, silently. */
+                if (!ChapterName.RE.matches(target)) continue
                 /* bytes, not text: decoding and re-encoding would rewrite
                    anything that isn't valid UTF-8 as replacement characters
                    and then delete the .gz that still held the real thing */
@@ -258,7 +270,6 @@ object Zips {
                         false
                     }
                     if (!ok) continue
-                    names.add(target)
                 }
                 if (!deleteDoc(cr, docUri(treeUri, f.docId))) continue
                 changed = true

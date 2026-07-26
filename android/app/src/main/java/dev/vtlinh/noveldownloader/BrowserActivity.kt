@@ -542,8 +542,7 @@ class BrowserActivity : AppCompatActivity() {
                     val rec = store.novels(folder).firstOrNull {
                         it.slug.lowercase().filter { c -> c.isLetterOrDigit() } == slugKey
                     } ?: return@withContext null
-                    val dir = store.getTitle(folder, rec.slug)
-                        ?: Extractor.sanitize(rec.title.ifEmpty { rec.slug })
+                    val dir = store.dirNameOrGuess(folder, rec.slug, rec.title)
                     Triple(rec, dir, store.chapterCount(folder, rec.slug))
                 } catch (e: Exception) { null }
             } ?: return@launch

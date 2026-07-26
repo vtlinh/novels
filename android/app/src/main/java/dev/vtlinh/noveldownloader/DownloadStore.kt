@@ -433,6 +433,22 @@ class DownloadStore(context: Context) :
         )
     }
 
+    /* Record which URL answered for a novel, WITHOUT touching its title.
+       registerNovel rewrites both, and the status sweep passed it the title it
+       happened to be displaying — which for a folder-scanned novel is the
+       directory name, and which comes back stripped of its "- Author" suffix
+       once an author is known. The stored title then stopped matching the
+       folder on disk, and every screen that rebuilds a folder name from the
+       title lost the novel. */
+    fun recordNovelUrl(folder: String, slug: String, url: String, titleIfNew: String, now: Long) {
+        val db = writableDatabase
+        db.execSQL(
+            "INSERT OR IGNORE INTO novels(folder,slug,url,title,started,total,complete) VALUES(?,?,?,?,?,-1,0)",
+            arrayOf(folder, slug, url, titleIfNew, now),
+        )
+        db.execSQL("UPDATE novels SET url=? WHERE folder=? AND slug=?", arrayOf(url, folder, slug))
+    }
+
     fun novels(folder: String): List<NovelRec> {
         val out = ArrayList<NovelRec>()
         readableDatabase.query(
@@ -554,6 +570,27 @@ class DownloadStore(context: Context) :
         return null
     }
 
+    /* The folder to open for a novel, for the screens that hold only a slug
+       and a title. They all used to rebuild it from the title, and the title
+       is the one thing that cannot answer this:
+
+         - a novel pushed off a colliding name lives under "Title (slug)",
+           while the title rebuilds the UNSUFFIXED name — another novel's
+           folder, which one screen then RECURSIVELY DELETED;
+         - a translated novel whose folder rename the provider refused keeps
+           its Vietnamese folder while the English title is already cached, so
+           the rebuilt name is a directory that does not exist;
+         - the status sweep rewrites `novels.title`, and once an author is
+           known it is stored stripped — so the name stops matching the folder
+           on disk with no collision involved at all.
+
+       The recorded directory is the answer to all three. The rest is only a
+       fallback for a library older than the column. */
+    fun dirNameOrGuess(folder: String, slug: String, title: String): String =
+        dirNameFor(folder, slug)
+            ?: getTitle(folder, slug)
+            ?: Extractor.folderName(title.ifEmpty { slug }, slug)
+
     fun setDirName(folder: String, slug: String, name: String) {
         writableDatabase.execSQL(
             "UPDATE novels SET dir_name=? WHERE folder=? AND slug=?", arrayOf(name, folder, slug),
@@ -565,6 +602,13 @@ class DownloadStore(context: Context) :
             "INSERT OR REPLACE INTO folder_owner(folder,name,slug) VALUES(?,?,?)",
             arrayOf(folder, name, slug),
         )
+    }
+
+    /* The novel is gone and its folder with it — let go of the name, or it
+       stays reserved for a slug that no longer exists and the next novel that
+       sanitises to it is pushed into a "Title (slug)" folder for nothing. */
+    fun releaseFolderName(folder: String, slug: String) {
+        writableDatabase.delete("folder_owner", "folder=? AND slug=?", arrayOf(folder, slug))
     }
 
     /* ---- pending Message Batches (orphaned-batch recovery) ---- */
