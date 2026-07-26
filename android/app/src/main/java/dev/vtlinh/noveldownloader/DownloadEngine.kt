@@ -868,17 +868,26 @@ class DownloadEngine(
         var usedCache = false
         if (cached.isNotEmpty()) {
             /* O(1) spot-check: does a sample indexed file still exist? Catches
-               a deleted/moved folder without listing the whole directory. */
-            val sampleUri = cached.values.first()
-            val ok = try {
+               a deleted/moved folder without listing the whole directory.
+               A blank URI is not a missing file — it's a location we
+               deliberately dropped after the folder moved — so sample a row
+               that actually has one, and fall through to the re-listing when
+               none does. */
+            val sampleUri = cached.values.firstOrNull { it.isNotEmpty() }
+            val ok = sampleUri != null && try {
                 DocumentFile.fromSingleUri(context, Uri.parse(sampleUri))?.exists() == true
             } catch (e: Exception) { false }
             if (ok) {
                 existing.addAll(cached.keys)
                 usedCache = true
             } else {
-                store.clear(folderKey, slug)
-                log("Saved-chapter index was stale (folder moved or removed) — re-listing.")
+                /* Only the locations are wrong. Which chapter each file IS is
+                   still recorded, and nothing on disk can rebuild that — so
+                   drop the URIs and let the re-listing below refresh them.
+                   clear() here undid the folder rename's care on the very
+                   next run. */
+                store.clearUris(folderKey, slug)
+                log("Saved-chapter locations were stale (folder moved) — re-listing.")
             }
         }
         if (!usedCache) {
