@@ -24,16 +24,21 @@ object Zips {
         }
     } catch (e: Exception) { null }
 
-    fun writeGz(cr: ContentResolver, parentDocUri: Uri, name: String, text: String): Boolean = try {
+    /* returns the new document's Uri, so a caller writing a chapter straight
+       to disk can index it without listing the folder again */
+    fun writeGzDoc(cr: ContentResolver, parentDocUri: Uri, name: String, text: String): Uri? = try {
         val u = DocumentsContract.createDocument(cr, parentDocUri, "application/gzip", name)
         val os = u?.let { cr.openOutputStream(it) }
         if (os == null) {
-            false
+            null
         } else {
             java.util.zip.GZIPOutputStream(os).use { it.write(text.toByteArray(Charsets.UTF_8)) }
-            true
+            u
         }
-    } catch (e: Exception) { false }
+    } catch (e: Exception) { null }
+
+    fun writeGz(cr: ContentResolver, parentDocUri: Uri, name: String, text: String): Boolean =
+        writeGzDoc(cr, parentDocUri, name, text) != null
 
     fun docSize(cr: ContentResolver, uri: Uri): Long = try {
         cr.query(uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use {
