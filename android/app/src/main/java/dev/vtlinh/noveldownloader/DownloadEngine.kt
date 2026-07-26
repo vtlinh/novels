@@ -44,6 +44,8 @@ class DownloadEngine(
         const val CONC_MIN = 5
         const val CONC_MAX = 50
         const val FETCH_BATCH = 50
+        /* a differing heading shifts a chapter's size by only a few bytes */
+        private const val HEADING_SLACK = 96L
 
         /* app-private cover thumbnail for a novel */
         fun coverFile(context: Context, slug: String): java.io.File =
@@ -346,34 +348,51 @@ class DownloadEngine(
         val extras = chapterFiles.filter { it.base !in assigned }
         if (extras.isEmpty()) return
 
-        val keptBySize = HashMap<Long, MutableList<OnDisk>>()
-        for (f in chapterFiles) {
-            if (f.base in assigned) keptBySize.getOrPut(f.size) { ArrayList() }.add(f)
-        }
+        /* Fingerprint the BODY, not the file. Every chapter is written as
+           "<heading>\n<content>" and the heading carries the chapter number,
+           so the same chapter saved under two different numbering schemes
+           differs in its first line — and in its length, which is why an
+           exact size+hash match misses these entirely. Comparing what comes
+           after the heading recognises them as the same text.
 
+           Sizes still narrow the field: only the heading differs, so a twin
+           is within a few dozen bytes. */
         val known = store.fingerprints(folderKey, slug)
-        fun hashOf(f: OnDisk): String? {
+        fun bodyHash(f: OnDisk): String? {
             known[f.base]?.let { if (it.first == f.size) return it.second }
             val text = (
                 if (f.name.endsWith(".gz")) Zips.readGz(cr, treeUri, f.docId)
                 else Saf.readText(cr, treeUri, f.docId)
                 ) ?: return null
+            val body = text.substringAfter('\n', "").ifEmpty { text }
             val h = java.security.MessageDigest.getInstance("SHA-256")
-                .digest(text.toByteArray(Charsets.UTF_8))
+                .digest(body.toByteArray(Charsets.UTF_8))
                 .joinToString("") { "%02x".format(it) }
             known[f.base] = Pair(f.size, h)
             store.setFingerprint(folderKey, slug, f.base, f.size, h)
             return h
         }
 
+        val keptSorted = chapterFiles.filter { it.base in assigned }.sortedBy { it.size }
+        /* a heading swap moves the size by only a handful of bytes */
+        fun nearBySize(size: Long): List<OnDisk> {
+            val lo = keptSorted.binarySearch { it.size.compareTo(size - HEADING_SLACK) }
+                .let { if (it < 0) -it - 1 else it }
+            val out = ArrayList<OnDisk>()
+            var i = lo
+            while (i < keptSorted.size && keptSorted[i].size <= size + HEADING_SLACK) {
+                out.add(keptSorted[i]); i++
+            }
+            return out
+        }
+
         var removed = 0
         var kept = 0
         for (x in extras) {
-            val sameSize = keptBySize[x.size]
-            if (sameSize.isNullOrEmpty()) { kept++; log("  extra kept (nothing matches it): ${x.name}"); continue }
-            val xh = hashOf(x)
-            val twin = if (xh == null) null else sameSize.firstOrNull { hashOf(it) == xh }
-            if (twin == null) { kept++; log("  extra kept (content differs): ${x.name}"); continue }
+            val candidates = nearBySize(x.size)
+            val xh = if (candidates.isEmpty()) null else bodyHash(x)
+            val twin = if (xh == null) null else candidates.firstOrNull { bodyHash(it) == xh }
+            if (twin == null) { kept++; log("  extra kept (text found nowhere else): ${x.name}"); continue }
             /* same bytes as a chapter we're keeping — drop the copy */
             val ok = try {
                 DocumentsContract.deleteDocument(
@@ -395,8 +414,8 @@ class DownloadEngine(
             store.removeChapter(folderKey, slug, x.base)
             removed++
         }
-        if (removed > 0) log("removed $removed duplicate chapter file(s)")
-        if (kept > 0) log("$kept extra file(s) left alone — their content is not a duplicate")
+        if (removed > 0) log("removed $removed duplicate chapter file(s) — same text as a chapter we kept")
+        if (kept > 0) log("$kept extra file(s) left alone — their text is not a duplicate")
     }
 
     /* How chapters were named before the URL map existed: the site's own

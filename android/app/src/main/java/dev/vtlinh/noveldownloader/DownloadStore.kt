@@ -46,7 +46,7 @@ class CachedChapterList(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 15) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 16) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -149,6 +149,11 @@ class DownloadStore(context: Context) :
             try { db.execSQL("ALTER TABLE chapters ADD COLUMN size INTEGER DEFAULT 0") } catch (e: Exception) {}
             try { db.execSQL("ALTER TABLE chapters ADD COLUMN hash TEXT DEFAULT ''") } catch (e: Exception) {}
         }
+        /* v15 hashed the whole file, heading included, so the same chapter
+           saved under two numbering schemes never matched itself. Hashes are
+           of the body now — drop the old ones rather than compare across
+           two meanings. */
+        if (oldVersion == 15) db.execSQL("UPDATE chapters SET hash=''")
     }
 
     /* ---- site chapter order (reader sorts by this, not by filename) ---- */
