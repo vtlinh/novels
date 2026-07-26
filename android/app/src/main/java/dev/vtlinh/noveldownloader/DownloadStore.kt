@@ -195,10 +195,13 @@ class DownloadStore(context: Context) :
             }
             /* this listing is the truest on-disk count — it sees loose AND
                compressed chapters, which the scan/index counters don't — so
-               persist it and the Library's x/y stays right */
+               persist it and the Library's x/y stays right. Set it, don't
+               raise it: the old `disk_count<?` guard made this a high-water
+               mark, so once dedup removed a file the Library went on counting
+               it forever and the novel looked more downloaded than it was. */
             db.execSQL(
-                "UPDATE novels SET disk_count=? WHERE folder=? AND slug=? AND disk_count<?",
-                arrayOf(list.ordered.size, folder, slug, list.ordered.size),
+                "UPDATE novels SET disk_count=? WHERE folder=? AND slug=?",
+                arrayOf(list.ordered.size, folder, slug),
             )
             db.setTransactionSuccessful()
         } finally {
