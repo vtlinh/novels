@@ -196,16 +196,32 @@ class DownloadStore(context: Context) :
            already have chapters, so an existing library owns the folders it
            has been using rather than being evicted from them by whichever
            novel happens to run first. */
+        if (oldVersion < 18) {
+            db.execSQL(FOLDER_OWNER_TABLE)
+            try {
+                db.execSQL(
+                    "INSERT OR IGNORE INTO folder_owner(folder,name,slug) " +
+                        "SELECT folder, english, slug FROM titles WHERE english<>''",
+                )
+            } catch (e: Exception) {}
+        }
         /* Which directory each novel actually uses. Nothing recorded it
            before, so ownership had to be inferred — and the inference was
            "this slug has chapters somewhere in this tree", which is true of
            every novel on its second run. Two novels whose titles sanitise to
            the same name therefore collapsed into one folder: the second one
            skipped the disambiguating suffix, resolved to the first one's
-           directory, renamed its files and wrote into it. */
+           directory, renamed its files and wrote into it.
+
+           AFTER the v18 block, not before it. These run in written order, not
+           in version order, and the seed below reads folder_owner — which for
+           anything older than v18 is a table that does not exist yet. The
+           statement threw, the throw was swallowed, and every pre-v18 library
+           upgraded with an empty dir_name for every novel: exactly the state
+           this column exists to avoid. */
         if (oldVersion < 19) {
             try { db.execSQL("ALTER TABLE novels ADD COLUMN dir_name TEXT DEFAULT ''") } catch (e: Exception) {}
-            /* Seed it from the ownership table, which v18 already populated.
+            /* Seed it from the ownership table, which v18 has just populated.
                Without this an existing library has no recorded directory, so
                every guard that asks "which folder is this novel's?" falls back
                to rebuilding the name from the title — which gives the
@@ -217,15 +233,6 @@ class DownloadStore(context: Context) :
                         "SELECT name FROM folder_owner " +
                         "WHERE folder_owner.folder = novels.folder AND folder_owner.slug = novels.slug" +
                         "), '') WHERE dir_name = ''",
-                )
-            } catch (e: Exception) {}
-        }
-        if (oldVersion < 18) {
-            db.execSQL(FOLDER_OWNER_TABLE)
-            try {
-                db.execSQL(
-                    "INSERT OR IGNORE INTO folder_owner(folder,name,slug) " +
-                        "SELECT folder, english, slug FROM titles WHERE english<>''",
                 )
             } catch (e: Exception) {}
         }
@@ -480,6 +487,23 @@ class DownloadStore(context: Context) :
             "SELECT COUNT(*) FROM chapters WHERE folder=? AND slug=?", arrayOf(folder, slug),
         ).use { c -> if (c.moveToNext()) return c.getInt(0) }
         return 0
+    }
+
+    /* Does the index know about any OTHER novel in this tree?
+
+       This is what tells a reinstall apart from a collision. Both arrive at
+       an existing folder that nothing in the database claims; only one of
+       them is somebody else's work. If the index has never heard of any novel
+       here, no other novel can be the folder's owner — the app was reinstalled
+       (or its data cleared) on top of a library that is still on disk. If it
+       does know other novels, an unclaimed folder under our name may well be
+       one of theirs, from before names were recorded, and we step aside. */
+    fun hasOtherChapters(folder: String, slug: String): Boolean {
+        readableDatabase.rawQuery(
+            "SELECT EXISTS(SELECT 1 FROM chapters WHERE folder=? AND slug<>?)",
+            arrayOf(folder, slug),
+        ).use { c -> if (c.moveToNext()) return c.getInt(0) != 0 }
+        return false
     }
 
     /* ---- translated novel-folder name cache: slug -> "English (Vietnamese)" ---- */
