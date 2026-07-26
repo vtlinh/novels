@@ -253,4 +253,31 @@ object SpeechEdits {
         }
         return out
     }
+
+    /* Run a batch of user regexes with a wall-clock budget, off the calling
+       thread. Returns null if it did not finish in time.
+
+       The reader used to bound this by handing the matcher a CharSequence
+       that threw once a deadline passed. That guard never fires on Android:
+       java.util.regex here is ICU-backed and libcore materialises the input
+       with toString() before matching, so the matcher never reads through
+       our wrapper — the whole protection was inert, on every version. And
+       catastrophic backtracking is not an exception, so no catch can help.
+
+       A separate thread can be abandoned. The runaway keeps burning a core
+       until it finishes or the process dies, which is why the callers stop
+       using the rule set after a timeout rather than starting another one
+       each sentence — but the reader, and the editor's live preview, stay
+       responsive. */
+    private val pool by lazy {
+        java.util.concurrent.Executors.newCachedThreadPool { r ->
+            Thread(r, "speech-rules").apply { isDaemon = true }
+        }
+    }
+
+    fun within(budgetMs: Long, work: () -> String): String? = try {
+        pool.submit<String> { work() }.get(budgetMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+    } catch (e: Exception) {
+        null
+    }
 }

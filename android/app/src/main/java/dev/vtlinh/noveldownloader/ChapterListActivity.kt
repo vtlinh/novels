@@ -299,7 +299,15 @@ class ChapterListActivity : AppCompatActivity() {
                 val order = slug?.let {
                     try { DownloadStore(this@ChapterListActivity).getChapterOrder(folder, it) } catch (e: Exception) { null }
                 } ?: emptyMap()
-                chapterNames(this@ChapterListActivity, Uri.parse(folder), dirName, order, slug)
+                /* the provider throws when the persisted grant is gone or a
+                   cursor window overflows, and this coroutine has no handler:
+                   an empty list is a screen, an exception is a crash */
+                try {
+                    chapterNames(this@ChapterListActivity, Uri.parse(folder), dirName, order, slug)
+                } catch (e: Exception) { null }
+            } ?: run {
+                status.text = "Could not read \"$dirName\"."
+                return@launch
             }
             val ordered = chapters.ordered.let {
                 if (prefs.getBoolean(descKey, false)) it.reversed() else it

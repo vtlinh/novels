@@ -71,7 +71,9 @@ class ReaderActivity : AppCompatActivity() {
 
     /* each loaded chapter's character offset in the text + its heading line,
        so the header can show the chapter actually being READ */
-    private class LoadedChapter(val idx: Int, var start: Int, val heading: String)
+    /* `idx` is a position in the current listing, and a rename pass can move
+       it under us — resyncIfRenamed carries the whole buffer across by name */
+    private class LoadedChapter(var idx: Int, var start: Int, val heading: String)
     private val loadedChapters = ArrayList<LoadedChapter>()
 
     private fun headingOf(body: String): String = body.substringBefore('\n').trim()
@@ -210,14 +212,37 @@ class ReaderActivity : AppCompatActivity() {
                     ChapterListActivity.chapterNames(this@ReaderActivity, tree, dir, order, slug)
                 } catch (e: Exception) { null }
             }
-            if (fresh != null && fresh.ordered.isNotEmpty()) {
-                chapters = fresh
-                drawerAdapter?.clear()
-                drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
-                drawerAdapter?.notifyDataSetChanged()
+            if (fresh == null || fresh.ordered.isEmpty()) return@launch
+            /* The text on screen, the drawer position and the chapter we are
+               about to name a saved spot after are all POSITIONS in the old
+               listing. Swapping the listing without moving them re-opened the
+               write gate over a mismatch: the spot was then saved under the
+               name one chapter along, a drawer tap scrolled to a neighbour's
+               text without reloading, and the next append read the wrong
+               chapter. Carry the buffer across by NAME, which is the only
+               thing that survives a renumbering. */
+            val old = chapters?.ordered
+            val where = HashMap<String, Int>(fresh.ordered.size)
+            fresh.ordered.forEachIndexed { i, n -> where[n] = i }
+            val moved = loadedChapters.map { lc -> old?.getOrNull(lc.idx)?.let { where[it] } }
+            /* Every loaded chapter has to be findable, and they have to stay in
+               the order they are stacked in the buffer. If they don't — a
+               chapter on screen is no longer listed, or the listing reordered
+               around us — then nothing here can say where we are, and the old
+               listing at least agrees with the indices we hold. Keep both, and
+               leave the gate shut until an open rebuilds them together. */
+            if (moved.any { it == null } || moved.filterNotNull().zipWithNext().any { it.first >= it.second }) {
+                return@launch
             }
-            /* take the epoch even if the reload came back empty — otherwise
-               the latch simply stays shut */
+            chapters = fresh
+            drawerAdapter?.clear()
+            drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
+            drawerAdapter?.notifyDataSetChanged()
+            val here = old?.getOrNull(currentChapterIdx)?.let { where[it] }
+            for ((i, lc) in loadedChapters.withIndex()) lc.idx = moved[i]!!
+            currentChapterIdx = here ?: currentChapterIdx
+            loadedChapters.firstOrNull()?.let { firstIdx = it.idx }
+            loadedChapters.lastOrNull()?.let { nextIdx = it.idx + 1 }
             chaptersEpoch = now
         }
     }
@@ -362,9 +387,22 @@ class ReaderActivity : AppCompatActivity() {
                 val order = slug?.let {
                     try { store.getChapterOrder(folder, it) } catch (e: Exception) { null }
                 } ?: emptyMap()
-                ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order, slug)
+                /* Listing the folder crosses a binder to the storage provider,
+                   and it throws outright when the persisted grant is gone or a
+                   cursor window overflows. Uncaught in a coroutine that is
+                   nothing but a crash on the ordinary act of opening a novel —
+                   the resync path already wraps the identical call. */
+                try {
+                    ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order, slug)
+                } catch (e: Exception) { null }
             }
-            val ch = chapters ?: return@launch
+            val ch = chapters ?: run {
+                titleBar.text = novelTitle
+                android.widget.Toast.makeText(
+                    this@ReaderActivity, "Could not read that novel's folder", android.widget.Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
             /* inline chapter list in the right drawer, current one highlighted */
             drawerAdapter = object : ArrayAdapter<String>(
                 this@ReaderActivity, android.R.layout.simple_list_item_1,
@@ -794,13 +832,21 @@ class ReaderActivity : AppCompatActivity() {
         return (if (fifth) top - scroll.height / 5 else top - dp(16)).coerceAtLeast(0)
     }
 
-    private fun offsetOfPara(chapterStart: Int, para: Int): Int {
+    /* Counting paragraphs stops at `limit`. Without a bound it walked
+       newlines to the end of the BUFFER, so a paragraph index that outruns
+       its chapter — a translation with different paragraph splitting, a
+       chapter re-fetched shorter, a language toggle — landed somewhere in a
+       LATER chapter. The reader then resolved the viewport to that chapter
+       and saved the spot there, so the place the user actually left was not
+       merely unreachable, it was overwritten two chapters ahead. */
+    private fun offsetOfPara(chapterStart: Int, para: Int, limit: Int = -1): Int {
         val body = text.text.toString()
+        val end = if (limit < 0) body.length else limit.coerceIn(chapterStart, body.length)
         var off = chapterStart
         var n = 0
         while (n < para) {
             val i = body.indexOf('\n', off)
-            if (i == -1) break
+            if (i == -1 || i + 1 >= end) break
             off = i + 1
             n++
         }
@@ -919,7 +965,15 @@ class ReaderActivity : AppCompatActivity() {
             if (idx >= 0) {
                 val lc = loadedChapters.firstOrNull { it.idx == idx }
                 if (lc != null) {
-                    startTtsFrom(offsetOfPara(lc.start, para))
+                    /* Through the same restore every other path uses: bounded
+                       by this chapter, and corrected by the stored paragraph
+                       text when the index has drifted. Raw, it could run off
+                       the end of the chapter into a later one — and this is
+                       the button users press most. */
+                    val next = loadedChapters.firstOrNull { it.start > lc.start }
+                    val chEnd = next?.let { it.start - SEP.length } ?: text.length()
+                    val anchor = slugX.let { prefs.getString("ttsParaText:$it", null) }
+                    startTtsFrom(restoreOffsetIn(lc.start, chEnd, para, anchor))
                 } else {
                     pendingSpeakAfterOpen = true
                     openAt(idx, para)
@@ -1018,40 +1072,37 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* Speech rules are arbitrary user-authored regexes, imported wholesale
-       from @Voice files, and they run on the MAIN thread between sentences.
-       A pattern with nested quantifiers backtracks exponentially — and that
-       is not an exception, it is a hang, so the try/catch below could not
-       catch it and the app just froze mid-chapter. The matcher only advances
-       by reading characters, so a CharSequence that refuses to be read past a
-       deadline turns the hang into an exception the existing per-rule catch
-       already handles: that one rule is skipped, the read continues. */
-    private class Deadline(private val s: CharSequence, private val until: Long) : CharSequence {
-        override val length get() = s.length
-        override fun get(index: Int): Char {
-            if (System.currentTimeMillis() > until) throw IllegalStateException("rule too slow")
-            return s[index]
-        }
-        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence =
-            Deadline(s.subSequence(startIndex, endIndex), until)
-        override fun toString() = s.toString()
-    }
+       from @Voice files, and they run between sentences. A pattern with
+       nested quantifiers backtracks exponentially — and that is not an
+       exception, it is a hang, so no catch here can help.
 
+       This used to hand the matcher a CharSequence that threw once a deadline
+       passed. It never fired: Android's java.util.regex is ICU-backed and
+       copies its input to a String before matching, so the matcher never read
+       through the wrapper and the guard was inert on every version. Run the
+       rules off the main thread with a budget instead, and if one blows it,
+       drop the rule set for the rest of the session rather than abandon a
+       fresh runaway thread on every sentence. */
     private fun cleanForSpeech(sentence: String, lang: String): String {
         if (lang != "en" || speechRules.isEmpty()) return sentence
-        return try {
+        val rules = speechRules
+        val out = SpeechEdits.within(RULE_BUDGET_MS) {
             var s = "$sentence "   // trailing space so end-anchored rules fire
-            for ((re, rep) in speechRules) {
-                /* one bad rule (e.g. a replacement with an out-of-range $group,
-                   or one that backtracks forever) must never crash or stall the
-                   read — skip it and keep going */
-                s = try {
-                    re.replace(Deadline(s, System.currentTimeMillis() + RULE_BUDGET_MS), rep)
-                } catch (e: Exception) { s }
+            for ((re, rep) in rules) {
+                /* one bad rule (e.g. a replacement with an out-of-range $group)
+                   must never crash the read — skip it and keep going */
+                s = try { re.replace(s, rep) } catch (e: Exception) { s }
             }
             s.replace(collapseWs, " ").trim()
-        } catch (e: Exception) {
-            sentence
         }
+        if (out == null) {
+            speechRules = emptyList()
+            android.widget.Toast.makeText(
+                this, "A speech-edit rule is too slow — rules turned off for now", android.widget.Toast.LENGTH_LONG,
+            ).show()
+            return sentence
+        }
+        return out
     }
 
     /* Keep the line being read vertically centered while TTS plays. Posted a
@@ -1132,10 +1183,12 @@ class ReaderActivity : AppCompatActivity() {
         para: Int,
         anchorText: String?,
     ): Int {
-        val byIndex = if (para > 0) offsetOfPara(chapterStart, para) else chapterStart
-        val anchor = anchorText?.takeIf { it.isNotBlank() } ?: return byIndex
         val body = text.text.toString()
         val end = chapterEnd.coerceIn(chapterStart, body.length)
+        /* bounded by the chapter: an index that outruns it must land at the
+           chapter's end, never inside the next one */
+        val byIndex = if (para > 0) offsetOfPara(chapterStart, para, end) else chapterStart
+        val anchor = anchorText?.takeIf { it.isNotBlank() } ?: return byIndex
         if (byIndex in chapterStart until end && body.startsWith(anchor, byIndex)) {
             return byIndex   // index agrees with the anchor
         }
