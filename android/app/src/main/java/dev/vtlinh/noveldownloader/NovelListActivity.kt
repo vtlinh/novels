@@ -464,7 +464,20 @@ class NovelListActivity : AppCompatActivity() {
                         Intent(ctx, ReaderActivity::class.java)
                             .putExtra("dir", dirName).putExtra("title", row.display)
                             .putExtra("slug", row.rec.slug)
-                            .putExtra("start", ttsChapter)
+                            /* Whichever spot is MORE RECENT — the shortcut is
+                               "a novel you are listening to opens in the
+                               reader", not "the read-aloud spot always wins".
+                               The other two ways into the reader ask
+                               resumeChapter; this one, the main way in, took
+                               the TTS chapter whatever its age, and then
+                               openAt wrote it back as lastCh with a fresh
+                               timestamp — so an evening of scroll-reading was
+                               not just skipped past but erased, with nothing
+                               else holding a copy of it. */
+                            .putExtra(
+                                "start",
+                                ReaderActivity.resumeChapter(ctx, row.rec.slug) ?: ttsChapter,
+                            )
                             .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
                     )
                     return@setOnClickListener
