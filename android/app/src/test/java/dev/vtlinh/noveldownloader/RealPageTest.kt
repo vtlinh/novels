@@ -320,7 +320,7 @@ class RealChapterTest {
     }
 
     private fun parse(c: Chap): String =
-        Extractor.parseChapter(Jsoup.parse(read(c.file), c.url), "", c.headingNumber ?: 1, c.site.headingWord)
+        Extractor.parseChapter(Jsoup.parse(read(c.file), c.url), "", c.headingNumber ?: 1, c.site)
 
     @Test
     fun `chapter pages are captured from both sites, first and middle`() {
@@ -383,7 +383,7 @@ class RealChapterTest {
         for (c in chapters) {
             val n = (c.headingNumber ?: 1) + 500          // deliberately not the printed number
             val out = Extractor.parseChapter(
-                Jsoup.parse(read(c.file), c.url), "", n, c.site.headingWord,
+                Jsoup.parse(read(c.file), c.url), "", n, c.site,
             )
             val first = out.lineSequence().first()
             assertTrue(
