@@ -638,6 +638,10 @@ class Translator(
                 if (isStopped()) break
                 val bundle = queue.removeFirst()
                 bundleNo++
+                /* A WRITE that failed, specifically — not a chapter the reply
+                   never contained. Only the first is worth keeping the batch
+                   record for, and the two were counted as one thing. */
+                var writeFailed = 0
                 status("Translating bundle $bundleNo (${bundle.size} chapter(s))…")
 
                 val run = runBatch(
@@ -714,6 +718,7 @@ class Translator(
                             log("saved  translated/${ch.first}")
                         } else {
                             failed++
+                            writeFailed++
                         }
                     }
                 }
@@ -737,10 +742,20 @@ class Translator(
                    land and seven fail — the volume fills mid-bundle, the card
                    is pulled — retired the record and lost seven translations
                    that were already paid for, to be bought again next run. */
-                if (missing == 0 || chapters == null || chapters.length() == 0) {
+                /* ...but a chapter the MODEL left out is not one of those. The
+                   batch has ended and its results have been read, so re-reading
+                   them can only produce the same reply with the same chapter
+                   missing — and while the record lives, `inFlight` withholds
+                   exactly those chapters from being re-sent. So a short reply
+                   bought five runs of recovery that could not possibly recover
+                   anything, with the log telling the user to re-run and the
+                   re-run doing nothing, before the record aged out and the
+                   chapters were finally translated. Keep the record only for
+                   work we have paid for and not yet written down. */
+                if (writeFailed == 0 || chapters == null || chapters.length() == 0) {
                     store.removePending(run.id)
                 } else {
-                    log("! bundle $bundleNo: $missing chapter(s) unaccounted for — keeping the batch for recovery")
+                    log("! bundle $bundleNo: $writeFailed chapter(s) not written — keeping the batch for recovery")
                 }
                 log("Bundle $bundleNo: ${glossary.size} names known")
             }
@@ -805,6 +820,9 @@ class Translator(
                 val results = fetchResults(rec.batchId, "recover", isStopped)
                 val msg = results["bundle"]
                 var n = 0
+                /* as in the collecting path: a WRITE that failed, which is
+                   worth another run, not a chapter the reply never held */
+                var recWriteFailed = 0
                 if (msg != null && msg.optString("stop_reason") != "max_tokens") {
                     val parsed = parseBundle(messageText(msg))
                     if (parsed != null) {
@@ -857,6 +875,7 @@ class Translator(
                                     continue
                                 }
                                 if (writeTranslated(tdir, fn, text)) { done.add(fn); n++; log("saved  translated/$fn (recovered)") }
+                                else recWriteFailed++
                             }
                         }
                         log("Recovered bundle: $n chapter(s)")
@@ -885,10 +904,23 @@ class Translator(
                     val fn = if (url != null) nowNamed[url] else rec.files.getOrNull(i)
                     fn != null && fn !in done
                 }
-                if (unaccounted > 0) {
+                /* ...and only when something is still RECOVERABLE. A chapter
+                   the reply never contained cannot appear on a re-read — the
+                   batch ended before the record was ever kept — so holding the
+                   record open for it bought nothing, while `inFlight` withheld
+                   that chapter from being re-sent for every one of the five
+                   tries. Records written by an older build reach here too, so
+                   the distinction has to be made on this side as well. */
+                if (unaccounted > 0 && recWriteFailed > 0) {
                     log("! batch …${rec.batchId.takeLast(8)}: $unaccounted chapter(s) not saved — keeping it for the next run")
                     retryLater(store, rec, "could not write results")
                     continue
+                }
+                if (unaccounted > 0) {
+                    log(
+                        "! batch …${rec.batchId.takeLast(8)}: $unaccounted chapter(s) were not in the " +
+                            "reply — re-sending them next run",
+                    )
                 }
                 store.removePending(rec.batchId)
             } catch (e: StoppedException) {

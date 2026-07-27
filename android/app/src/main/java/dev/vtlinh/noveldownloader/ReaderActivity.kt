@@ -2217,8 +2217,17 @@ class ReaderActivity : AppCompatActivity() {
        chapters load lazily when the reader scrolls up into the top chapter
        (see maybeLoadMore). */
     private fun openAt(pos: Int, targetPara: Int = 0, anchor: String? = null) {
-        val ch = chapters ?: return
-        if (loading || ch.ordered.isEmpty()) return
+        /* Both early returns disarm the Play flag. It is set right before the
+           call at the Play button, and nothing else ever cleared it — so a
+           Play pressed while a load was in flight did nothing visible and left
+           the flag latched, and the NEXT open from any source (a drawer pick,
+           the EN/VI toggle) started reading aloud unprompted in whatever
+           chapter that was, whose first spoken sentence then overwrote the
+           saved listening spot. The button is gated on ttsReady, not on
+           `loading`, and the notification and media-key paths reach it
+           without any UI gate at all. */
+        val ch = chapters ?: run { pendingSpeakAfterOpen = false; return }
+        if (loading || ch.ordered.isEmpty()) { pendingSpeakAfterOpen = false; return }
         stopTts()
         resumeCursor = -1
         loading = true
