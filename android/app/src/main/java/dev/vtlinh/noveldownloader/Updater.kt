@@ -33,7 +33,12 @@ import java.util.concurrent.TimeUnit
    InstallReceiver). Every CI build is signed with the same committed key, so
    updates always install over the existing app. */
 object Updater {
-    private const val BASE = "https://github.com/vtlinh/novels/releases/download/android-latest"
+    /* Not the GitHub release directly. The repository is private, so those
+       assets answer 404 to a device with no credential — every installed copy
+       would quietly stop finding updates, with nothing on the device able to
+       recover from it. The Worker holds a read-only GitHub token and serves
+       these two files, and only these two, without one. */
+    private const val BASE = "https://truyenfull.vtlinh87.workers.dev/app"
     private const val VERSION_URL = "$BASE/version.json"
     private const val APK_URL = "$BASE/app-release.apk"
 
