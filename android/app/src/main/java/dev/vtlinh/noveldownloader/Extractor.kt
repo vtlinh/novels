@@ -25,6 +25,8 @@ object Extractor {
         Regex("(?:Ch[ưu]ơ?ng|Chapter)\\s*(\\d+)(?:\\.\\d+)?\\s*[:\\-–]?\\s*(.*)", RegexOption.IGNORE_CASE)
     private val HEADING_ONLY_RE = Regex("^(?:Ch[ưu]ơ?ng|Chapter)\\s*\\d+$", RegexOption.IGNORE_CASE)
     private val HEADING_START_RE = Regex("^(?:Ch[ưu]ơ?ng|Chapter)\\s*\\d+", RegexOption.IGNORE_CASE)
+    /* a page can separate two headings with spaces rather than a break */
+    private val SPACE_RUN_RE = Regex("\\s{2,}")
 
     fun parseHeading(text: String): Pair<Int?, String> {
         val m = HEADING_RE.find(text) ?: return Pair(null, text.trim())
@@ -111,20 +113,37 @@ object Extractor {
         var content = extracted.first
         val raw = extracted.second
 
-        val nl = content.indexOf('\n')
-        val firstLine = (if (nl == -1) content else content.substring(0, nl)).trim()
-        if (firstLine.length < 120 && HEADING_START_RE.containsMatchIn(firstLine)) {
-            val fh = parseHeading(firstLine)
-            /* ...or the number the PAGE prints. `num` is the number the app
-               was told to use, and on a renumbered novel it is not the site's
-               — so a first body line repeating the page's own heading was
-               left in place, and the file went out with two heading lines
-               disagreeing about which chapter it is. What identifies the line
-               as furniture is that it echoes the page's heading, not that it
-               happens to agree with us. */
-            if (fh.first == num || (fh.first != null && fh.first == head.first)) {
-                if (title.isEmpty() && fh.second.isNotEmpty()) title = fh.second
-                content = if (nl == -1) "" else content.substring(nl).trimStart('\n')
+        /* Take the leading heading off the body, however the page laid it
+           out. Measured across every captured chapter page, three shapes
+           occur: one heading line (most), the heading on two consecutive
+           LINES, and the heading twice inside a SINGLE line with only a run
+           of spaces between — so it is not a line at all and no line-based
+           rule reaches it.
+
+           Cutting at the first run of two-plus spaces handles all three, and
+           everything after the cut is kept verbatim rather than rejoined, so
+           a page this does not fire on is untouched. Bounded: past a couple
+           of repeats it is the chapter, not furniture.
+
+           What identifies a line as furniture is that it echoes the PAGE's
+           heading, not that it agrees with `num` — on a renumbered novel the
+           number the app was told to use is not the site's. */
+        var stripped = 0
+        while (stripped++ < 4) {
+            val nl = content.indexOf('\n')
+            val line = if (nl == -1) content else content.substring(0, nl)
+            val rest = if (nl == -1) "" else content.substring(nl + 1)
+            val cut = SPACE_RUN_RE.find(line)
+            val lead = (if (cut != null) line.substring(0, cut.range.first) else line).trim()
+            if (lead.length >= 120 || !HEADING_START_RE.containsMatchIn(lead)) break
+            val fh = parseHeading(lead)
+            if (fh.first != num && !(fh.first != null && fh.first == head.first)) break
+            if (title.isEmpty() && fh.second.isNotEmpty()) title = fh.second
+            val tail = if (cut != null) line.substring(cut.range.last + 1) else ""
+            content = when {
+                tail.isNotBlank() && rest.isNotEmpty() -> "$tail\n$rest"
+                tail.isNotBlank() -> tail
+                else -> rest
             }
         }
         if (content.isBlank()) {
