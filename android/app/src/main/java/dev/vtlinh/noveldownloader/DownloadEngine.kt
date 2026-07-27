@@ -1446,8 +1446,52 @@ class DownloadEngine(
             if (!english.isNullOrBlank()) {
                 folderName = english
                 if (english != vietName) {
+                    /* WHICH Vietnamese folder — the one this novel is on
+                       record as using, not the one its title happens to
+                       compute to. This was the last place in the app that
+                       resolved a novel's directory by rebuilding the name, and
+                       it runs sixty lines before the ownership check written
+                       to stop exactly that, so the check could only ever
+                       bless a rename that had already happened.
+
+                       findFile matches on the display name alone, and the
+                       tree can hold another novel's folder under that name:
+                       truyenfull serves the same title under two slugs
+                       (dau-la-dai-luc and dau-la-dai-luc-230420, both "Đấu La
+                       Đại Lục"), sanitising folds tone marks so "Thần Y" and
+                       "Thân Y" meet, and a folder the Library scan adopted is
+                       claimed under a slug invented from its name. Renaming
+                       it made the other novel's chapters look unclaimed —
+                       settled() returns true for a file with no recorded page
+                       — so this novel adopted them, paid to translate them,
+                       and left the real owner pointing at a directory that no
+                       longer exists, to be downloaded and translated again.
+
+                       No record and nothing claimed is still not proof the
+                       folder is ours: a copied-in directory the scan has not
+                       reached yet has neither. Ownership.ours is the app's
+                       answer to this question everywhere else, so ask it
+                       rather than growing a second rule beside it. */
+                    val recorded = try { store.dirNameFor(folderKey, slug) } catch (e: Exception) { null }
+                    val srcName = if (recorded != null) {
+                        /* gone from disk: renamed or moved outside the app.
+                           Not a licence to take the computed name instead. */
+                        recorded.takeIf { root.findFile(it)?.isDirectory == true }
+                    } else if (
+                        Ownership.ours(
+                            slug, vietName,
+                            try { store.slugOwningName(folderKey, vietName) } catch (e: Exception) { null },
+                            null,
+                            try { store.chapterCount(folderKey, slug) } catch (e: Exception) { 0 },
+                            try { store.hasOtherChapters(folderKey, slug) } catch (e: Exception) { true },
+                        )
+                    ) {
+                        vietName
+                    } else {
+                        null
+                    }
                     val existingEng = root.findFile(english)?.takeIf { it.isDirectory }
-                    val existingViet = root.findFile(vietName)?.takeIf { it.isDirectory }
+                    val existingViet = srcName?.let { root.findFile(it)?.takeIf { d -> d.isDirectory } }
                     if (existingEng == null && existingViet != null) {
                         val ok = try { existingViet.renameTo(english) } catch (e: Exception) { false }
                         if (ok) {
@@ -1473,8 +1517,12 @@ class DownloadEngine(
                                the spot-check passed and nothing re-downloaded,
                                while the translator saw an empty translated/
                                and re-sent the entire novel to the API. */
-                            folderName = vietName
-                            log("Could not rename the folder — keeping \"$vietName\"")
+                            /* srcName, not vietName: the folder we failed to
+                               rename is the one this novel is recorded as
+                               using, which is not always what the title
+                               computes to. */
+                            folderName = srcName
+                            log("Could not rename the folder — keeping \"$srcName\"")
                         }
                     }
                 }
