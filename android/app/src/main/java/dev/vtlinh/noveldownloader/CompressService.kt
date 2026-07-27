@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -160,9 +161,13 @@ class CompressService : Service() {
                    half-compressed with nothing to resume it. */
                 if (converged) prefs.edit().putBoolean("compressJobActive", false).apply()
             } catch (e: Exception) {
-                /* silent by design — an interrupted pass just resumes on the
-                   next app start (resumeIfNeeded) */
-                prefs.edit().putBoolean("compressJobActive", false).apply()
+                /* Silent, but the flag STAYS. The comment here said "an
+                   interrupted pass just resumes on the next app start
+                   (resumeIfNeeded)" while the line below cleared the one flag
+                   resumeIfNeeded gates on — so the one exit that is by
+                   definition unfinished was the only one that guaranteed
+                   nothing would ever pick the job up. Every other path is
+                   careful about this; this one contradicted itself. */
             } finally {
                 runningFlow.value = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -178,6 +183,18 @@ class CompressService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+
+    /* The scope outlives onStartCommand, exactly as DownloadService's does.
+       Without this a destroyed service left the pass gzipping, rewriting and
+       deleting files across the whole library over SAF with no foreground
+       protection and nothing tracking it — and the per-chapter steps are
+       idempotent, so there is nothing to lose by stopping: the flag stays set
+       and the next app start resumes it. */
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.coroutineContext[kotlinx.coroutines.Job]?.cancelChildren()
+        runningFlow.value = false
     }
 
     private fun createChannel() {

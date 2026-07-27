@@ -100,6 +100,23 @@ class ListingTest {
        Scaled, it wrote off seven pages of a 140-page novel, and "Check status"
        — which renames and deletes but never downloads — then deleted those
        326 chapters and their paid translations with nothing to restore them. */
+    /* Pinned from BELOW as well. Every other case here uses one page (forgiven)
+       or seven-plus (refused), so the cap could be relaxed to any value in
+       2..6 and the whole suite stayed green — which is the same regression
+       the case below is written about, only smaller. Two pages is ~100
+       chapters, and forgiving them deletes their files and their paid
+       translations. */
+    @Test
+    fun `two missing tail pages are a gap, not an over-read`() {
+        val forgivable = Listing.forgivableTailPages(
+            missed = setOf(89, 90),
+            gone = setOf(89, 90),
+            loaded = setOf(88),
+            lastPage = 90,
+        )
+        assertEquals(emptyList<Int>(), forgivable)
+    }
+
     @Test
     fun `the allowance does not grow with the novel`() {
         val forgivable = Listing.forgivableTailPages(

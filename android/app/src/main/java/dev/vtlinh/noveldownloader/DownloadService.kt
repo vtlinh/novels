@@ -129,6 +129,17 @@ class DownloadService : Service() {
             return first
         }
 
+        /* back to the FRONT — it was next in line and nothing has run since */
+        private fun unpopQueue(ctx: android.content.Context, item: org.json.JSONObject) =
+            synchronized(queueLock) {
+                val arr = queueArr(ctx)
+                val out = org.json.JSONArray()
+                out.put(item)
+                for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { out.put(it) }
+                prefs(ctx).edit().putString(QUEUE_KEY, out.toString()).apply()
+                publishQueue(ctx)
+            }
+
         private fun clearQueue(ctx: android.content.Context) = synchronized(queueLock) {
             prefs(ctx).edit().remove(QUEUE_KEY).apply()
             publishQueue(ctx)
@@ -142,14 +153,26 @@ class DownloadService : Service() {
             val p = prefs(ctx)
             val tree = p.getString("tree", null) ?: return
             val next = popQueue(ctx) ?: return
-            ctx.startForegroundService(
-                Intent(ctx, DownloadService::class.java)
-                    .putExtra("url", next.optString("url"))
-                    .putExtra("tree", tree)
-                    .putExtra("translate", next.optBoolean("translate"))
-                    .putExtra("forceTranslate", next.optBoolean("force"))
-                    .putExtra("apiKey", p.getString("apiKey", "") ?: ""),
-            )
+            try {
+                ctx.startForegroundService(
+                    Intent(ctx, DownloadService::class.java)
+                        .putExtra("url", next.optString("url"))
+                        .putExtra("tree", tree)
+                        .putExtra("translate", next.optBoolean("translate"))
+                        .putExtra("forceTranslate", next.optBoolean("force"))
+                        .putExtra("apiKey", p.getString("apiKey", "") ?: ""),
+                )
+            } catch (e: Exception) {
+                /* Popped, then the start refused — put it back. From API 31 a
+                   foreground service cannot be started from the background,
+                   and this runs from the teardown of a service the system is
+                   destroying: the throw was swallowed by the caller and the
+                   novel was simply gone, out of the persisted queue and out
+                   of the Library's "Queued" state, with nothing that would
+                   ever pick it up again. The queue is the only record. */
+                unpopQueue(ctx, next)
+                throw e
+            }
         }
     }
 

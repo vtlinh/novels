@@ -147,7 +147,19 @@ export default {
     let resp;
     let buf;
     try {
-      resp = await fetch(target, { headers: PAGE_HEADERS, redirect: "follow" });
+      /* By hand, so the allowlist applies to every hop and not only to the
+         URL the caller sent — see worker.js. `redirect: "follow"` let one
+         open redirect on either site turn this into a proxy for anything. */
+      let at = target;
+      for (let hop = 0; ; hop++) {
+        resp = await fetch(at, { headers: PAGE_HEADERS, redirect: "manual" });
+        if (resp.status < 300 || resp.status > 399) break;
+        const loc = resp.headers.get("location");
+        if (!loc) break;
+        if (hop >= 5) return deny(508, "too many redirects");
+        at = new URL(loc, at).toString();
+        if (!SITES.test(at)) return deny(403, `redirected off the allowlist: ${at}`);
+      }
       buf = await resp.arrayBuffer();
     } catch (e) {
       return deny(502, `upstream fetch failed: ${e && e.message ? e.message : e}`);

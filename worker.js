@@ -95,8 +95,27 @@ const tokenOk = (given, expected) => {
   return diff === 0;
 };
 
+/* Redirects are followed BY HAND so the allowlist is applied to every hop.
+ * `redirect: "follow"` checked only the URL the caller supplied: one open
+ * redirect on either novel site — or a hostile response from one — and the
+ * proxy fetched anything at all on the caller's behalf, link-local addresses
+ * included, which is the single thing the allowlist exists to prevent. It
+ * even reported the foreign final host back in x-upstream-url: it had the
+ * value and never looked at it. */
+const MAX_HOPS = 5;
+
 async function readPage(target) {
-  const r = await fetch(target, { headers: PAGE_HEADERS, redirect: "follow" });
+  let at = target;
+  let r;
+  for (let hop = 0; ; hop++) {
+    r = await fetch(at, { headers: PAGE_HEADERS, redirect: "manual" });
+    if (r.status < 300 || r.status > 399) break;
+    const loc = r.headers.get("location");
+    if (!loc) break;
+    if (hop >= MAX_HOPS) return { resp: r, buf: new ArrayBuffer(0), challenged: false, tooMany: true };
+    at = new URL(loc, at).toString();
+    if (!SITES.test(at)) return { resp: r, buf: new ArrayBuffer(0), challenged: false, offSite: at };
+  }
   const buf = await r.arrayBuffer();
   let sniff = "";
   try {
@@ -127,7 +146,14 @@ export default {
       const list = (urls || []).filter(u => SITES.test(u)).slice(0, 50);
       const results = await Promise.all(list.map(async u => {
         try {
-          const { resp, buf, challenged } = await readPage(u);
+          const page = await readPage(u);
+          if (page.offSite) {
+            return { url: u, status: 403, bytes: 0, challenge: false, html: "", error: `redirected off the allowlist: ${page.offSite}` };
+          }
+          if (page.tooMany) {
+            return { url: u, status: 508, bytes: 0, challenge: false, html: "", error: "too many redirects" };
+          }
+          const { resp, buf, challenged } = page;
           const text = buf.byteLength > MAX_BYTES
             ? ""
             : new TextDecoder("utf-8", { fatal: false }).decode(buf);
@@ -172,6 +198,8 @@ export default {
     } catch (e) {
       return deny(502, `upstream fetch failed: ${e && e.message ? e.message : e}`);
     }
+    if (page.offSite) return deny(403, `redirected off the allowlist: ${page.offSite}`);
+    if (page.tooMany) return deny(508, "too many redirects");
     const { resp, buf, challenged } = page;
     if (buf.byteLength > MAX_BYTES) return deny(413, "response too large");
 

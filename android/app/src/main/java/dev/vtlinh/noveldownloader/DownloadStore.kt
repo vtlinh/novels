@@ -381,15 +381,31 @@ class DownloadStore(context: Context) :
        folder they keep other things in, and needs to stay inside these. */
     fun ownedDirNames(folder: String): Set<String> {
         val out = HashSet<String>()
-        readableDatabase.rawQuery(
-            "SELECT dir_name FROM novels WHERE folder=?", arrayOf(folder),
-        ).use { c ->
-            while (c.moveToNext()) c.getString(0)?.takeIf { it.isNotEmpty() }?.let { out.add(it) }
-        }
         readableDatabase.query(
             "folder_owner", arrayOf("name"), "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
             while (c.moveToNext()) c.getString(0)?.takeIf { it.isNotEmpty() }?.let { out.add(it) }
+        }
+        /* `dir_name` alone is not enough, and the caller's "empty set → walk
+           everything" fallback does not cover the gap: v19 seeds the column
+           from folder_owner, which v18 seeds from `titles` — the TRANSLATED
+           title cache. So every untranslated novel from before v19 upgrades
+           with no directory and no owner row, and the scan skips novels it
+           already knows. Download one new novel and the set stops being empty,
+           at which point every one of those older novels drops out of the
+           compress pass for good: the pass reports "nothing changed",
+           declares itself converged and clears its resume flag, and turning
+           compression off leaves that library gzipped with nothing that will
+           ever unpack it.
+
+           So fall back per NOVEL, not for the set as a whole — the same
+           chain dirNameOrGuess uses, which is the best answer available for a
+           row that predates the column. */
+        for (rec in novels(folder)) {
+            val dir = dirNameFor(folder, rec.slug)
+                ?: getTitle(folder, rec.slug)
+                ?: Extractor.folderName(rec.title.ifEmpty { rec.slug }, rec.slug)
+            if (dir.isNotEmpty()) out.add(dir)
         }
         return out
     }
