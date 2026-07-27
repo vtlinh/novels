@@ -33,7 +33,7 @@ Style, naming and taste are out of scope.
 2. **A finding needs a concrete minimal trigger.** State the exact sequence that
    reaches it and what the user loses. No trigger, no finding.
 3. **Measure claims about site HTML.** 227 real captured pages live under
-   `android/app/src/test/resources/pages/`, one HTML per zip, with
+   `android/app/src/sites/<site>/test/resources/pages/<site>/`, one HTML per zip, with
    `manifest.tsv`/`chapters.tsv` measured independently of the app's parser.
    Read them with python + zipfile. The fixtures are one page per distinct
    novel, so they cannot show duplicate-title collisions; harvest the sidebar

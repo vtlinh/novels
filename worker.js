@@ -4,7 +4,7 @@
  * The app does not use this and must not: it fetches novel sites directly,
  * which is the point of it being a native app (no CORS, no middleman). This
  * exists so work on the app can read a real page — capturing the test
- * fixtures in android/app/src/test/resources/pages.zip, checking what a
+ * pages in android/app/src/sites/<site>/test/resources/, checking what a
  * site's HTML actually contains before changing a selector, confirming a
  * claim about a site instead of guessing at it.
  *

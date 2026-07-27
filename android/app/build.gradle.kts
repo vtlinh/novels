@@ -55,6 +55,37 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    /* One directory per supported site, holding everything that is that
+       site's business: its adapter, its own test class, and the real pages it
+       is judged against.
+
+           src/sites/<site>/main/<Site>.kt
+           src/sites/<site>/test/java/<Site>Test.kt
+           src/sites/<site>/test/resources/pages/<site>/…
+
+       Site knowledge was previously spread across the shared source and test
+       trees with the fixtures in a third place and one manifest every site
+       had to be edited into, so adding or removing a site touched files that
+       belonged to the others. Discovered from the filesystem rather than
+       listed here, so a new site is a new directory and nothing else. */
+    val siteRoots = file("src/sites").listFiles().orEmpty()
+        .filter { it.isDirectory }.sortedBy { it.name }
+
+    /* These hold Kotlin, and go on the JAVA source set on purpose: the Kotlin
+       plugin's KotlinAndroidJavaSourceDirConfigurator feeds each Android
+       source set's java trees into the Kotlin one through a lazy provider, so
+       adding here reaches both compilers. Adding to a `kotlin` set instead
+       would leave Java-side tooling blind to them. */
+    sourceSets {
+        getByName("main") {
+            java.srcDirs(siteRoots.map { File(it, "main") })
+        }
+        getByName("test") {
+            java.srcDirs(siteRoots.map { File(it, "test/java") })
+            resources.srcDirs(siteRoots.map { File(it, "test/resources") })
+        }
+    }
 }
 
 dependencies {
