@@ -1,6 +1,7 @@
 package dev.vtlinh.noveldownloader
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -186,5 +187,76 @@ class ListingTest {
     @Test
     fun `no gaps means collect everything`() {
         assertEquals(91, Listing.firstGap(emptySet(), lastPage = 90))
+    }
+
+    /* ---- what one fetch of a listing page establishes ---- */
+
+    /* The distinction the whole forgiveness rule rests on: "definitely not
+       there" versus "no answer". Forgiving a page treats its ~50 chapters as
+       never having existed and the dedupe deletes their files and their paid
+       translations, so a page must never be forgiven on silence. */
+    @Test
+    fun `a page that loaded is present, whatever its status was`() {
+        assertEquals(Listing.Answer.PRESENT, Listing.answer("<html/>", 200))
+    }
+
+    @Test
+    fun `only a definite not-there counts as missing`() {
+        assertEquals(Listing.Answer.MISSING, Listing.answer(null, 404))
+        assertEquals(Listing.Answer.MISSING, Listing.answer(null, 410))
+    }
+
+    /* Throttled, blocked, timed out, or a challenge — a page that exists and
+       would not load. `fetch` reports a network failure as status 0. */
+    @Test
+    fun `a failure that is not a not-there establishes nothing`() {
+        for (code in listOf(0, 403, 429, 500, 503)) {
+            assertEquals("status $code", Listing.Answer.NO_ANSWER, Listing.answer(null, code))
+        }
+    }
+
+    /* THE BUG THIS RULE EXISTS FOR. `gone` is what forgiveness reads, and it
+       used only ever to grow — so a page that answered 404 once and then
+       merely timed out stayed "definitely missing" for the rest of the run.
+       Its chapters were deleted on the strength of an answer that silence had
+       since contradicted, and in a status check there is no retry behind it
+       and no download to put them back. */
+    @Test
+    fun `a page that stops answering is no longer evidence that it is gone`() {
+        val gone = mutableSetOf(90)
+        val missed = mutableSetOf(90)
+        Listing.record(90, Listing.answer(null, 0), gone, missed)
+        assertFalse("a timeout must not leave the page forgivable", 90 in gone)
+        assertTrue("...and the page is still unread", 90 in missed)
+        assertEquals(emptyList<Int>(), Listing.forgivableTailPages(missed, gone, setOf(89), 90))
+    }
+
+    @Test
+    fun `a page that confirms not-there stays forgivable`() {
+        val gone = mutableSetOf<Int>()
+        val missed = mutableSetOf(90)
+        Listing.record(90, Listing.answer(null, 404), gone, missed)
+        assertTrue(90 in gone)
+        assertEquals(listOf(90), Listing.forgivableTailPages(missed, gone, setOf(89), 90))
+    }
+
+    @Test
+    fun `a page that turns up after all is neither missing nor forgiven`() {
+        val gone = mutableSetOf(90)
+        val missed = mutableSetOf(90)
+        assertTrue(Listing.record(90, Listing.answer("<html/>", 200), gone, missed))
+        assertFalse(90 in gone)
+        assertFalse(90 in missed)
+    }
+
+    /* record() answers "was it really there", because that is what decides
+       whether the caller goes on to parse it. */
+    @Test
+    fun `only a present page reports back as readable`() {
+        val g = mutableSetOf<Int>()
+        val m = mutableSetOf<Int>()
+        assertFalse(Listing.record(5, Listing.answer(null, 404), g, m))
+        assertFalse(Listing.record(5, Listing.answer(null, 0), g, m))
+        assertTrue(Listing.record(5, Listing.answer("x", 200), g, m))
     }
 }
