@@ -34,7 +34,7 @@ abstract class SiteContract {
             .filter { it[0] == site.name }
             .toList()
 
-    private fun page(path: String): String {
+    protected fun page(path: String): String {
         val ins = javaClass.getResourceAsStream("/pages/$path.zip")
             ?: throw AssertionError("missing fixture: pages/$path.zip")
         ins.use { raw ->
@@ -45,7 +45,7 @@ abstract class SiteContract {
         }
     }
 
-    private val novels by lazy { rows("manifest.tsv").filter { it[4] == "novel" } }
+    protected val novels by lazy { rows("manifest.tsv").filter { it[4] == "novel" } }
     private val chapters by lazy { rows("chapters.tsv") }
 
     /* ---- the contract ---- */
@@ -307,19 +307,39 @@ class NovelfullTest : SiteContract() {
         assertTrue("a .net novel must stay on .net, got $base", base.startsWith("https://novelfull.net/"))
     }
 
-    /* .com has no og:title at all, so the shared title chain happened to land
-       on h3.title and give a clean name. .net HAS one, wrapped in furniture —
-       and the folder a novel lives in is recorded once and never recomputed,
-       so taking it would have named every .net novel "Read ... - NovelFull"
-       for good. */
+    /* .com serves no og:title at all, so the shared title chain fell through to
+       h3.title and happened to give a clean name. .net DOES serve one, wrapped
+       in furniture — and the folder a novel lives in is recorded once and
+       never recomputed, so taking it would have named every .net novel
+       "Read ... - NovelFull" for good.
+
+       There is no hand-written HTML here on purpose. This used to assert
+       against a document I typed out from memory of the real one, which is
+       worth very little: it only ever proves the parser handles the shape I
+       imagined. The corpus now holds real .net pages, and the contract's own
+       branding and length checks run over them like any other — so this only
+       has to confirm the corpus actually covers the host that has the trap. */
     @Test
-    fun `the site's furniture never becomes the novel's folder name`() {
-        val doc = org.jsoup.Jsoup.parse(
-            """<html><head>
-               <meta property="og:title" content="Read The Mech Touch novel online free - NovelFull">
-               </head><body><h3 class="title">The Mech Touch</h3></body></html>""",
+    fun `the host whose title carries furniture is actually in the corpus`() {
+        val net = novels.filter { it[2].contains("novelfull.net") }
+        assertTrue(
+            "no novelfull.net pages captured — the og:title trap is on that host, " +
+                "so without them nothing here can see it",
+            net.size >= 5,
         )
-        assertEquals("The Mech Touch", site.title(doc))
+        /* and those pages really do carry the trap, or their presence proves
+           nothing either */
+        val wrapped = net.count { r ->
+            org.jsoup.Jsoup.parse(page(r[1]), r[3])
+                .selectFirst("meta[property=og:title]")
+                ?.attr("content").orEmpty()
+                .lowercase().contains("novelfull")
+        }
+        assertTrue(
+            "captured .net pages carry no furniture-wrapped og:title, so the " +
+                "branding check above is not exercised by them",
+            wrapped >= 5,
+        )
     }
 
     @Test

@@ -101,7 +101,9 @@ class RealPageTest {
         val novels = fixtures.filter { it.kind == "novel" }
         for (name in listOf("truyenfull", "novelfull")) {
             val mine = novels.filter { it.site.name == name }
-            assertEquals("100 novel pages captured for $name", 100, mine.size)
+            /* at LEAST — the corpus grows when a site gains a host, and
+               novelfull is served from both .com and .net */
+            assertTrue("100+ novel pages captured for $name, got ${mine.size}", mine.size >= 100)
             assertTrue("$name: some finished", mine.any { it.completed == true })
             assertTrue("$name: some ongoing", mine.any { it.completed == false })
             assertTrue("$name: some short", mine.any { (it.maxPage ?: 1) <= 3 })
