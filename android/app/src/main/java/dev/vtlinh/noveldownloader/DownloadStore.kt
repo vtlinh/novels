@@ -50,7 +50,7 @@ class CachedChapterList(
 )
 
 class DownloadStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, 19) {
+    SQLiteOpenHelper(context.applicationContext, "downloads.db", null, Schema.VERSION) {
 
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
@@ -65,178 +65,20 @@ class DownloadStore(context: Context) :
         private val chlistEpochAll = java.util.concurrent.atomic.AtomicLong(0)
 
         private fun epochKey(folder: String, slug: String) = "$folder\u0000$slug"
-        private const val NOVELS_TABLE =
-            "CREATE TABLE IF NOT EXISTS novels (" +
-                "folder TEXT, slug TEXT, url TEXT, title TEXT, " +
-                "started INTEGER, total INTEGER DEFAULT -1, complete INTEGER DEFAULT 0, " +
-                "author TEXT DEFAULT '', disk_count INTEGER DEFAULT 0, " +
-                "last_dl INTEGER DEFAULT 0, last_read INTEGER DEFAULT 0, " +
-                "dir_name TEXT DEFAULT '', " +
-                "PRIMARY KEY(folder, slug))"
-        /* which novel a folder NAME belongs to, so a second novel that
-           sanitises onto the same name is sent elsewhere instead of writing
-           over the first one's chapters */
-        private const val FOLDER_OWNER_TABLE =
-            "CREATE TABLE IF NOT EXISTS folder_owner (" +
-                "folder TEXT, name TEXT, slug TEXT, PRIMARY KEY(folder, name))"
-        /* folders whose one-time root scan has been folded into the registry */
-        private const val SCANNED_TABLE =
-            "CREATE TABLE IF NOT EXISTS scanned (folder TEXT PRIMARY KEY, at INTEGER)"
-        /* the site's exact chapter order (listing-page sequence), per novel */
-        private const val ORDER_TABLE =
-            "CREATE TABLE IF NOT EXISTS chapter_order (" +
-                "folder TEXT, slug TEXT, filename TEXT, ord INTEGER, " +
-                "PRIMARY KEY(folder, slug, filename))"
-        /* cached resolved chapter listing (see CachedChapterList).
-           Invalidated by every write to the chapter index / order, and by
-           the compress pass. */
-        private const val CHLIST_TABLE =
-            "CREATE TABLE IF NOT EXISTS chlist (" +
-                "folder TEXT, slug TEXT, pos INTEGER, name TEXT, src TEXT, tr TEXT, " +
-                "PRIMARY KEY(folder, slug, pos))"
     }
 
-    override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL(
-            "CREATE TABLE chapters (" +
-                "folder TEXT, slug TEXT, filename TEXT, uri TEXT, url TEXT DEFAULT '', " +
-                "size INTEGER DEFAULT 0, hash TEXT DEFAULT '', " +
-                "PRIMARY KEY(folder, slug, filename))",
-        )
-        db.execSQL(
-            "CREATE TABLE names (" +
-                "folder TEXT, slug TEXT, vi TEXT, en TEXT, " +
-                "PRIMARY KEY(folder, slug, vi))",
-        )
-        db.execSQL(
-            "CREATE TABLE pending_batches (" +
-                "batch_id TEXT PRIMARY KEY, folder TEXT, slug TEXT, " +
-                "files TEXT, urls TEXT, created INTEGER, tries INTEGER, want_title TEXT)",
-        )
-        db.execSQL(
-            "CREATE TABLE titles (" +
-                "folder TEXT, slug TEXT, english TEXT, " +
-                "PRIMARY KEY(folder, slug))",
-        )
-        db.execSQL(FOLDER_OWNER_TABLE)
-        db.execSQL(NOVELS_TABLE)
-        db.execSQL(SCANNED_TABLE)
-        db.execSQL(ORDER_TABLE)
-        db.execSQL(CHLIST_TABLE)
+    /* The statements themselves live in Schema, which has no Android in it, so
+       the migrations can be replayed against a real SQLite in a plain JVM test
+       — see SchemaTest. They run once per install, on data nobody can get
+       back, which is not something to leave resting on a careful reading. */
+    private fun on(db: SQLiteDatabase) = object : Schema.Exec {
+        override fun exec(sql: String) = db.execSQL(sql)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 4) {
-            /* pre-v4 schemas differ in place — rebuild (it's all cache/index) */
-            db.execSQL("DROP TABLE IF EXISTS chapters")
-            db.execSQL("DROP TABLE IF EXISTS names")
-            db.execSQL("DROP TABLE IF EXISTS pending_batches")
-            db.execSQL("DROP TABLE IF EXISTS titles")
-            db.execSQL("DROP TABLE IF EXISTS novels")
-            onCreate(db)
-            return
-        }
-        /* v4+ upgrades are additive; keep everything else (the names
-           glossary especially is not rebuildable) */
-        if (oldVersion < 5) db.execSQL(NOVELS_TABLE)   // creates the full current shape
-        if (oldVersion == 5) db.execSQL("ALTER TABLE novels ADD COLUMN author TEXT DEFAULT ''")
-        if (oldVersion in 5..6) db.execSQL("ALTER TABLE novels ADD COLUMN disk_count INTEGER DEFAULT 0")
-        if (oldVersion < 7) db.execSQL(SCANNED_TABLE)
-        if (oldVersion in 5..7) db.execSQL("ALTER TABLE novels ADD COLUMN last_dl INTEGER DEFAULT 0")
-        if (oldVersion in 5..8) db.execSQL("ALTER TABLE novels ADD COLUMN last_read INTEGER DEFAULT 0")
-        if (oldVersion < 10) db.execSQL(ORDER_TABLE)
-        /* v10 orders were polluted by the sites' "latest chapters" widget —
-           purge so downloads / Check status re-index with correct scoping */
-        if (oldVersion == 10) db.execSQL("DELETE FROM chapter_order")
-        if (oldVersion < 12) db.execSQL(CHLIST_TABLE)
-        /* v12 orders were polluted the same way v10's were: the scoped
-           chapter list was consulted only for links we hadn't seen, so a
-           listing page of already-seen chapters counted as empty and fell
-           through to the whole document — where the "latest chapters" widget
-           lives. Purge the orders and the cached listings built from them so
-           both re-index cleanly. */
-        if (oldVersion < 13) {
-            db.execSQL("DELETE FROM chapter_order")
-            db.execSQL("DELETE FROM chlist")
-        }
-        /* a chapter's page URL, so its file keeps the same name for life
-           however the site relabels or renumbers it. Blank for everything
-           downloaded before this column existed; the engine fills those in
-           as it recognises them. */
-        if (oldVersion < 14) {
-            try { db.execSQL("ALTER TABLE chapters ADD COLUMN url TEXT DEFAULT ''") } catch (e: Exception) {}
-            /* v14 is also where "Chapter N" stopped meaning the number the
-               site printed and started meaning the Nth entry in its listing.
-               Both of these index chapters BY FILENAME, so every row written
-               before the change now names a different chapter than it meant
-               to — and the reader sorts by exactly these. Drop them; a
-               download or a Check status rebuilds both. */
-            db.execSQL("DELETE FROM chapter_order")
-            db.execSQL("DELETE FROM chlist")
-        }
-        /* size + content hash, so a duplicate left behind by an earlier
-           naming scheme can be recognised as the same chapter and dropped */
-        if (oldVersion < 15) {
-            try { db.execSQL("ALTER TABLE chapters ADD COLUMN size INTEGER DEFAULT 0") } catch (e: Exception) {}
-            try { db.execSQL("ALTER TABLE chapters ADD COLUMN hash TEXT DEFAULT ''") } catch (e: Exception) {}
-        }
-        /* v15 hashed the whole file, heading included, so the same chapter
-           saved under two numbering schemes never matched itself. Hashes are
-           of the body now — drop the old ones rather than compare across
-           two meanings. */
-        if (oldVersion == 15) db.execSQL("UPDATE chapters SET hash=''")
-        /* the page each chapter in a submitted batch came from, so results
-           collected after the listing shifted are filed by identity rather
-           than by a filename that has since moved to another chapter */
-        if (oldVersion < 17) {
-            try { db.execSQL("ALTER TABLE pending_batches ADD COLUMN urls TEXT DEFAULT ''") } catch (e: Exception) {}
-        }
-        /* Folder ownership. v17 briefly kept this in `titles`, which is the
-           translated-title cache — seed the new table from the novels that
-           already have chapters, so an existing library owns the folders it
-           has been using rather than being evicted from them by whichever
-           novel happens to run first. */
-        if (oldVersion < 18) {
-            db.execSQL(FOLDER_OWNER_TABLE)
-            try {
-                db.execSQL(
-                    "INSERT OR IGNORE INTO folder_owner(folder,name,slug) " +
-                        "SELECT folder, english, slug FROM titles WHERE english<>''",
-                )
-            } catch (e: Exception) {}
-        }
-        /* Which directory each novel actually uses. Nothing recorded it
-           before, so ownership had to be inferred — and the inference was
-           "this slug has chapters somewhere in this tree", which is true of
-           every novel on its second run. Two novels whose titles sanitise to
-           the same name therefore collapsed into one folder: the second one
-           skipped the disambiguating suffix, resolved to the first one's
-           directory, renamed its files and wrote into it.
+    override fun onCreate(db: SQLiteDatabase) = Schema.create(on(db))
 
-           AFTER the v18 block, not before it. These run in written order, not
-           in version order, and the seed below reads folder_owner — which for
-           anything older than v18 is a table that does not exist yet. The
-           statement threw, the throw was swallowed, and every pre-v18 library
-           upgraded with an empty dir_name for every novel: exactly the state
-           this column exists to avoid. */
-        if (oldVersion < 19) {
-            try { db.execSQL("ALTER TABLE novels ADD COLUMN dir_name TEXT DEFAULT ''") } catch (e: Exception) {}
-            /* Seed it from the ownership table, which v18 has just populated.
-               Without this an existing library has no recorded directory, so
-               every guard that asks "which folder is this novel's?" falls back
-               to rebuilding the name from the title — which gives the
-               UNSUFFIXED one, i.e. another novel's folder — until each novel
-               happens to be downloaded again. */
-            try {
-                db.execSQL(
-                    "UPDATE novels SET dir_name = COALESCE((" +
-                        "SELECT name FROM folder_owner " +
-                        "WHERE folder_owner.folder = novels.folder AND folder_owner.slug = novels.slug" +
-                        "), '') WHERE dir_name = ''",
-                )
-            } catch (e: Exception) {}
-        }
-    }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) =
+        Schema.upgrade(on(db), oldVersion)
 
     /* ---- site chapter order (reader sorts by this, not by filename) ---- */
 
