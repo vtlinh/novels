@@ -191,12 +191,15 @@ object Ownership {
     ): Boolean {
         /* The recorded directory FIRST — "the whole answer when there is one",
            as stated above, which an `owner == slug` test in front of it made
-           untrue. Owning a name and living in it are different facts: a novel
-           whose folder was renamed Vietnamese → English keeps its claim on the
-           old name (nothing releases it), so on any later run that computes
-           the Vietnamese name back — translation switched off, a title batch
-           that failed — the claim said "ours", the folder was not there any
-           more, and a fresh EMPTY one was created and recorded. The run then
+           untrue. Owning a name and living in it are different facts, and they
+           come apart routinely: a novel downloaded untranslated lives in its
+           Vietnamese folder for good (translatedFolder no longer renames it),
+           while every later run computes the ENGLISH name from the cached
+           title and asks about that one. A novel pushed off a colliding name
+           is the same shape.
+
+           Answering from the claim alone sent a run into a folder that was not
+           there — a fresh EMPTY one was created and recorded. The run then
            downloaded nothing (the index still resolved into the real folder),
            the library pointed at the empty directory, and a translation pass
            found nothing done and re-submitted the whole novel to the API. */
@@ -267,8 +270,9 @@ object Ownership {
             return Choice(wanted, stepAside = false, recorded = false)
         }
         /* We own a folder under a different name — a suffix from a past
-           collision, or the name before a translated rename. Keep using it
-           rather than recomputing our way back into somebody else's. */
+           collision, or the Vietnamese name a novel downloaded before
+           translation was switched on keeps for good. Keep using it rather
+           than recomputing our way back into somebody else's. */
         if (recordedDir != null && recordedDirOnDisk()) {
             return Choice(recordedDir, stepAside = false, recorded = true)
         }
