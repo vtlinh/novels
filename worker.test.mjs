@@ -10,7 +10,7 @@
 
 import worker from "./worker.js";
 
-const ENV = { FETCH_TOKEN: "s3cret-token-value" };
+const ENV = { FETCH_TOKEN: "s3cret-token-value", GH_TOKEN: "gh-read-only-token" };
 const CTX = { waitUntil() {} };
 
 /* The real one is a Cloudflare API; nothing here exercises the cache path. */
@@ -189,6 +189,63 @@ await check("fetch-many refuses an off-allowlist redirect too", async () => {
   const j = await r.json();
   eq(j.results[0].status, 403, "status");
   eq(j.results[0].html, "", "html must be empty");
+});
+
+/* The app's own release, served to anyone. The repository is private, so the
+ * GitHub assets the updater used to fetch now 404 on a device with no
+ * credential — every installed copy would quietly stop finding updates. These
+ * two routes deliberately skip the token gate, which is safe only because
+ * they take no url from the caller. */
+const RELEASE = {
+  assets: [{ name: "version.json", id: 11 }, { name: "app-release.apk", id: 22 }],
+};
+
+await check("the release manifest is served without a token", async () => {
+  stub = async (u) => {
+    if (u.includes("/releases/tags/")) return new Response(JSON.stringify(RELEASE), { status: 200 });
+    if (u.includes("/releases/assets/11")) return new Response('{"versionCode":9}', { status: 200 });
+    throw new Error("unexpected " + u);
+  };
+  const r = await call("/app/version.json");
+  eq(r.status, 200, "status");
+  eq((await r.text()).includes("versionCode"), true, "body");
+});
+
+await check("the apk is served without a token", async () => {
+  stub = async (u) => {
+    if (u.includes("/releases/tags/")) return new Response(JSON.stringify(RELEASE), { status: 200 });
+    if (u.includes("/releases/assets/22")) return new Response("APKBYTES", { status: 200 });
+    throw new Error("unexpected " + u);
+  };
+  const r = await call("/app/app-release.apk");
+  eq(r.status, 200, "status");
+  eq(r.headers.get("content-type"), "application/vnd.android.package-archive", "content-type");
+});
+
+/* The credential must not be replayed to whatever host the redirect names,
+ * and a redirect somewhere unexpected is refused rather than proxied. */
+await check("an asset redirect off GitHub is refused", async () => {
+  stub = async (u) => {
+    if (u.includes("/releases/tags/")) return new Response(JSON.stringify(RELEASE), { status: 200 });
+    return new Response("", { status: 302, headers: { location: "https://example.com/evil" } });
+  };
+  const r = await call("/app/app-release.apk");
+  eq(r.status, 502, "status");
+  eq((await r.text()).includes("off GitHub"), true, "reason");
+});
+
+await check("the release routes cannot be turned into a proxy", async () => {
+  stub = () => { throw new Error("must not reach upstream"); };
+  for (const p of ["/app/", "/app/../worker.js", "/app/anything.txt"]) {
+    const r = await call(p);
+    eq(r.status !== 200, true, `${p} must not serve anything`);
+  }
+});
+
+await check("a missing GH_TOKEN fails closed rather than silently", async () => {
+  stub = () => { throw new Error("must not reach upstream"); };
+  const r = await worker.fetch(new Request("https://w.example/app/version.json"), { FETCH_TOKEN: "x" }, CTX);
+  eq(r.status, 500, "status");
 });
 
 await check("health needs no token", async () => {
