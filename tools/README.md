@@ -1,7 +1,7 @@
 # The dev fetch Worker
 
-`worker.js` at the repo root is a small, authenticated fetch proxy for the two
-novel sites. **The app does not use it and must not** — it fetches sites
+`worker.js` at the repo root is a small, authenticated fetch proxy for the
+supported novel sites. **The app does not use it and must not** — it fetches sites
 directly, which is the point of it being a native app. This exists so work on
 the app can read a real page: capturing the test fixtures in
 `android/app/src/sites/<site>/test/resources/`, checking what a site's HTML actually
@@ -97,13 +97,13 @@ The Worker is authenticated and host-restricted in code:
 
 - a shared secret on every request, compared in full so a near-miss can't be
   found a character at a time by timing;
-- an allowlist regex — only the two novel sites' hosts, https only. A leaked
+- an allowlist regex — only the supported novel sites' hosts, https only. A leaked
   token would otherwise make it everyone's proxy;
 - an 8 MB cap, a five-minute edge cache so repeated reads don't hammer a site,
   and no cookie or request-body forwarding.
 
 `node worker.test.mjs` checks those decisions offline with `fetch` stubbed:
-twelve cases covering a missing/wrong/near-miss token, four kinds of
+twenty cases covering a missing/wrong/near-miss token, four kinds of
 out-of-allowlist URL, a challenge page, a 404, `head=1`, both `/fetch-many`
 paths, and a Worker with no secret set. It caught a real bug when it was
 written — a non-ASCII character in a response header, which throws, so every
