@@ -30,6 +30,16 @@ interface Site {
 
     fun matches(url: String): Boolean
 
+    /* The hosts this site serves, most canonical first.
+
+       `matches` is a predicate and cannot be enumerated, so the browser's
+       start screen had no way to name a site the user had not already
+       visited — it listed browsing history and nothing else, which means a
+       newly supported site stayed invisible until you knew to type it in.
+       This is that list, and it lives here because which hosts a site
+       answers to is the site's own business. */
+    val hosts: List<String>
+
     /* ---- urls ---- */
 
     /* any url of this site -> (the novel's listing base, its slug) */

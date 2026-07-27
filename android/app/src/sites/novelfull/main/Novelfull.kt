@@ -14,6 +14,10 @@ object Novelfull : Site {
     override val english = true
     override val listScope = "#list-chapter"
 
+    /* .com first: it is the larger catalogue, and .net carries novels it
+       does not rather than being a mirror of it */
+    override val hosts = listOf("novelfull.com", "novelfull.net")
+
     /* .com and .net serve the same application — same #list-chapter, same
        /slug/chapter-name.html links, same ?page=N pagination — and .net
        carries novels .com's catalogue does not. normalize keeps whichever

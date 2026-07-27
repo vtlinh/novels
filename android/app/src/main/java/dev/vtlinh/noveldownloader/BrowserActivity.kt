@@ -105,6 +105,39 @@ class BrowserActivity : AppCompatActivity() {
         return out
     }
 
+    /* What the start screen lists: EVERY supported site, most recently
+       visited first.
+
+       It used to list browsing history and nothing else, which meant a site
+       became visible only after you had already found it — a newly supported
+       one was reachable solely by typing its address, and nothing in the app
+       ever said which sites it supports. The registry is the answer to that
+       question, so the list is built from Sites.all and merely ORDERED by
+       history.
+
+       A supported site that has never been opened sorts last, in registry
+       order, rather than being absent. Domains visited that no adapter claims
+       keep their place at the end, so the history this screen used to be does
+       not disappear from it. */
+    private fun startScreenDomains(): List<String> {
+        val seen = domainHistory()
+        fun lastVisit(host: String) =
+            seen[host] ?: seen.entries.firstOrNull { (k, _) ->
+                /* www.x.com and x.com are the same site to the user, and at
+                   least one supported host redirects between them */
+                k == "www.$host" || "www.$k" == host
+            }?.value ?: 0L
+
+        val supported = Sites.all.flatMap { it.hosts }.distinct()
+        val ranked = supported.sortedWith(
+            compareByDescending<String> { lastVisit(it) }
+                .thenBy { supported.indexOf(it) },
+        )
+        val others = seen.entries.sortedByDescending { it.value }.map { it.key }
+            .filter { h -> supported.none { it == h || "www.$it" == h || it == "www.$h" } }
+        return ranked + others
+    }
+
     private fun recordDomainVisit(host: String) {
         val map = domainHistory()
         map[host] = System.currentTimeMillis()
@@ -312,7 +345,7 @@ class BrowserActivity : AppCompatActivity() {
        a URL can be typed here instead of only tapped from the list */
     private fun showRecentPanel() {
         val web = findViewById<WebView>(R.id.webview)
-        val history = domainHistory().entries.sortedByDescending { it.value }.map { it.key }
+        val history = startScreenDomains()
         val list = findViewById<android.widget.ListView>(R.id.recentList)
         list.adapter = object : android.widget.ArrayAdapter<String>(
             this, android.R.layout.simple_list_item_1, history,

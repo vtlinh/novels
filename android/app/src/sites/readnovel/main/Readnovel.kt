@@ -27,6 +27,8 @@ object Readnovel : Site {
        whichever came first in the document and called six links a novel. */
     override val listScope = "#list-chapter"
 
+    override val hosts = listOf("read-novel.com")
+
     private val urlRe = Regex("^https://read-novel\\.com/", RegexOption.IGNORE_CASE)
 
     override fun matches(url: String) = urlRe.containsMatchIn(url.trim())
