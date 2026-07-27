@@ -431,7 +431,15 @@ class RealChapterTest {
                container, which TTS reads aloud and a translation pass pays
                the API to translate */
             "Từ khóa tìm kiếm",
-            "function ", "googletag", "adsbygoogle", "<script",
+            /* JavaScript that survived, matched on shapes prose cannot have.
+               This was "function " with a trailing space, which is an
+               ordinary English word: a read-novel.com chapter says magic
+               "seemed to function weirdly in there" and failed as leftover
+               script. A marker that fires on the corpus growing is a marker
+               that gets carved an exception, and the rule here is that there
+               are none. */
+            "function(", "function (", "=function", "});", "var _",
+            "googletag", "adsbygoogle", "<script",
         )
         for (c in chapters) {
             val out = parse(c)
