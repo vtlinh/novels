@@ -91,10 +91,14 @@ class RealPageTest {
 
     private fun doc(f: Fixture) = Jsoup.parse(read(f.file), f.url)
 
+    /* Every site in the registry, not a list written out here: a site added
+       without its corpus would otherwise be held to nothing, and the corpus
+       is the only thing that makes its adapter a measurement rather than a
+       guess (CLAUDE.md). */
     @Test
-    fun `the fixtures cover both sites, finished and ongoing, short and long`() {
+    fun `the fixtures cover every supported site, finished and ongoing, short and long`() {
         val novels = fixtures.filter { it.kind == "novel" }
-        for (name in listOf("truyenfull", "novelfull")) {
+        for (name in Sites.all.map { it.name }) {
             val mine = novels.filter { it.site.name == name }
             /* at LEAST — the corpus grows when a site gains a host, and
                novelfull is served from both .com and .net */
@@ -318,9 +322,9 @@ class RealChapterTest {
         Extractor.parseChapter(Jsoup.parse(read(c.file), c.url), "", c.headingNumber ?: 1, c.site)
 
     @Test
-    fun `chapter pages are captured from both sites, first and middle`() {
+    fun `chapter pages are captured from every supported site, first and middle`() {
         assertTrue("no chapter fixtures", chapters.size >= 20)
-        for (name in listOf("truyenfull", "novelfull")) {
+        for (name in Sites.all.map { it.name }) {
             assertTrue("$name: no chapter pages", chapters.any { it.site.name == name })
         }
         assertTrue("no first chapters", chapters.any { it.which == "first" })
@@ -422,6 +426,11 @@ class RealChapterTest {
             "Chương trước", "Chương tiếp", "Chương sau",
             "Previous Chapter", "Next Chapter", "Report chapter",
             "Bạn đang đọc truyện tại", "truyenfull.vn",
+            /* the SEO keyword blob parked at the end of a chapter — 300
+               characters naming every rival site, inside the chapter
+               container, which TTS reads aloud and a translation pass pays
+               the API to translate */
+            "Từ khóa tìm kiếm",
             "function ", "googletag", "adsbygoogle", "<script",
         )
         for (c in chapters) {

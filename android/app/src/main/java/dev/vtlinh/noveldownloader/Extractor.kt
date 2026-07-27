@@ -15,6 +15,32 @@ object Extractor {
         RegexOption.IGNORE_CASE,
     )
     private val JUNK_CLASS_RE = Regex("(^|[^a-z])(ads?|banner|notice|lock(ed)?|unlock)([^a-z]|$)", RegexOption.IGNORE_CASE)
+
+    /* A "you are reading at <site>" stamp spliced INTO a sentence rather than
+       given a line of its own:
+
+         …không có chút sáng sủa nào cả. Bạn đang đọc truyện tại -
+         http://truyenfull.com Cuối cùng Huân Nhi lên tràng…
+
+       The line filter below cannot touch this: the paragraph it sits in is
+       real prose and well over the 200-character cut, so the choice there is
+       between keeping the advert and deleting the paragraph around it. Cut
+       out exactly the stamp — the phrase and the url it points at — and leave
+       the sentence it interrupted. Found in the truyenfullmoi corpus, on a
+       chapter of a novel the other sites also carry without it. */
+    private val INLINE_JUNK_RE = Regex(
+        "(bạn đang đọc truyện tại|nguồn truyện|đọc truyện tại)\\s*[-–:]?\\s*(https?://)?[\\w.-]+\\.(com|net|vn|org|info)\\S*",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /* The SEO keyword blob these sites park at the end of a chapter — a
+       labelled list of every rival site's name, 300 characters of it, inside
+       the chapter container. Too long for the 200-character rule above, and
+       it is neither prose nor a heading: TTS reads it aloud and a translation
+       pass pays the API to translate it. Matched on its own label at the
+       start of the line, so a paragraph that merely mentions the words is
+       untouched. */
+    private val KEYWORD_LINE_RE = Regex("^(từ khóa tìm kiếm|tu khoa tim kiem)\\s*:", RegexOption.IGNORE_CASE)
     /* The fractional part is consumed but not captured. Without it "(\d+)"
        stopped at the decimal point and the separator is optional, so the rest
        of the number fell into the TITLE: "Chapter 1.5: Side Story" parsed as
@@ -97,8 +123,20 @@ object Extractor {
             p.appendChild(TextNode("\n"))
         }
         val text = div.wholeText().split("\n")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && !(it.length < 200 && AD_RE.containsMatchIn(it)) }
+            /* Squeeze the gap the cut leaves, and ONLY on a line the cut
+               touched. Collapsing every run of spaces here instead destroys
+               the one marker the heading strip below has to work with: a page
+               that prints its heading twice inside a single line separates
+               the two with a run of spaces and nothing else, and with the run
+               gone the duplicate went out in the file. */
+            .map {
+                if (!INLINE_JUNK_RE.containsMatchIn(it)) it.trim()
+                else INLINE_JUNK_RE.replace(it, " ").replace(SPACE_RUN_RE, " ").trim()
+            }
+            .filter {
+                it.isNotEmpty() && !KEYWORD_LINE_RE.containsMatchIn(it) &&
+                    !(it.length < 200 && AD_RE.containsMatchIn(it))
+            }
             .joinToString("\n")
         return Pair(text, raw)
     }

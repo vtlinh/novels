@@ -97,14 +97,25 @@ abstract class SiteContract {
     }
 
     /* Measured at capture time by a script that does not use this parser, so
-       these are cross-checks rather than echoes. */
+       these are cross-checks rather than echoes.
+
+       DISTINCT links, not the raw count. A site is free to print the same
+       chapter twice in its own list, and truyenfullmoi does: three of its
+       captured pages list a run of chapters a second time, one of them eight
+       of them. The engine keys chapters by href and so sees the novel the
+       distinct set describes — counting the repeats would hold the parser to
+       a number the app never works with. */
     @Test
     fun `the chapter count in the listing container matches what was measured`() {
         for (r in novels) {
             val (_, slug) = site.normalize(r[3])
             val found = Listing.collect(Jsoup.parse(page(r[1]), r[3]), site, slug)
             assertFalse("${r[1]}: fell back to the whole document", found.fellBack)
-            assertEquals("${r[1]}: chapters in container", r[6].toInt(), found.links.size)
+            assertEquals(
+                "${r[1]}: chapters in container",
+                r[6].toInt(),
+                found.links.map { it.first }.distinct().size,
+            )
         }
     }
 
