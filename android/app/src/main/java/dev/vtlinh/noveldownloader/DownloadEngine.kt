@@ -1402,10 +1402,11 @@ class DownloadEngine(
         }
 
         /* When translating, render the English folder name up front (Sonnet,
-           Batches API) so chapters save straight into an "English (Vietnamese)"
-           folder. If a plain Vietnamese-named folder already exists from an
-           earlier non-translated run, rename it in place instead of starting
-           a fresh one. */
+           Batches API) so a NEW novel's chapters save straight into an
+           "English (Vietnamese)" folder. A novel that already has a folder
+           keeps it — this used to rename the Vietnamese one in place, which
+           went wrong in every direction it could; Ownership.translatedFolder
+           lists them. */
         val vietName = Extractor.folderName(title, slug)
         var folderName = vietName
         /* ...and only when there is anything to translate. The chapter pass
@@ -1423,88 +1424,26 @@ class DownloadEngine(
                 t.ensureEnglishTitle(title, store, folderKey, slug) { stopRequested }
             } catch (e: Exception) { log("Title translation failed — ${e.message}"); null }
             if (!english.isNullOrBlank()) {
-                folderName = english
-                if (english != vietName) {
-                    /* WHICH Vietnamese folder — the one this novel is on
-                       record as using, not the one its title happens to
-                       compute to. This was the last place in the app that
-                       resolved a novel's directory by rebuilding the name, and
-                       it runs sixty lines before the ownership check written
-                       to stop exactly that, so the check could only ever
-                       bless a rename that had already happened.
-
-                       findFile matches on the display name alone, and the
-                       tree can hold another novel's folder under that name:
-                       truyenfull serves the same title under two slugs
-                       (dau-la-dai-luc and dau-la-dai-luc-230420, both "Đấu La
-                       Đại Lục"), sanitising folds tone marks so "Thần Y" and
-                       "Thân Y" meet, and a folder the Library scan adopted is
-                       claimed under a slug invented from its name. Renaming
-                       it made the other novel's chapters look unclaimed —
-                       settled() returns true for a file with no recorded page
-                       — so this novel adopted them, paid to translate them,
-                       and left the real owner pointing at a directory that no
-                       longer exists, to be downloaded and translated again.
-
-                       No record and nothing claimed is still not proof the
-                       folder is ours: a copied-in directory the scan has not
-                       reached yet has neither. Ownership.ours is the app's
-                       answer to this question everywhere else, so ask it
-                       rather than growing a second rule beside it. */
-                    val recorded = try { store.dirNameFor(folderKey, slug) } catch (e: Exception) { null }
-                    val srcName = if (recorded != null) {
-                        /* gone from disk: renamed or moved outside the app.
-                           Not a licence to take the computed name instead. */
-                        recorded.takeIf { root.findFile(it)?.isDirectory == true }
-                    } else if (
-                        Ownership.ours(
-                            slug, vietName,
-                            try { store.slugOwningName(folderKey, vietName) } catch (e: Exception) { null },
-                            null,
-                            try { store.chapterCount(folderKey, slug) } catch (e: Exception) { 0 },
-                            try { store.hasOtherChapters(folderKey, slug) } catch (e: Exception) { true },
-                        )
-                    ) {
-                        vietName
-                    } else {
-                        null
-                    }
-                    val existingEng = root.findFile(english)?.takeIf { it.isDirectory }
-                    val existingViet = srcName?.let { root.findFile(it)?.takeIf { d -> d.isDirectory } }
-                    if (existingEng == null && existingViet != null) {
-                        val ok = try { existingViet.renameTo(english) } catch (e: Exception) { false }
-                        if (ok) {
-                            /* the folder moved, so the cached URIs are stale —
-                               but each file is still the chapter it was */
-                            store.clearUris(folderKey, slug)
-                            /* Record the move NOW. The ownership check below
-                               asks which directory this novel uses; left
-                               saying the Vietnamese name, it saw a name that
-                               no longer exists (we just renamed it), decided
-                               the English folder was somebody else's because
-                               it was full, and pushed this novel into an empty
-                               "Title (slug)" beside its own chapters — then
-                               re-downloaded the novel and re-translated it. */
-                            try { store.setDirName(folderKey, slug, english) } catch (e: Exception) {}
-                            try { store.claimFolderName(folderKey, english, slug) } catch (e: Exception) {}
-                            log("Renamed existing folder to \"$english\"")
-                        } else {
-                            /* The chapters are still in the Vietnamese folder,
-                               so stay with it. Going ahead under the English
-                               name built an empty folder beside a full one:
-                               the index still resolved into the old folder, so
-                               the spot-check passed and nothing re-downloaded,
-                               while the translator saw an empty translated/
-                               and re-sent the entire novel to the API. */
-                            /* srcName, not vietName: the folder we failed to
-                               rename is the one this novel is recorded as
-                               using, which is not always what the title
-                               computes to. */
-                            folderName = srcName
-                            log("Could not rename the folder — keeping \"$srcName\"")
-                        }
-                    }
-                }
+                /* Pick a folder; never rename one. See Ownership.translatedFolder
+                   for why — every way that rename could go wrong, it did. A
+                   novel that already has a directory keeps it; only one with
+                   no directory yet is given the English name, and creating a
+                   folder touches nothing that exists. */
+                val recorded = try { store.dirNameFor(folderKey, slug) } catch (e: Exception) { null }
+                folderName = Ownership.translatedFolder(
+                    english = english,
+                    vietName = vietName,
+                    recordedDir = recorded,
+                    vietIsOurs = Ownership.ours(
+                        slug, vietName,
+                        try { store.slugOwningName(folderKey, vietName) } catch (e: Exception) { null },
+                        null,
+                        try { store.chapterCount(folderKey, slug) } catch (e: Exception) { 0 },
+                        try { store.hasOtherChapters(folderKey, slug) } catch (e: Exception) { true },
+                    ),
+                    onDisk = { root.findFile(it)?.isDirectory == true },
+                )
+                if (folderName != english) log("Keeping the existing folder \"$folderName\"")
             }
         }
 
