@@ -285,9 +285,23 @@ abstract class SiteContract {
             read++
             assertEquals("${r[2]}: url number disagrees with the printed one", printed, n)
         }
-        /* not an assertion about every url — only that the reader is wired up
-           at all for a site whose urls do carry numbers */
-        assertTrue("${site.name}: chapterNumFromUrl never read a single url", read > 0)
+        /* The reader has to have been THOUGHT ABOUT, which is not the same as
+           having to answer. A site whose urls do carry the printed number
+           must read it — that is what `read > 0` catches, an adapter that
+           simply forgot. But a site whose urls carry something else must be
+           free to say so: freewebnovel.com files a chapter under its
+           POSITION ("/chapter-24" on a page printing "Chapter 40"), and a
+           reader there would be wrong on 7% of chapters, in the heading of
+           the saved file and in the only input to the legacy rename guess.
+           Answering null for every url is that site's correct answer — so
+           accept it, but only when it is EVERY url, never a selective
+           silence on the ones that would have disagreed. */
+        val silent = chapters.all { site.chapterNumFromUrl(it[2]) == null }
+        assertTrue(
+            "${site.name}: chapterNumFromUrl read no url at all, and did not " +
+                "consistently decline either — a site either reads its urls or does not",
+            read > 0 || silent,
+        )
     }
 
     /* The listing's own pagination sits inside the chapter-list container on
