@@ -106,6 +106,39 @@ object Listing {
         return if (forgivable.size <= 1) forgivable else emptyList()
     }
 
+    /* What a fetch of a listing page actually established about it.
+
+       The distinction that matters is between "definitely not there" and "no
+       answer": forgiveness is granted on the first and must never be granted
+       on the second. `gone` is what forgiveness reads, and it used only ever
+       to grow — so a page that answered 404 once and then merely timed out
+       stayed "definitely missing" for the rest of the run, and its chapters
+       and their paid translations were deleted on the strength of an answer
+       that had since been contradicted by silence. A timeout is not evidence.
+
+       The confirmation pass is the last word before forgiveness is decided,
+       and in a status check there is no retry behind it at all — that pass
+       renames and deletes but never downloads, so nothing self-corrects. */
+    enum class Answer { PRESENT, MISSING, NO_ANSWER }
+
+    fun answer(html: String?, status: Int): Answer = when {
+        html != null -> Answer.PRESENT
+        status == 404 || status == 410 -> Answer.MISSING
+        else -> Answer.NO_ANSWER
+    }
+
+    /* Apply that to the two sets the listing walk carries. Returns true when
+       the page turned out to be real, so the caller can go on to read it. */
+    fun record(page: Int, a: Answer, gone: MutableSet<Int>, missed: MutableSet<Int>): Boolean {
+        when (a) {
+            Answer.PRESENT -> { gone.remove(page); missed.remove(page) }
+            Answer.MISSING -> gone.add(page)
+            /* no evidence either way — it must not keep counting as proof */
+            Answer.NO_ANSWER -> gone.remove(page)
+        }
+        return a == Answer.PRESENT
+    }
+
     /* The first page we could not read. Chapters discovered before it are
        still at the positions they belong to; everything after it would be
        one slot early, so the run stops collecting there. */

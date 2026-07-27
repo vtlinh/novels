@@ -978,14 +978,9 @@ class DownloadEngine(
             }
             for ((i, html) in htmls.withIndex()) {
                 val p = tailSuspects[i]
-                if (html == null) {
-                    if (codes[i] != 404 && codes[i] != 410) gone.remove(p)
-                    continue
-                }
+                if (!Listing.record(p, Listing.answer(html, codes[i]), gone, missed)) continue
                 /* there after all — a real page, not an over-read */
-                pageHtml[p] = html
-                gone.remove(p)
-                missed.remove(p)
+                pageHtml[p] = html!!
                 last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
             }
         }
@@ -1248,14 +1243,9 @@ class DownloadEngine(
             }
             for ((i, html) in htmls.withIndex()) {
                 val p = tailSuspects[i]
-                if (html == null) {
-                    if (codes[i] != 404 && codes[i] != 410) gone.remove(p)
-                    continue
-                }
+                if (!Listing.record(p, Listing.answer(html, codes[i]), gone, missed)) continue
                 /* it was there after all — a real page, not an over-read */
-                pageHtml[p] = html
-                gone.remove(p)
-                missed.remove(p)
+                pageHtml[p] = html!!
                 last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
             }
             accountForRange()
@@ -1297,22 +1287,11 @@ class DownloadEngine(
                 }
             }
             for ((i, html) in htmls.withIndex()) {
-                if (html == null) {
-                    /* `gone` is what forgiveness is granted on, so it has to
-                       say what the LAST attempt found, not what any attempt
-                       ever found. Only adding to it meant a page that 404'd
-                       once and then timed out stayed "definitely not there"
-                       for the rest of the run — a timeout is no evidence at
-                       all, and the forgiveness rule's own promise, that a
-                       page which did not report missing is never forgiven,
-                       quietly stopped holding. */
-                    if (codes[i] == 404 || codes[i] == 410) gone.add(retry[i])
-                    else gone.remove(retry[i])
-                    continue
-                }
-                pageHtml[retry[i]] = html
-                gone.remove(retry[i])
-                missed.remove(retry[i])
+                /* One rule for all three passes — see Listing.answer. `gone`
+                   is what forgiveness is granted on, so it has to say what the
+                   LAST attempt found rather than what any attempt ever found. */
+                if (!Listing.record(retry[i], Listing.answer(html, codes[i]), gone, missed)) continue
+                pageHtml[retry[i]] = html!!
                 last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))
             }
             accountForRange()
