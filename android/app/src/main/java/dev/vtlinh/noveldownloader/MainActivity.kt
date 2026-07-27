@@ -328,8 +328,11 @@ class MainActivity : AppCompatActivity() {
         prefs.edit().putString("url", typed).apply()
         val site = Sites.forUrl(typed)
         if (site == null) {
+            /* Named from the registry, not written out here: this message
+               listed three hosts and there are nine, so it was telling the
+               user that sites the app supports are not supported. */
             findViewById<TextView>(R.id.statusText).text =
-                "Enter a novel URL from truyenfull.today, truyenfull.live, or novelfull.com"
+                "Enter a novel URL from " + Sites.all.flatMap { it.hosts }.joinToString(", ")
             return
         }
         /* Reduce to the novel's own URL before anything else touches it. The
@@ -342,7 +345,22 @@ class MainActivity : AppCompatActivity() {
            Download again, and a Check status sweep would rename and dedupe
            the novel's files underneath the running download. The browser
            already normalises before starting; this path never did. */
-        val url = try { site.normalize(typed).first } catch (e: Exception) { typed }
+        /* ...and a site is allowed to answer that the url names NO novel: a
+           truyenfullmoi chapter path carries no novel id, and no rule turns it
+           back into one. That answer is empty, and an empty url must not reach
+           the engine — the slug it keys everything on would be empty too, and
+           an empty folder name resolves to the tree root. The browser screen
+           disables its button on the same answer; this is the path a shared
+           link arrives through, so it has to say so instead. */
+        val url = try {
+            val (base, slug) = site.normalize(typed)
+            if (base.isEmpty() || slug.isEmpty()) {
+                findViewById<TextView>(R.id.statusText).text =
+                    "That link doesn't name a novel — open the novel's own page and share that."
+                return
+            }
+            base
+        } catch (e: Exception) { typed }
         /* the user threw this novel away before — confirm before re-downloading */
         val slugKey = NovelListActivity.slugKeyFromUrl(url)
         val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()

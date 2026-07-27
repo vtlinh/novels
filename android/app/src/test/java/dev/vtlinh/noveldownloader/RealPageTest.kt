@@ -60,17 +60,7 @@ class RealPageTest {
        you are debugging can be extracted on its own rather than unpacking
        the whole corpus. The manifest stays plain text: it is the index that
        makes the set reviewable, and it holds no page content. */
-    private fun read(path: String): String {
-        val ins = javaClass.getResourceAsStream("/pages/$path.zip")
-            ?: throw AssertionError("missing test resource: pages/$path.zip")
-        ins.use { raw ->
-            java.util.zip.ZipInputStream(raw).use { zip ->
-                val entry = zip.nextEntry ?: throw AssertionError("empty archive: pages/$path.zip")
-                if (entry.isDirectory) throw AssertionError("expected one page in pages/$path.zip")
-                return zip.readBytes().toString(Charsets.UTF_8)
-            }
-        }
-    }
+    private fun read(path: String) = Manifests.page(path)
 
     private val fixtures: List<Fixture> by lazy {
         Manifests.rows("manifest.tsv")
@@ -296,16 +286,7 @@ class RealChapterTest {
         override fun toString() = file
     }
 
-    private fun read(path: String): String {
-        val ins = javaClass.getResourceAsStream("/pages/$path.zip")
-            ?: throw AssertionError("missing test resource: pages/$path.zip")
-        ins.use { raw ->
-            java.util.zip.ZipInputStream(raw).use { zip ->
-                zip.nextEntry ?: throw AssertionError("empty archive: pages/$path.zip")
-                return zip.readBytes().toString(Charsets.UTF_8)
-            }
-        }
-    }
+    private fun read(path: String) = Manifests.page(path)
 
     private val chapters: List<Chap> by lazy {
         Manifests.rows("chapters.tsv").map { line ->

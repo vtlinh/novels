@@ -121,12 +121,14 @@ class BrowserActivity : AppCompatActivity() {
        not disappear from it. */
     private fun startScreenDomains(): List<String> {
         val seen = domainHistory()
+        /* www.x.com and x.com are the same site to the user, and at least one
+           supported host redirects between them. Both the ranking and the
+           leftovers below have to agree on that, or a site sorts as unvisited
+           in one and as visited in the other, and it appears twice. */
+        fun sameSite(a: String, b: String) = a == b || a == "www.$b" || b == "www.$a"
+
         fun lastVisit(host: String) =
-            seen[host] ?: seen.entries.firstOrNull { (k, _) ->
-                /* www.x.com and x.com are the same site to the user, and at
-                   least one supported host redirects between them */
-                k == "www.$host" || "www.$k" == host
-            }?.value ?: 0L
+            seen[host] ?: seen.entries.firstOrNull { (k, _) -> sameSite(k, host) }?.value ?: 0L
 
         val supported = Sites.all.flatMap { it.hosts }.distinct()
         val ranked = supported.sortedWith(
@@ -134,7 +136,7 @@ class BrowserActivity : AppCompatActivity() {
                 .thenBy { supported.indexOf(it) },
         )
         val others = seen.entries.sortedByDescending { it.value }.map { it.key }
-            .filter { h -> supported.none { it == h || "www.$it" == h || it == "www.$h" } }
+            .filter { h -> supported.none { sameSite(it, h) } }
         return ranked + others
     }
 

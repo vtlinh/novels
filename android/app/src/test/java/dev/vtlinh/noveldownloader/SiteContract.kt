@@ -34,19 +34,10 @@ abstract class SiteContract {
             .filter { it[0] == site.name }
             .toList()
 
-    protected fun page(path: String): String {
-        val ins = javaClass.getResourceAsStream("/pages/$path.zip")
-            ?: throw AssertionError("missing fixture: pages/$path.zip")
-        ins.use { raw ->
-            java.util.zip.ZipInputStream(raw).use { zip ->
-                zip.nextEntry ?: throw AssertionError("empty archive: pages/$path.zip")
-                return zip.readBytes().toString(Charsets.UTF_8)
-            }
-        }
-    }
+    protected fun page(path: String) = Manifests.page(path)
 
     protected val novels by lazy { rows("manifest.tsv").filter { it[4] == "novel" } }
-    private val chapters by lazy { rows("chapters.tsv") }
+    protected val chapters by lazy { rows("chapters.tsv") }
 
     /* ---- the contract ---- */
 
