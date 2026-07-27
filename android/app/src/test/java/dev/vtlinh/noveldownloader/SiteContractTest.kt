@@ -147,6 +147,49 @@ abstract class SiteContract {
         }
     }
 
+    /* ...and it must be the NOVEL's name, not the page's.
+       "Yields a non-empty title" was too weak to be worth much: novelfull.net
+       wraps its og:title in "Read <title> novel online free - NovelFull", and
+       that sanitises to something non-empty perfectly well. It would have
+       become the folder name for every novel captured from that host — and
+       the recorded directory is never recomputed, so permanently. I caught it
+       by reading the live page, which is precisely the method this corpus
+       exists to replace.
+       A site's own brand appearing in a novel's title is the giveaway, and
+       `name` already is that word for every adapter here. */
+    @Test
+    fun `the site's own branding never ends up in a novel's title`() {
+        for (r in novels) {
+            val t = site.title(Jsoup.parse(page(r[1]), r[3])) ?: continue
+            val key = t.lowercase().filter { it.isLetterOrDigit() }
+            assertFalse(
+                "${r[1]}: title \"$t\" carries the site's own name — that is page " +
+                    "furniture, and it would be the novel's folder name for good",
+                key.contains(site.name.lowercase()),
+            )
+        }
+    }
+
+    /* A blunt backstop for furniture that does not happen to name the site.
+       Measured across the captured corpus: novelfull sits at exactly 1.00 on
+       all 100 pages and truyenfull's median is 1.00, with one genuine 2.42
+       (a title carrying a parenthetical alternate name). The wrapped
+       novelfull.net title scores 1.80. */
+    @Test
+    fun `a title is not padded out with words the slug has never heard of`() {
+        for (r in novels) {
+            val t = site.title(Jsoup.parse(page(r[1]), r[3])) ?: continue
+            val (_, slug) = site.normalize(r[3])
+            val tk = t.lowercase().filter { it.isLetterOrDigit() }.length
+            val sk = slug.lowercase().filter { it.isLetterOrDigit() }.length.coerceAtLeast(1)
+            assertTrue(
+                "${r[1]}: title \"$t\" is ${"%.1f".format(tk.toDouble() / sk)}x the length of " +
+                    "its slug — that reads as page furniture rather than a name",
+                tk.toDouble() / sk <= 2.5,
+            )
+        }
+    }
+
     /* ---- chapter pages ---- */
 
     @Test
