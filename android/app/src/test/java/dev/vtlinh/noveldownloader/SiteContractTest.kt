@@ -236,6 +236,16 @@ abstract class SiteContract {
         for (r in chapters) {
             val printed = r[5].toIntOrNull() ?: continue
             val n = site.chapterNumFromUrl(r[2]) ?: continue
+            /* A SUB-CHAPTER cannot be asked of a url. novelfull prints
+               "Book 2: Chapter 9.1" and renders it as ".../book-2-chapter-91-…",
+               so the url says 91 and the page says 9.1 — and from the url
+               alone those two are indistinguishable. One fixture in the
+               corpus is like this, which is exactly why it is in the corpus.
+               The engine already handles the case where a url reads back a
+               number the page disagrees with: the chapter is named by its
+               POSITION in the listing, not by either number. */
+            val heading = site.chapterHeading(Jsoup.parse(page(r[1]), r[2]))?.text().orEmpty()
+            if (Regex("\\d+\\.\\d+").containsMatchIn(heading)) continue
             read++
             assertEquals("${r[2]}: url number disagrees with the printed one", printed, n)
         }
