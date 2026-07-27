@@ -14,7 +14,11 @@ object Novelfull : Site {
     override val english = true
     override val listScope = "#list-chapter"
 
-    private val urlRe = Regex("^https://novelfull\\.com/", RegexOption.IGNORE_CASE)
+    /* .com and .net serve the same application — same #list-chapter, same
+       /slug/chapter-name.html links, same ?page=N pagination — and .net
+       carries novels .com's catalogue does not. normalize keeps whichever
+       host the url came from, so a novel stays where it was found. */
+    private val urlRe = Regex("^https://novelfull\\.(com|net)/", RegexOption.IGNORE_CASE)
 
     override fun matches(url: String) = urlRe.containsMatchIn(url.trim())
 
@@ -72,7 +76,17 @@ object Novelfull : Site {
     override fun isCompleted(doc: Document) =
         doc.select("a[href*=/status/]").any { it.text().trim().equals("Completed", true) }
 
-    override fun title(doc: Document) = SiteHelp.metaTitle(doc)
+/* h3.title FIRST, unlike every other site here. novelfull.com has no
+       og:title at all, so the shared chain happened to land on h3.title and
+       give a clean name — but .net does have one, and it is wrapped in site
+       furniture ("Read <title> novel online free - NovelFull"). Taking og
+       first would have made that the FOLDER NAME for every novel captured
+       from .net, permanently, since the recorded directory is never
+       recomputed. Measured on both hosts before choosing. */
+    override fun title(doc: Document) =
+        doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
+            ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
+            ?: SiteHelp.metaTitle(doc)
 
     override fun author(doc: Document) =
         doc.selectFirst("a[href*=/author/]")?.text()?.trim()?.ifEmpty { null }
