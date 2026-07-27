@@ -93,8 +93,18 @@ class ChapterListActivity : AppCompatActivity() {
                     probes.add(n - 1)
                     for (k in 1 until CACHE_PROBES) probes.add(k * n / CACHE_PROBES)
                     val ok = probes.all { i ->
-                        val ref = cached.source[cached.ordered.getOrNull(i) ?: return@all false]
-                        ref != null && refUsable(context, cr, treeUri, ref)
+                        val name = cached.ordered.getOrNull(i) ?: return@all false
+                        /* No ref means the walk RECORDED this chapter as
+                           unreadable — a 0-byte file it deliberately kept in
+                           the listing so its translation survives — not that
+                           the cache is stale. Treating it as stale threw the
+                           whole listing away and re-walked the folder on every
+                           single open, permanently: one probe is the last
+                           chapter, which is exactly where a file left empty by
+                           a full volume or a pulled card tends to sit, and the
+                           re-walk records the same thing again. */
+                        val ref = cached.source[name] ?: return@all true
+                        refUsable(context, cr, treeUri, ref)
                     }
                     if (ok) return Chapters(cached.ordered, cached.source, cached.translated)
                     try { store.clearChapterList(folder, slug) } catch (e: Exception) {}
