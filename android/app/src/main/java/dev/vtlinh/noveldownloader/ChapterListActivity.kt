@@ -87,25 +87,9 @@ class ChapterListActivity : AppCompatActivity() {
                        listing, and the reader silently skipped over it with no
                        gap shown. Spread the sample across the novel; still a
                        handful of lookups, not a walk. */
-                    val n = cached.ordered.size
-                    val probes = LinkedHashSet<Int>()
-                    probes.add(0)
-                    probes.add(n - 1)
-                    for (k in 1 until CACHE_PROBES) probes.add(k * n / CACHE_PROBES)
-                    val ok = probes.all { i ->
-                        val name = cached.ordered.getOrNull(i) ?: return@all false
-                        /* No ref means the walk RECORDED this chapter as
-                           unreadable — a 0-byte file it deliberately kept in
-                           the listing so its translation survives — not that
-                           the cache is stale. Treating it as stale threw the
-                           whole listing away and re-walked the folder on every
-                           single open, permanently: one probe is the last
-                           chapter, which is exactly where a file left empty by
-                           a full volume or a pulled card tends to sit, and the
-                           re-walk records the same thing again. */
-                        val ref = cached.source[name] ?: return@all true
-                        refUsable(context, cr, treeUri, ref)
-                    }
+                    val ok = Folder.cacheValid(
+                        cached.ordered, cached.source, CACHE_PROBES,
+                    ) { ref -> refUsable(context, cr, treeUri, ref) }
                     if (ok) return Chapters(cached.ordered, cached.source, cached.translated)
                     try { store.clearChapterList(folder, slug) } catch (e: Exception) {}
                 }
@@ -119,101 +103,24 @@ class ChapterListActivity : AppCompatActivity() {
             val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri))
             val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
                 ?: return Chapters(emptyList(), emptyMap(), emptyMap())
-            val source = HashMap<String, String>()
-            val gzSource = HashMap<String, String>()
-            var translatedId: String? = null
-            /* An EMPTY file is not a chapter. The download-side lister has
-               always required a length; this one asked only for the name, and
-               a 0-byte "Chapter N.txt" — what a killed run or a full volume
-               leaves — reads back as "" rather than null, so the reader's
-               unreadable-chapter handling never fired. It recorded a chapter
-               of zero length instead: a blank header, the next chapter's text
-               immediately below it, and the empty chapter saved as the place
-               the novel reopens at. Only a KNOWN zero counts; a provider that
-               reports no size at all gives -1, and dropping those would empty
-               the library. */
-            fun empty(e: Saf.Entry) = e.size == 0L
-            /* ...but the chapter still EXISTS. Dropping the name outright took
-               it out of `ordered` altogether, and `retainAll` below then threw
-               away its translation with it — content the user paid for, which
-               the reader was perfectly able to show. Keep the name and leave
-               it unresolved: readAt returns null for a name with no source,
-               which is the reader's unreadable-chapter path — it says so and
-               stops recording a place it never reached. */
-            val truncated = HashSet<String>()
-            for (e in Saf.children(cr, treeUri, dir.docId)) {
-                if (e.isDir && e.name == "translated") translatedId = e.docId
-                else if (e.isDir) continue
-                else if (Zips.isGzName(e.name)) {
-                    val n = e.name.removeSuffix(".gz")
-                    if (!CHAPTER_RE.matches(n)) continue
-                    if (empty(e)) truncated.add(n) else gzSource[n] = Zips.gzRef(e.docId)
-                } else if (CHAPTER_RE.matches(e.name)) {
-                    if (empty(e)) truncated.add(e.name) else source[e.name] = e.docId
-                }
-            }
-            val translated = HashMap<String, String>()
-            val gzTranslated = HashMap<String, String>()
-            translatedId?.let {
-                for (e in Saf.children(cr, treeUri, it)) {
-                    if (e.isDir || empty(e)) continue
-                    if (Zips.isGzName(e.name)) {
-                        val n = e.name.removeSuffix(".gz")
-                        if (CHAPTER_RE.matches(n)) gzTranslated[n] = Zips.gzRef(e.docId)
-                    } else if (CHAPTER_RE.matches(e.name)) translated[e.name] = e.docId
-                }
-            }
-            /* compressed chapters fill in behind loose .txt files */
-            for ((n, r) in gzSource) if (n !in source) source[n] = r
-            for ((n, r) in gzTranslated) if (n !in translated) translated[n] = r
-            /* a good copy under either name settles it — only a chapter with
-               nothing readable left stays on the truncated list */
-            truncated.removeAll(source.keys)
-            translated.keys.retainAll(source.keys + truncated)
-            /* The site's listing sequence is the order, and it has to be: a
-               site can name chapters after their titles rather than number
-               them, so the number in a filename is only as good as what
-               could be parsed out of a title. The listing is what the site
-               itself presents.
-
-               A chapter the listing doesn't cover — added since the order was
-               recorded, or left by an older build — still has to land in the
-               right place rather than at the end, so slot it just after the
-               last listed chapter that precedes it by number. With no
-               recorded order at all every chapter takes that path, which
-               leaves a plain numeric sort. */
-            val numberOf = { n: String ->
-                CHAPTER_RE.find(n)?.groupValues?.get(1)?.toIntOrNull()
-            }
-            val ordinalByNumber = java.util.TreeMap<Int, Int>()
-            for ((fn, ord) in siteOrder) {
-                val n = numberOf(fn) ?: continue
-                val prev = ordinalByNumber[n]
-                if (prev == null || ord < prev) ordinalByNumber[n] = ord
-            }
-            /* (slot, tie-break), computed once rather than on every compare.
-               A listed chapter ties at 0, so an unlisted one sharing its slot
-               follows it and both stay ahead of the next listed chapter. */
-            val listable = source.keys + truncated
-            val rank = HashMap<String, Pair<Int, Int>>(listable.size)
-            for (name in listable) {
-                val listed = siteOrder[name]
-                rank[name] = if (listed != null) {
-                    Pair(listed, 0)
-                } else {
-                    val n = numberOf(name)
-                    if (n == null) Pair(Int.MAX_VALUE, Int.MAX_VALUE)
-                    else Pair(ordinalByNumber.floorEntry(n)?.value ?: -1, n)
-                }
-            }
-            val ordered = listable.sortedWith(
-                compareBy(
-                    { rank[it]?.first ?: Int.MAX_VALUE },
-                    { rank[it]?.second ?: Int.MAX_VALUE },
-                    { numberOf(it) ?: Int.MAX_VALUE },
-                    { it },
-                ),
+            /* The rules for what a folder holds live in Folder, which has no
+               Android in it — see FolderTest. Three defects in as many
+               releases came out of reasoning about them in place, and SAF
+               cannot be faked off-device, so the folder is handed over as a
+               list. This end does the walking; that end does the deciding. */
+            val kids = Saf.children(cr, treeUri, dir.docId)
+            fun items(list: List<Saf.Entry>) =
+                list.map { Folder.Item(it.name, it.docId, it.isDir, it.size) }
+            val translatedId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
+            val got = Folder.resolve(
+                items(kids),
+                translatedId?.let { items(Saf.children(cr, treeUri, it)) } ?: emptyList(),
+                siteOrder,
             )
+            val ordered = got.ordered
+            val source = got.source
+            val translated = got.translated
+
             /* remember the resolved listing so the next open skips the walk */
             if (slug != null && store != null && ordered.isNotEmpty()) {
                 try {
