@@ -38,7 +38,22 @@
 
 /* The only hosts this will ever reach. Without it an authenticated proxy is
  * still a proxy, and a leaked token would make it everyone's. */
-const SITES = /^https:\/\/(truyenfull\.(today|live|vn)|novelfull\.(com|net))\//i;
+const SITES = new RegExp(
+  "^https://(" +
+    [
+      "truyenfull\\.(today|live|vn)",
+      "novelfull\\.(com|net)",
+      "(www\\.)?truyenfullmoi\\.com",
+      "allnovelupdates\\.com",
+      "read-novel\\.com",
+      "xtruyen\\.vn",
+      "empirenovel\\.com",
+      "novellive\\.app",
+      "(www\\.)?freewebnovel\\.com",
+    ].join("|") +
+    ")/",
+  "i",
+);
 
 /* A browser's headers. Not a disguise — the request really is on our behalf
  * — but these sites serve a different page, or nothing at all, to something

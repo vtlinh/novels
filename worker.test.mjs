@@ -72,9 +72,42 @@ await check("a host outside the allowlist is refused, token or not", async () =>
     "https://api.anthropic.com/v1/messages",
     "https://truyenfull.today.evil.com/x/",
     "http://truyenfull.today/x/",
+    /* the allowlist is a list of alternatives now that it covers nine sites,
+       so a host that merely CONTAINS an allowed one has to keep failing */
+    "https://allnovelupdates.com.evil.com/x",
+    "https://evil.com/https://allnovelupdates.com/x",
+    "https://notfreewebnovel.com/x",
+    "http://xtruyen.vn/x",
   ]) {
     const r = await call("/?url=" + encodeURIComponent(u) + "&token=" + ENV.FETCH_TOKEN);
     eq(r.status, 403, "status for " + u);
+  }
+});
+
+/* ...and every host the capture scripts need really is reachable. The
+   allowlist went from two sites written out inline to a joined list of nine;
+   a mistake in one alternative fails closed and silently, which reads exactly
+   like the site challenging us. */
+await check("every allowlisted novel host is reachable", async () => {
+  stub = async () => html("<html><body>ok</body></html>");
+  for (const u of [
+    "https://truyenfull.today/x/",
+    "https://truyenfull.live/x/",
+    "https://truyenfull.vn/x/",
+    "https://novelfull.com/x.html",
+    "https://novelfull.net/x.html",
+    "https://truyenfullmoi.com/x.1/",
+    "https://www.truyenfullmoi.com/x.1/",
+    "https://allnovelupdates.com/book/x",
+    "https://read-novel.com/novel1000-x.html",
+    "https://xtruyen.vn/x/",
+    "https://empirenovel.com/x",
+    "https://novellive.app/x",
+    "https://freewebnovel.com/x.html",
+    "https://www.freewebnovel.com/x.html",
+  ]) {
+    const r = await call("/?url=" + encodeURIComponent(u) + "&token=" + ENV.FETCH_TOKEN);
+    eq(r.status, 200, "status for " + u);
   }
 });
 
