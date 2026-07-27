@@ -251,6 +251,34 @@ class NovelfullTest : SiteContract() {
        url test would hide most of a novel — the loose one is what the listing
        uses. A 19-page listing once came back as a few hundred chapters and the
        download called itself finished. */
+    /* .net serves the same application and carries novels .com's catalogue
+       does not, so both hosts are this one site. normalize keeps whichever
+       host the url came from — a novel found on .net must not be re-addressed
+       to .com, where it may not exist. */
+    @Test
+    fun `both hosts are recognised and a novel stays on the one it came from`() {
+        assertTrue(site.matches("https://novelfull.com/the-mech-touch.html"))
+        assertTrue(site.matches("https://novelfull.net/the-mech-touch.html"))
+        val (base, slug) = site.normalize("https://novelfull.net/the-mech-touch/chapter-1-ren.html")
+        assertEquals("the-mech-touch", slug)
+        assertTrue("a .net novel must stay on .net, got $base", base.startsWith("https://novelfull.net/"))
+    }
+
+    /* .com has no og:title at all, so the shared title chain happened to land
+       on h3.title and give a clean name. .net HAS one, wrapped in furniture —
+       and the folder a novel lives in is recorded once and never recomputed,
+       so taking it would have named every .net novel "Read ... - NovelFull"
+       for good. */
+    @Test
+    fun `the site's furniture never becomes the novel's folder name`() {
+        val doc = org.jsoup.Jsoup.parse(
+            """<html><head>
+               <meta property="og:title" content="Read The Mech Touch novel online free - NovelFull">
+               </head><body><h3 class="title">The Mech Touch</h3></body></html>""",
+        )
+        assertEquals("The Mech Touch", site.title(doc))
+    }
+
     @Test
     fun `a title-named chapter counts inside the listing but not outside it`() {
         assertTrue(site.isChapterInList("/the-mech-touch/1-ren.html", "the-mech-touch"))
