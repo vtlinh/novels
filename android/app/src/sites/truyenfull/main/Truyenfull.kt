@@ -13,6 +13,9 @@ object Truyenfull : Site {
     override val headingWord = "Chương"
     override val listScope = "#list-chapter"
 
+    /* both spellings serve the same catalogue */
+    override val hosts = listOf("truyenfull.today", "truyenfull.live")
+
     private val urlRe = Regex("^https://truyenfull\\.(today|live)(/|$)", RegexOption.IGNORE_CASE)
 
     override fun matches(url: String) = urlRe.containsMatchIn(url.trim())

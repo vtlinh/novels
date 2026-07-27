@@ -28,6 +28,9 @@ object Truyenfullmoi : Site {
     override val headingWord = "Chương"
     override val listScope = "#list-chapter"
 
+    /* the apex redirects to www, so either opens the same site */
+    override val hosts = listOf("truyenfullmoi.com")
+
     private val urlRe = Regex("^https://(www\\.)?truyenfullmoi\\.com(/|$)", RegexOption.IGNORE_CASE)
 
     override fun matches(url: String) = urlRe.containsMatchIn(url.trim())

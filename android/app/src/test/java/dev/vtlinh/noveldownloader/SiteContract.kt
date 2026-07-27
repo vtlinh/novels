@@ -70,6 +70,31 @@ abstract class SiteContract {
         }
     }
 
+    /* The browser's start screen lists every supported site by name, so a
+       site that declares a host it does not claim would put a dead entry on
+       that screen, and one whose captured pages come from a host it never
+       declares would be unreachable from it. */
+    @Test
+    fun `it declares the hosts it serves, and claims every one of them`() {
+        assertTrue("${site.name}: declares no hosts", site.hosts.isNotEmpty())
+        for (h in site.hosts) {
+            assertFalse("${site.name}: host \"$h\" should be bare, not a url", h.contains("/"))
+            assertTrue(
+                "${site.name}: declares $h but does not claim https://$h/",
+                site.matches("https://$h/"),
+            )
+        }
+        /* ...and the hosts the corpus was actually captured from are among
+           them, give or take the www the sites redirect between */
+        for (r in novels) {
+            val host = java.net.URI(r[3]).host.orEmpty().removePrefix("www.")
+            assertTrue(
+                "${site.name}: captured from $host, which it does not declare",
+                site.hosts.any { it.removePrefix("www.") == host },
+            )
+        }
+    }
+
     /* normalize is how every later step addresses the novel — a base to page
        through and a slug that names its folder for life. */
     @Test
