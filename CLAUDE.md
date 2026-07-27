@@ -48,25 +48,56 @@
 
 ## Adding a supported site
 
-- A new site in `Sites.kt` is not done until it has fixtures: **100 novel
-  pages and 30 chapter pages** captured from it, spanning finished and
-  ongoing novels and books from a handful of chapters to thousands. Fetch
-  them through the dev Worker (`tools/README.md`), add the host to its
-  `SITES` allowlist first, and pace the crawl — these sites challenge a
-  burst, and some individual novels are challenge-protected for every client
+- A site is a class under `sites/` implementing the `Site` interface, plus a
+  `SiteContract` subclass in the tests. The contract asks every question the
+  engine asks, so a site cannot be added without answering all of them. Nothing
+  outside `sites/` may hold a selector for a particular site — that knowledge
+  used to be spread over four files and a selector added for one site silently
+  changed what the others extracted.
+
+- **The site is not done until its pages are captured.** Per site:
+  - **100 novel pages**, deliberately mixed: completed AND in progress, short
+    AND long — a handful of chapters up to thousands. A corpus of only
+    finished, only popular novels tests one shape and misses the rest; the
+    first attempt here captured 88 completed novels in a row before anyone
+    noticed the candidate ordering.
+  - **30 chapter pages**, spread ACROSS those novels rather than taken from
+    one — first chapters, middle chapters, chapters from long books and from
+    short ones.
+  - **Every page compressed when saved**: one HTML per zip under
+    `android/app/src/test/resources/pages/<site>/`
+    (`tools/pack-pages.py <dir> <site>` packs them). Compressed so whole
+    third-party pages stay out of repository search and off every clone's
+    disk; one per archive so the page being debugged can be extracted alone.
+
+- **Every one of a site's tests must pass against every page captured for it.**
+  Not a sample of them, and not with exceptions carved out for pages that
+  fail — a page the adapter cannot read is either a bug to fix or a shape to
+  handle, and carving it out hides which.
+
+- Capture per HOST, not per site. Two hosts serving "the same application" can
+  still differ in ways that matter: novelfull.com serves no `og:title` at all
+  while novelfull.net wraps one in site furniture, and a corpus holding only
+  `.com` pages could not see it.
+
+- Add a row per page to `pages/manifest.tsv` (and chapter pages to
+  `chapters.tsv`), and measure its columns with a script that does NOT use
+  this app's parser. The tests compare the app against that independent
+  measurement; filled in from `Listing.collect`, they would only prove the
+  code agrees with itself.
+
+- Fetch through the dev Worker (`tools/README.md`), adding the host to its
+  `SITES` allowlist first, and pace the crawl — these sites challenge a burst,
+  and some individual novels are challenge-protected for every client
   (truyenfull's `-free` titles), which is worth recording rather than
-  retrying.
-- One HTML per zip under `android/app/src/test/resources/pages/<site>/`
-  (`tools/pack-pages.py <dir> <site>` does the packing): compressed so whole
-  third-party pages stay out of repository search, one per archive so a
-  single page can be extracted while debugging.
-- Add a row per page to `pages/manifest.tsv`, and measure its columns with a
-  script that does NOT use this app's parser. The tests compare the app
-  against that independent measurement; if the manifest is filled in from
-  `Listing.collect`, the tests only prove the code agrees with itself.
-- Everything else here is tested against values we invented, which is fine
-  for the arithmetic and useless for the thing that actually breaks: what a
-  site's HTML really contains. Three shipped bugs came out of that gap.
+  retrying. Four of the sites on the wish list answer a plain fetch with a JS
+  challenge and need the Worker; five do not.
+
+- Never test against hand-written HTML. It only proves the parser handles the
+  shape someone imagined. Real pages have found, in one run each: a chapter
+  container that two selectors both matched, a title wrapped in site
+  furniture that would have become a folder name for good, and a heading
+  printed twice inside a single line.
 
 ## Workflow
 
