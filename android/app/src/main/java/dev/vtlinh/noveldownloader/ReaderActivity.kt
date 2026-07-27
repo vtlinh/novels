@@ -307,6 +307,11 @@ class ReaderActivity : AppCompatActivity() {
 
     /* ---- text-to-speech ---- */
     private var tts: android.speech.tts.TextToSpeech? = null
+
+    /* Moves whenever what we are saying changes — a new sentence, or anything
+       that throws the current one away. A report carrying an older tag is a
+       report about an utterance we already discarded; see Utterance. */
+    private var speechGen = 0L
     private var ttsReady = false
     private var speaking = false
     private var speakCursor = 0        // char offset where the NEXT sentence starts
@@ -779,11 +784,11 @@ class ReaderActivity : AppCompatActivity() {
         t.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
-                runOnUiThread { if (speaking) speakNext() }
+                runOnUiThread { if (speaking && Utterance.isCurrent(utteranceId, speechGen)) speakNext() }
             }
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-                runOnUiThread { if (speaking) speakNext() }
+                runOnUiThread { if (speaking && Utterance.isCurrent(utteranceId, speechGen)) speakNext() }
             }
         })
         tts = t
@@ -1088,6 +1093,7 @@ class ReaderActivity : AppCompatActivity() {
             nextIdx < (chapters?.ordered?.size ?: 0)
         ) {
             t.stop()   // make sure nothing is mid-utterance while we load
+            speechGen++   // ...and its report must not advance us either
             pendingSpeakContinue = true
             appendChapters(LOAD_BATCH)
             return
@@ -1104,7 +1110,10 @@ class ReaderActivity : AppCompatActivity() {
         /* normalize the spoken copy (URLs/emojis silenced, abbreviations
            expanded); the on-screen text and s0/s1 offsets are untouched */
         val toSpeak = cleanForSpeech(sentence, lang).ifBlank { " " }
-        t.speak(toSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "novel")
+        /* A fresh tag per sentence: QUEUE_FLUSH discards whatever was
+           mid-utterance, and that discarded one still reports — see
+           Utterance. */
+        t.speak(toSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, Utterance.id(++speechGen))
     }
 
     /* Speech edits (managed on the Speech-edits screen) applied to every
@@ -1270,6 +1279,9 @@ class ReaderActivity : AppCompatActivity() {
         cancelSleepTimer()
         stopShakeDetection()
         tts?.stop()
+        /* ...and retire its tag with it: stop() discards the utterance, and
+           the discarded one still reports. */
+        speechGen++
         /* paused: keep the notification with a Play action (wake lock off) */
         TtsService.start(this, currentHeading(), false, mediaSession?.sessionToken, intent.getStringExtra("slug"))
         if (resumeCursor >= 0) speakCursor = resumeCursor
@@ -1287,6 +1299,7 @@ class ReaderActivity : AppCompatActivity() {
         cancelSleepTimer()
         stopShakeDetection()
         tts?.stop()
+        speechGen++
         TtsService.stop(this)
         abandonAudioFocus()
         clearHighlight()
