@@ -434,6 +434,10 @@ class DownloadEngine(
         folderKey: String,
         slug: String,
         doc: org.jsoup.nodes.Document,
+        /* the page's own title is a SITE question — which element carries it
+           differs per site, and the shared guess was one of the selector lists
+           that leaked out of the adapters */
+        site: Site,
     ): DocumentFile? = try {
         /* The recorded directory first. Rebuilding the name from the title
            gives the UNSUFFIXED one, so for a novel that was pushed off a
@@ -443,13 +447,7 @@ class DownloadEngine(
         val name = store.dirNameFor(folderKey, slug)
             ?: store.getTitle(folderKey, slug)
             ?: Extractor.sanitize(
-                Extractor.stripAuthor(
-                    doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
-                        ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
-                        ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
-                        ?: slug,
-                    Sites.author(doc),
-                ),
+                Extractor.stripAuthor(site.title(doc) ?: slug, site.author(doc)),
             )
         DocumentFile.fromTreeUri(context, treeUri)?.findFile(name)?.takeIf { it.isDirectory }
     } catch (e: Exception) {
@@ -862,13 +860,7 @@ class DownloadEngine(
         if (first.html == null) return@withContext null
         val doc = Jsoup.parse(first.html, base)
         if (expectTitle != null && expectTitle.isNotBlank()) {
-            val pageTitle = Extractor.stripAuthor(
-                doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
-                    ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
-                    ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
-                    ?: "",
-                Sites.author(doc),
-            )
+            val pageTitle = Extractor.stripAuthor(site.title(doc) ?: "", site.author(doc))
             if (!Extractor.sameNovelTitle(pageTitle, expectTitle)) {
                 log("! $slug: $base is \"$pageTitle\", not \"$expectTitle\" — not acting on it")
                 return@withContext null
@@ -1042,7 +1034,7 @@ class DownloadEngine(
            do, which is the normal case for most novels in a sweep. */
         val store = DownloadStore(context)
         val treeUri = Uri.parse(folderKey)
-        val dir = novelDir(treeUri, store, folderKey, slug, doc)
+        val dir = novelDir(treeUri, store, folderKey, slug, doc, site)
         /* Ask again, here. The caller tests "is this novel downloading?"
            before calling, but the listing fetch above is tens of seconds of
            paginated requests, and the queue can pop this very novel inside
@@ -1061,7 +1053,7 @@ class DownloadEngine(
             )
         }
         SiteStatus(
-            siteOrdered.size, site.isCompleted(doc), Sites.author(doc),
+            siteOrdered.size, site.isCompleted(doc), site.author(doc),
             siteOrdered.mapNotNull { it.filename },
         )
     }
@@ -1095,14 +1087,11 @@ class DownloadEngine(
         val doc = Jsoup.parse(first.html, base)
         /* language of the SOURCE, judged from the novel page's own text */
         val sourceEnglish = looksEnglish(doc.text())
-        val author = Sites.author(doc)
+        val author = site.author(doc)
         /* sites often append "- {author}" to the title — folder names and the
            novels list carry the bare title, the author is stored separately */
         val title = Extractor.stripAuthor(
-            doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.ifEmpty { null }
-                ?: doc.selectFirst("h3.title")?.text()?.trim()?.ifEmpty { null }
-                ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
-                ?: slug,
+            site.title(doc) ?: slug,
             author,
         )
 
@@ -1716,7 +1705,7 @@ class DownloadEngine(
                                 log("FAILED ${ch.url} — HTTP ${res.status}")
                             } else {
                                 val body = Extractor.parseChapter(
-                                    Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site.headingWord,
+                                    Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site,
                                 )
                                 val replacing = refetchAll || ch.filename in stale
                                 /* Is what is already under this name the same

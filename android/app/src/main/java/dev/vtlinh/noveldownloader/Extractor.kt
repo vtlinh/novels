@@ -10,10 +10,6 @@ import java.text.Normalizer
    a lock notice), single-newline output, heading dedup, and quoting the raw
    content when extraction comes up empty. */
 object Extractor {
-    private val CONTENT_SELECTORS = listOf(
-        "#chapter-c", ".chapter-c", "#chapter-content",
-        ".chapter-content", "div[itemprop=articleBody]", ".box-chap",
-    )
     private val AD_RE = Regex(
         "(CLICK\\s*ADS|quảng cáo|mở khóa|truyenfull|đọc truyện online|ủng hộ dịch giả|Vui lòng|Mời bạn|novelfull|find any errors|broken links|non-standard content|report chapter|please report)",
         RegexOption.IGNORE_CASE,
@@ -76,12 +72,13 @@ object Extractor {
     }
 
     /* returns (cleaned text, raw text before filtering) */
-    private fun extractContent(doc: Document): Pair<String, String> {
-        var div: Element? = null
-        for (sel in CONTENT_SELECTORS) {
-            div = doc.selectFirst(sel)
-            if (div != null) break
-        }
+    private fun extractContent(doc: Document, site: Site): Pair<String, String> {
+        /* WHICH element holds the prose is the site's question. This was one
+           combined list of every site's selectors, so a selector added for one
+           site changed what the others extracted — and the first match won,
+           which made that ordering load-bearing across sites that never knew
+           about each other. */
+        var div: Element? = site.chapterContent(doc)
         if (div == null) {
             doc.select("script,style,nav,header,footer,form").remove()
             div = doc.select("div").maxByOrNull { it.text().length }
@@ -105,11 +102,12 @@ object Extractor {
     }
 
     /* parse a fetched chapter page into the saved file body */
-    fun parseChapter(doc: Document, linkText: String, num: Int, headingWord: String): String {
-        val headEl = doc.selectFirst("a.chapter-title, h2 a, h3 a, .chapter-title, .chapter-text")
+    fun parseChapter(doc: Document, linkText: String, num: Int, site: Site): String {
+        val headingWord = site.headingWord
+        val headEl = site.chapterHeading(doc)
         val head = parseHeading(headEl?.text()?.trim() ?: linkText)
         var title = head.second.ifEmpty { parseHeading(linkText).second }
-        val extracted = extractContent(doc)
+        val extracted = extractContent(doc, site)
         var content = extracted.first
         val raw = extracted.second
 
