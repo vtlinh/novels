@@ -48,6 +48,18 @@
 
 ## Adding a supported site
 
+- **Capture the pages BEFORE writing the adapter.** Always, and in that order.
+  An adapter written first is a guess at markup nobody has looked at, and the
+  tests written alongside it only prove the parser handles the shape whoever
+  wrote it imagined. Every selector, every URL rule, every "this site marks a
+  finished novel like so" is a claim about real HTML, and the only way to make
+  it a measurement is to have the HTML in hand first.
+  Ordering it the other way has cost real defects here: a chapter container
+  two selectors both matched, a title wrapped in site furniture that would
+  have become a folder name for good, and a heading printed twice inside a
+  single line — each found the moment real pages arrived, none of them
+  reachable by reasoning.
+
 - A site is a class under `sites/` implementing the `Site` interface, plus a
   `SiteContract` subclass in the tests. The contract asks every question the
   engine asks, so a site cannot be added without answering all of them. Nothing
