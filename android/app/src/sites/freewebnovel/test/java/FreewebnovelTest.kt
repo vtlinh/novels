@@ -40,10 +40,6 @@ class FreewebnovelTest : SiteContract() {
     fun `the number in the url is a position, so it is not read as a chapter number`() {
         assertNull(site.chapterNumFromUrl("https://freewebnovel.com/novel/some-book/chapter-12"))
         var disagreed = 0
-        val chapters = javaClass.getResourceAsStream("/pages/${site.name}/chapters.tsv")!!
-            .use { it.readBytes().toString(Charsets.UTF_8) }
-            .lineSequence().filter { it.isNotBlank() && !it.startsWith("#") }
-            .map { it.split("\t") }.toList()
         for (r in chapters) {
             val printed = r[5].toIntOrNull() ?: continue
             val inUrl = Regex("/chapter-(\\d+)").find(r[2])?.groupValues?.get(1)?.toIntOrNull()
@@ -85,7 +81,11 @@ class FreewebnovelTest : SiteContract() {
                 )
             }
         }
-        assertTrue("no captured page carries the select at all", withOptions >= 90)
+        /* EVERY page, not most of them. maxPage falls back to 1 without the
+           select, and a novel that reports one listing page is a novel whose
+           chapters past the fortieth are not in the listing at all. Measured:
+           all 100 carry it. */
+        assertEquals("every captured page must carry the select", novels.size, withOptions)
     }
 
     /* The listing container and the "latest chapters" widget share a class,
@@ -112,10 +112,6 @@ class FreewebnovelTest : SiteContract() {
        saved file. Confirm the corpus actually contains that shape. */
     @Test
     fun `the doubled h4 heading is in the corpus, which is why span-chapter is used`() {
-        val chapters = javaClass.getResourceAsStream("/pages/${site.name}/chapters.tsv")!!
-            .use { it.readBytes().toString(Charsets.UTF_8) }
-            .lineSequence().filter { it.isNotBlank() && !it.startsWith("#") }
-            .map { it.split("\t") }.toList()
         var doubled = 0
         for (r in chapters) {
             val doc = org.jsoup.Jsoup.parse(page(r[1]), r[2])
