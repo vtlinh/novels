@@ -4,7 +4,7 @@
 novel sites. **The app does not use it and must not** — it fetches sites
 directly, which is the point of it being a native app. This exists so work on
 the app can read a real page: capturing the test fixtures in
-`android/app/src/test/resources/pages.zip`, checking what a site's HTML actually
+`android/app/src/sites/<site>/test/resources/`, checking what a site's HTML actually
 contains before a selector changes, settling a question about a site instead
 of guessing at it.
 

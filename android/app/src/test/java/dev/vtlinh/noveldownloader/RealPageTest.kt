@@ -72,13 +72,8 @@ class RealPageTest {
         }
     }
 
-    private fun readPlain(path: String): String =
-        javaClass.getResourceAsStream("/pages/$path")?.use { it.readBytes().toString(Charsets.UTF_8) }
-            ?: throw AssertionError("missing test resource: pages/$path")
-
     private val fixtures: List<Fixture> by lazy {
-        readPlain("manifest.tsv").lineSequence()
-            .filter { it.isNotBlank() && !it.startsWith("#") }
+        Manifests.rows("manifest.tsv")
             .map { line ->
                 val c = line.split("\t")
                 Fixture(
@@ -309,9 +304,7 @@ class RealChapterTest {
     }
 
     private val chapters: List<Chap> by lazy {
-        val tsv = javaClass.getResourceAsStream("/pages/chapters.tsv")!!
-            .use { it.readBytes().toString(Charsets.UTF_8) }
-        tsv.lineSequence().filter { it.isNotBlank() && !it.startsWith("#") }.map { line ->
+        Manifests.rows("chapters.tsv").map { line ->
             val c = line.split("\t")
             Chap(
                 site = Sites.all.first { it.name == c[0] },

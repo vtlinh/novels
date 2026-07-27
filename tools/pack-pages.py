@@ -4,7 +4,11 @@
     tools/pack-pages.py <captured-dir> <site-name>
 
 <captured-dir> holds raw .html files as fetched. Each becomes its own zip
-under android/app/src/test/resources/pages/<site>/, one page per archive —
+under the site's own directory —
+
+    android/app/src/sites/<site>/test/resources/pages/<site>/
+
+one page per archive —
 compressed so whole third-party pages are neither indexed by repository
 search nor carried uncompressed on every clone, and one-per-archive so the
 page you are debugging can be extracted alone.
@@ -18,10 +22,12 @@ import os
 import sys
 import zipfile
 
-ROOT = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "android/app/src/test/resources/pages",
-)
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def site_pages(site):
+    """Everything a site owns lives under its own root, tests included."""
+    return os.path.join(REPO, "android/app/src/sites", site, "test/resources/pages", site)
 
 
 def main():
@@ -29,7 +35,7 @@ def main():
         print(__doc__)
         return 1
     src, site = sys.argv[1], sys.argv[2]
-    out = os.path.join(ROOT, site)
+    out = site_pages(site)
     os.makedirs(out, exist_ok=True)
     n = 0
     for name in sorted(os.listdir(src)):

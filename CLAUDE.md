@@ -6,9 +6,9 @@
   were removed — all features live in the app now.
 - `worker.js` + `wrangler.toml` are that Worker brought back for DEVELOPMENT
   ONLY — an authenticated, host-restricted fetch proxy so a session with no
-  browser can read a real page (capturing the fixtures under
-  `android/app/src/test/resources/pages.zip`, checking a selector against what a
-  site actually serves). The app must never call it. `tools/README.md` covers
+  browser can read a real page (capturing the pages under each site's
+  `android/app/src/sites/<site>/test/resources/`, checking a selector against
+  what a site actually serves). The app must never call it. `tools/README.md` covers
   deploy and use; `node worker.test.mjs` checks its guards offline. It DOES
   reach novelfull.com, which answers a direct curl with a JS interstitial —
   measured, after an earlier note here predicted the opposite. What is
@@ -60,12 +60,29 @@
   single line — each found the moment real pages arrived, none of them
   reachable by reasoning.
 
-- A site is a class under `sites/` implementing the `Site` interface, plus a
-  `SiteContract` subclass in the tests. The contract asks every question the
-  engine asks, so a site cannot be added without answering all of them. Nothing
-  outside `sites/` may hold a selector for a particular site — that knowledge
-  used to be spread over four files and a selector added for one site silently
-  changed what the others extracted.
+- **Everything about a site lives in that site's own directory** — its
+  adapter, its tests, and the real pages it is judged against:
+
+  ```
+  android/app/src/sites/<site>/
+      main/<Site>.kt                          the Site implementation
+      test/java/<Site>Test.kt                 its SiteContract subclass
+      test/resources/pages/<site>/            its captured pages
+          manifest.tsv  chapters.tsv          measured independently
+          *.html.zip  chapters/*.html.zip
+  ```
+
+  `app/build.gradle.kts` discovers these roots from the filesystem, so adding
+  a site is a new directory and removing one is a deleted directory — no list
+  to keep in step. Nothing outside a site's directory may hold a selector for
+  it, and nothing inside it belongs to any other site: that knowledge used to
+  be spread over four files with the fixtures in a fifth and one shared
+  manifest every site had to be edited into, and a selector added for one
+  site silently changed what the others extracted.
+
+- The adapter implements the `Site` interface; its test subclasses
+  `SiteContract`, which asks every question the engine asks, so a site cannot
+  be added without answering all of them.
 
 - **The site is not done until its pages are captured.** Per site:
   - **100 novel pages**, deliberately mixed: completed AND in progress, short
@@ -76,8 +93,8 @@
   - **30 chapter pages**, spread ACROSS those novels rather than taken from
     one — first chapters, middle chapters, chapters from long books and from
     short ones.
-  - **Every page compressed when saved**: one HTML per zip under
-    `android/app/src/test/resources/pages/<site>/`
+  - **Every page compressed when saved**: one HTML per zip under the site's
+    own `test/resources/pages/<site>/`
     (`tools/pack-pages.py <dir> <site>` packs them). Compressed so whole
     third-party pages stay out of repository search and off every clone's
     disk; one per archive so the page being debugged can be extracted alone.
@@ -92,8 +109,8 @@
   while novelfull.net wraps one in site furniture, and a corpus holding only
   `.com` pages could not see it.
 
-- Add a row per page to `pages/manifest.tsv` (and chapter pages to
-  `chapters.tsv`), and measure its columns with a script that does NOT use
+- Add a row per page to that site's own `manifest.tsv` (and chapter pages to
+  its `chapters.tsv`), and measure its columns with a script that does NOT use
   this app's parser. The tests compare the app against that independent
   measurement; filled in from `Listing.collect`, they would only prove the
   code agrees with itself.
