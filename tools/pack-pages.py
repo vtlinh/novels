@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Pack captured pages into the fixture layout the tests read.
 
-    tools/pack-pages.py <captured-dir> <site-name>
+    tools/pack-pages.py <captured-dir> <site-name> [subdir]
 
 <captured-dir> holds raw .html files as fetched. Each becomes its own zip
 under the site's own directory —
 
-    android/app/src/sites/<site>/test/resources/pages/<site>/
+    android/app/src/sites/<site>/test/resources/pages/<site>/[subdir]/
 
-one page per archive —
+one page per archive — `subdir` is how a site's chapter pages land in
+`chapters/` beside its novel pages rather than mixed in with them.
+
 compressed so whole third-party pages are neither indexed by repository
 search nor carried uncompressed on every clone, and one-per-archive so the
 page you are debugging can be extracted alone.
@@ -31,11 +33,13 @@ def site_pages(site):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         print(__doc__)
         return 1
     src, site = sys.argv[1], sys.argv[2]
     out = site_pages(site)
+    if len(sys.argv) == 4:
+        out = os.path.join(out, sys.argv[3])
     os.makedirs(out, exist_ok=True)
     n = 0
     for name in sorted(os.listdir(src)):

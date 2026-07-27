@@ -255,7 +255,16 @@ class BrowserActivity : AppCompatActivity() {
            screen; its action is the way over to the novels list */
         downloadBtn.setOnClickListener {
             val site = Sites.forUrl(currentUrl) ?: return@setOnClickListener
-            val novel = site.normalize(currentUrl).first
+            /* An empty answer means this page names no novel — the site
+               already uses it that way for a listing page, and truyenfullmoi
+               gives it for a chapter url too, whose path carries no novel id
+               and so cannot be turned into one. Starting a download on that
+               would fetch a redirect to the site's home page and read it as a
+               chapter list. */
+            val (novel, slug) = try {
+                site.normalize(currentUrl)
+            } catch (e: Exception) { return@setOnClickListener }
+            if (slug.isEmpty() || novel.isEmpty()) return@setOnClickListener
             prefs.edit().putString("url", novel).apply()
             startDownload(novel)
         }
@@ -352,7 +361,10 @@ class BrowserActivity : AppCompatActivity() {
        turn, so tapping it can't start a second job for the same novel */
     private fun syncDownloadButton(url: String) {
         val btn = findViewById<Button>(R.id.browseDownload)
-        if (Sites.forUrl(url) == null) {
+        /* No site, or a site that says this page names no novel — a genre
+           listing, or a chapter url on a site whose chapter paths carry no
+           novel id. Either way there is nothing to download from here. */
+        if (Sites.forUrl(url) == null || slugKeyFor(url).isEmpty()) {
             btn.isEnabled = false
             btn.text = "↓"
             return

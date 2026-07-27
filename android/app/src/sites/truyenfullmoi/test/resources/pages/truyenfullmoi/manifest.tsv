@@ -1,0 +1,113 @@
+# Real truyenfullmoi.com pages, unedited, fetched directly — this host answers
+# a plain request, so no Worker was needed. One row per captured page.
+# capture_url is where the bytes came from; app_url is the URL the app uses.
+# They are the same here: one host serves the catalogue, and the apex
+# redirects to www rather than serving a second copy of it.
+# columns: site  file  capture_url  app_url  kind  completed  chapters  max_page
+# `chapters` is the DISTINCT chapter links inside #list-chapter and `max_page`
+# the highest /<slug>.<id>/trang-N in the pagination — both measured at capture
+# time with bs4/lxml, NOT with this app's parser, so the tests cross-check the
+# two readings rather than echoing one back.
+# The 100 were picked across finished AND ongoing and across listing sizes
+# (1 page to 161, i.e. a handful of chapters up to ~8,000) rather than taken
+# in crawl order, which is how a corpus of one shape gets built by accident.
+truyenfullmoi	truyenfullmoi/am-muu-w-tong-tinh.1170.html	https://www.truyenfullmoi.com/am-muu-w-tong-tinh.1170/	https://www.truyenfullmoi.com/am-muu-w-tong-tinh.1170/	novel	true	9	1
+truyenfullmoi	truyenfullmoi/au-hoang-bao-hong-o-tro-choi-sinh-ton.1450.html	https://www.truyenfullmoi.com/au-hoang-bao-hong-o-tro-choi-sinh-ton.1450/	https://www.truyenfullmoi.com/au-hoang-bao-hong-o-tro-choi-sinh-ton.1450/	novel	false	41	1
+truyenfullmoi	truyenfullmoi/ban-gai-gia-cua-trum-truong.1135.html	https://www.truyenfullmoi.com/ban-gai-gia-cua-trum-truong.1135/	https://www.truyenfullmoi.com/ban-gai-gia-cua-trum-truong.1135/	novel	true	8	1
+truyenfullmoi	truyenfullmoi/ban-gai-toi-la-tien-nu.1299.html	https://www.truyenfullmoi.com/ban-gai-toi-la-tien-nu.1299/	https://www.truyenfullmoi.com/ban-gai-toi-la-tien-nu.1299/	novel	false	41	1
+truyenfullmoi	truyenfullmoi/bao-mau-mem-mai-nhieu-nuoc-cua-han.1562.html	https://www.truyenfullmoi.com/bao-mau-mem-mai-nhieu-nuoc-cua-han.1562/	https://www.truyenfullmoi.com/bao-mau-mem-mai-nhieu-nuoc-cua-han.1562/	novel	true	1	1
+truyenfullmoi	truyenfullmoi/chi-muon-lam-my-nhan-tien-ton-lanh-lung-cao-quy.1625.html	https://www.truyenfullmoi.com/chi-muon-lam-my-nhan-tien-ton-lanh-lung-cao-quy.1625/	https://www.truyenfullmoi.com/chi-muon-lam-my-nhan-tien-ton-lanh-lung-cao-quy.1625/	novel	true	1	1
+truyenfullmoi	truyenfullmoi/co-mot-ke-cam-muon-noi-yeu-anh.1227.html	https://www.truyenfullmoi.com/co-mot-ke-cam-muon-noi-yeu-anh.1227/	https://www.truyenfullmoi.com/co-mot-ke-cam-muon-noi-yeu-anh.1227/	novel	true	1	1
+truyenfullmoi	truyenfullmoi/con-dau-moi-la-chan-ai.655.html	https://www.truyenfullmoi.com/con-dau-moi-la-chan-ai.655/	https://www.truyenfullmoi.com/con-dau-moi-la-chan-ai.655/	novel	true	3	1
+truyenfullmoi	truyenfullmoi/con-duong-ba-chu.5.html	https://www.truyenfullmoi.com/con-duong-ba-chu.5/	https://www.truyenfullmoi.com/con-duong-ba-chu.5/	novel	false	1	1
+truyenfullmoi	truyenfullmoi/cung-phong-do-dai-de-thanh-hon-sau-do-toi-lien-hot.1529.html	https://www.truyenfullmoi.com/cung-phong-do-dai-de-thanh-hon-sau-do-toi-lien-hot.1529/	https://www.truyenfullmoi.com/cung-phong-do-dai-de-thanh-hon-sau-do-toi-lien-hot.1529/	novel	false	34	1
+truyenfullmoi	truyenfullmoi/cuoc-song-ngot-ngao-cua-doa-hoa-o-que.1449.html	https://www.truyenfullmoi.com/cuoc-song-ngot-ngao-cua-doa-hoa-o-que.1449/	https://www.truyenfullmoi.com/cuoc-song-ngot-ngao-cua-doa-hoa-o-que.1449/	novel	false	50	1
+truyenfullmoi	truyenfullmoi/dai-ly-tu-khanh.1535.html	https://www.truyenfullmoi.com/dai-ly-tu-khanh.1535/	https://www.truyenfullmoi.com/dai-ly-tu-khanh.1535/	novel	true	1	1
+truyenfullmoi	truyenfullmoi/de-phi-lam-thien.1161.html	https://www.truyenfullmoi.com/de-phi-lam-thien.1161/	https://www.truyenfullmoi.com/de-phi-lam-thien.1161/	novel	false	32	1
+truyenfullmoi	truyenfullmoi/diep-vo-khuyet-truyen-ky.859.html	https://www.truyenfullmoi.com/diep-vo-khuyet-truyen-ky.859/	https://www.truyenfullmoi.com/diep-vo-khuyet-truyen-ky.859/	novel	false	48	1
+truyenfullmoi	truyenfullmoi/dinh-cap-ten-con-do.1686.html	https://www.truyenfullmoi.com/dinh-cap-ten-con-do.1686/	https://www.truyenfullmoi.com/dinh-cap-ten-con-do.1686/	novel	false	1	1
+truyenfullmoi	truyenfullmoi/duoi-dong-hoang-tan.663.html	https://www.truyenfullmoi.com/duoi-dong-hoang-tan.663/	https://www.truyenfullmoi.com/duoi-dong-hoang-tan.663/	novel	true	10	1
+truyenfullmoi	truyenfullmoi/giang-la.680.html	https://www.truyenfullmoi.com/giang-la.680/	https://www.truyenfullmoi.com/giang-la.680/	novel	true	5	1
+truyenfullmoi	truyenfullmoi/gioi-tu-tien-nay-ky-la-qua.1004.html	https://www.truyenfullmoi.com/gioi-tu-tien-nay-ky-la-qua.1004/	https://www.truyenfullmoi.com/gioi-tu-tien-nay-ky-la-qua.1004/	novel	false	43	1
+truyenfullmoi	truyenfullmoi/hau-phu-nhan.795.html	https://www.truyenfullmoi.com/hau-phu-nhan.795/	https://www.truyenfullmoi.com/hau-phu-nhan.795/	novel	true	3	1
+truyenfullmoi	truyenfullmoi/hay-goi-ta-la-quy-sai-dai-nhan.1049.html	https://www.truyenfullmoi.com/hay-goi-ta-la-quy-sai-dai-nhan.1049/	https://www.truyenfullmoi.com/hay-goi-ta-la-quy-sai-dai-nhan.1049/	novel	false	29	1
+truyenfullmoi	truyenfullmoi/hoa-dang-gui-tam-tu.1699.html	https://www.truyenfullmoi.com/hoa-dang-gui-tam-tu.1699/	https://www.truyenfullmoi.com/hoa-dang-gui-tam-tu.1699/	novel	true	45	1
+truyenfullmoi	truyenfullmoi/am-ap-tu-anh.48.html	https://www.truyenfullmoi.com/am-ap-tu-anh.48/	https://www.truyenfullmoi.com/am-ap-tu-anh.48/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/ban-trai-khong-gap-mat.882.html	https://www.truyenfullmoi.com/ban-trai-khong-gap-mat.882/	https://www.truyenfullmoi.com/ban-trai-khong-gap-mat.882/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/bien-bac-lam-tu-luat.1413.html	https://www.truyenfullmoi.com/bien-bac-lam-tu-luat.1413/	https://www.truyenfullmoi.com/bien-bac-lam-tu-luat.1413/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/ca-the-gioi-deu-muon-toi-ly-hon.1776.html	https://www.truyenfullmoi.com/ca-the-gioi-deu-muon-toi-ly-hon.1776/	https://www.truyenfullmoi.com/ca-the-gioi-deu-muon-toi-ly-hon.1776/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/cach-dau-binh-vuong.289.html	https://www.truyenfullmoi.com/cach-dau-binh-vuong.289/	https://www.truyenfullmoi.com/cach-dau-binh-vuong.289/	novel	false	50	2
+truyenfullmoi	truyenfullmoi/chay-ve-phia-em.1840.html	https://www.truyenfullmoi.com/chay-ve-phia-em.1840/	https://www.truyenfullmoi.com/chay-ve-phia-em.1840/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/chong-chong-dien-hinh.1325.html	https://www.truyenfullmoi.com/chong-chong-dien-hinh.1325/	https://www.truyenfullmoi.com/chong-chong-dien-hinh.1325/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/co-vo-kem-15-tuoi-cua-ngai-trieu.1237.html	https://www.truyenfullmoi.com/co-vo-kem-15-tuoi-cua-ngai-trieu.1237/	https://www.truyenfullmoi.com/co-vo-kem-15-tuoi-cua-ngai-trieu.1237/	novel	false	50	2
+truyenfullmoi	truyenfullmoi/dai-tieu-thu-xuyen-khong.380.html	https://www.truyenfullmoi.com/dai-tieu-thu-xuyen-khong.380/	https://www.truyenfullmoi.com/dai-tieu-thu-xuyen-khong.380/	novel	false	50	2
+truyenfullmoi	truyenfullmoi/dang-yeu-la-ke-lau-dai.1880.html	https://www.truyenfullmoi.com/dang-yeu-la-ke-lau-dai.1880/	https://www.truyenfullmoi.com/dang-yeu-la-ke-lau-dai.1880/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/de-ta-mang-cac-vi-vung-len.1364.html	https://www.truyenfullmoi.com/de-ta-mang-cac-vi-vung-len.1364/	https://www.truyenfullmoi.com/de-ta-mang-cac-vi-vung-len.1364/	novel	false	50	2
+truyenfullmoi	truyenfullmoi/dong-nhan-harry-potter-sanh-buoc-cung-nguoi.472.html	https://www.truyenfullmoi.com/dong-nhan-harry-potter-sanh-buoc-cung-nguoi.472/	https://www.truyenfullmoi.com/dong-nhan-harry-potter-sanh-buoc-cung-nguoi.472/	novel	false	49	2
+truyenfullmoi	truyenfullmoi/hieu-ung-an-khop.490.html	https://www.truyenfullmoi.com/hieu-ung-an-khop.490/	https://www.truyenfullmoi.com/hieu-ung-an-khop.490/	novel	false	50	2
+truyenfullmoi	truyenfullmoi/hieu-ung-gon-song.1895.html	https://www.truyenfullmoi.com/hieu-ung-gon-song.1895/	https://www.truyenfullmoi.com/hieu-ung-gon-song.1895/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/hoa-hong-trao-ken-ken.940.html	https://www.truyenfullmoi.com/hoa-hong-trao-ken-ken.940/	https://www.truyenfullmoi.com/hoa-hong-trao-ken-ken.940/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/ke-xau-xa-van-nha.1000.html	https://www.truyenfullmoi.com/ke-xau-xa-van-nha.1000/	https://www.truyenfullmoi.com/ke-xau-xa-van-nha.1000/	novel	false	50	2
+truyenfullmoi	truyenfullmoi/khi-hoc-ba-xuyen-thanh-hao-mon-phe-sai.605.html	https://www.truyenfullmoi.com/khi-hoc-ba-xuyen-thanh-hao-mon-phe-sai.605/	https://www.truyenfullmoi.com/khi-hoc-ba-xuyen-thanh-hao-mon-phe-sai.605/	novel	true	50	2
+truyenfullmoi	truyenfullmoi/bach-nguyet-quang-van-nhan-me-he-voi-the-than-roi.1523.html	https://www.truyenfullmoi.com/bach-nguyet-quang-van-nhan-me-he-voi-the-than-roi.1523/	https://www.truyenfullmoi.com/bach-nguyet-quang-van-nhan-me-he-voi-the-than-roi.1523/	novel	false	50	3
+truyenfullmoi	truyenfullmoi/cam-trong-tay-kich-ban-nu-chinh-sung-van.1034.html	https://www.truyenfullmoi.com/cam-trong-tay-kich-ban-nu-chinh-sung-van.1034/	https://www.truyenfullmoi.com/cam-trong-tay-kich-ban-nu-chinh-sung-van.1034/	novel	false	50	3
+truyenfullmoi	truyenfullmoi/don-tu-chuc-cua-van-nguoi-ghet.737.html	https://www.truyenfullmoi.com/don-tu-chuc-cua-van-nguoi-ghet.737/	https://www.truyenfullmoi.com/don-tu-chuc-cua-van-nguoi-ghet.737/	novel	false	50	3
+truyenfullmoi	truyenfullmoi/dung-co-hoc-hu.1353.html	https://www.truyenfullmoi.com/dung-co-hoc-hu.1353/	https://www.truyenfullmoi.com/dung-co-hoc-hu.1353/	novel	true	50	3
+truyenfullmoi	truyenfullmoi/app-truc-tiep-thanh-tinh.1647.html	https://www.truyenfullmoi.com/app-truc-tiep-thanh-tinh.1647/	https://www.truyenfullmoi.com/app-truc-tiep-thanh-tinh.1647/	novel	true	50	4
+truyenfullmoi	truyenfullmoi/ban-ghi-chep-am-thuc-vung-nui-cua-nuong-tu-thu-lang.1952.html	https://www.truyenfullmoi.com/ban-ghi-chep-am-thuc-vung-nui-cua-nuong-tu-thu-lang.1952/	https://www.truyenfullmoi.com/ban-ghi-chep-am-thuc-vung-nui-cua-nuong-tu-thu-lang.1952/	novel	true	50	4
+truyenfullmoi	truyenfullmoi/ben-le-su-co-ngoai-y-muon.753.html	https://www.truyenfullmoi.com/ben-le-su-co-ngoai-y-muon.753/	https://www.truyenfullmoi.com/ben-le-su-co-ngoai-y-muon.753/	novel	false	50	4
+truyenfullmoi	truyenfullmoi/dau-la-chi-lang-thanh.1544.html	https://www.truyenfullmoi.com/dau-la-chi-lang-thanh.1544/	https://www.truyenfullmoi.com/dau-la-chi-lang-thanh.1544/	novel	false	50	4
+truyenfullmoi	truyenfullmoi/de-thai-kieu.1788.html	https://www.truyenfullmoi.com/de-thai-kieu.1788/	https://www.truyenfullmoi.com/de-thai-kieu.1788/	novel	true	50	4
+truyenfullmoi	truyenfullmoi/dinh-hon.1181.html	https://www.truyenfullmoi.com/dinh-hon.1181/	https://www.truyenfullmoi.com/dinh-hon.1181/	novel	true	50	4
+truyenfullmoi	truyenfullmoi/doi-nay-dep-lam-giong-nhu-loi-nguoi-noi.812.html	https://www.truyenfullmoi.com/doi-nay-dep-lam-giong-nhu-loi-nguoi-noi.812/	https://www.truyenfullmoi.com/doi-nay-dep-lam-giong-nhu-loi-nguoi-noi.812/	novel	true	50	4
+truyenfullmoi	truyenfullmoi/ga-cho-toi-than.159.html	https://www.truyenfullmoi.com/ga-cho-toi-than.159/	https://www.truyenfullmoi.com/ga-cho-toi-than.159/	novel	true	50	4
+truyenfullmoi	truyenfullmoi/hanh-trinh-nhan-cao-menh-cua-me-chong-nha-nong.1949.html	https://www.truyenfullmoi.com/hanh-trinh-nhan-cao-menh-cua-me-chong-nha-nong.1949/	https://www.truyenfullmoi.com/hanh-trinh-nhan-cao-menh-cua-me-chong-nha-nong.1949/	novel	false	50	4
+truyenfullmoi	truyenfullmoi/huong-dan-hanh-phuc-cho-nu-phu-thap-nien-70.1767.html	https://www.truyenfullmoi.com/huong-dan-hanh-phuc-cho-nu-phu-thap-nien-70.1767/	https://www.truyenfullmoi.com/huong-dan-hanh-phuc-cho-nu-phu-thap-nien-70.1767/	novel	true	50	4
+truyenfullmoi	truyenfullmoi/am-ha-truyen.1627.html	https://www.truyenfullmoi.com/am-ha-truyen.1627/	https://www.truyenfullmoi.com/am-ha-truyen.1627/	novel	true	50	5
+truyenfullmoi	truyenfullmoi/cung-tuong-van-tam.1007.html	https://www.truyenfullmoi.com/cung-tuong-van-tam.1007/	https://www.truyenfullmoi.com/cung-tuong-van-tam.1007/	novel	true	50	5
+truyenfullmoi	truyenfullmoi/dai-lao-huyen-hoc-xuong-nui-khuay-dong-ca-the-gioi.1877.html	https://www.truyenfullmoi.com/dai-lao-huyen-hoc-xuong-nui-khuay-dong-ca-the-gioi.1877/	https://www.truyenfullmoi.com/dai-lao-huyen-hoc-xuong-nui-khuay-dong-ca-the-gioi.1877/	novel	false	50	5
+truyenfullmoi	truyenfullmoi/dang-sung.1796.html	https://www.truyenfullmoi.com/dang-sung.1796/	https://www.truyenfullmoi.com/dang-sung.1796/	novel	true	50	5
+truyenfullmoi	truyenfullmoi/am-quan-minh-the.1102.html	https://www.truyenfullmoi.com/am-quan-minh-the.1102/	https://www.truyenfullmoi.com/am-quan-minh-the.1102/	novel	false	50	6
+truyenfullmoi	truyenfullmoi/an-may-tu-tien.744.html	https://www.truyenfullmoi.com/an-may-tu-tien.744/	https://www.truyenfullmoi.com/an-may-tu-tien.744/	novel	false	50	6
+truyenfullmoi	truyenfullmoi/co-vo-xinh-dep-lanh-lung-cua-toi.644.html	https://www.truyenfullmoi.com/co-vo-xinh-dep-lanh-lung-cua-toi.644/	https://www.truyenfullmoi.com/co-vo-xinh-dep-lanh-lung-cua-toi.644/	novel	false	50	6
+truyenfullmoi	truyenfullmoi/hao-mon-the-ga-at-chu-bai-song-lai.1369.html	https://www.truyenfullmoi.com/hao-mon-the-ga-at-chu-bai-song-lai.1369/	https://www.truyenfullmoi.com/hao-mon-the-ga-at-chu-bai-song-lai.1369/	novel	false	50	6
+truyenfullmoi	truyenfullmoi/ho-quoc-chien-than.972.html	https://www.truyenfullmoi.com/ho-quoc-chien-than.972/	https://www.truyenfullmoi.com/ho-quoc-chien-than.972/	novel	false	50	9
+truyenfullmoi	truyenfullmoi/chao-mung-den-voi-dia-nguc-cua-ta.551.html	https://www.truyenfullmoi.com/chao-mung-den-voi-dia-nguc-cua-ta.551/	https://www.truyenfullmoi.com/chao-mung-den-voi-dia-nguc-cua-ta.551/	novel	false	50	10
+truyenfullmoi	truyenfullmoi/bach-dao-su.1583.html	https://www.truyenfullmoi.com/bach-dao-su.1583/	https://www.truyenfullmoi.com/bach-dao-su.1583/	novel	false	50	11
+truyenfullmoi	truyenfullmoi/bat-long-quy-nguyen-truyen.488.html	https://www.truyenfullmoi.com/bat-long-quy-nguyen-truyen.488/	https://www.truyenfullmoi.com/bat-long-quy-nguyen-truyen.488/	novel	false	50	11
+truyenfullmoi	truyenfullmoi/cai-thien-nghich-dao.1256.html	https://www.truyenfullmoi.com/cai-thien-nghich-dao.1256/	https://www.truyenfullmoi.com/cai-thien-nghich-dao.1256/	novel	false	50	11
+truyenfullmoi	truyenfullmoi/dau-la-dai-luc.90.html	https://www.truyenfullmoi.com/dau-la-dai-luc.90/	https://www.truyenfullmoi.com/dau-la-dai-luc.90/	novel	true	50	11
+truyenfullmoi	truyenfullmoi/hao-mon-kinh-mong-iii-dung-de-lo-nhau.33.html	https://www.truyenfullmoi.com/hao-mon-kinh-mong-iii-dung-de-lo-nhau.33/	https://www.truyenfullmoi.com/hao-mon-kinh-mong-iii-dung-de-lo-nhau.33/	novel	true	50	15
+truyenfullmoi	truyenfullmoi/hon-trom-55-lan.83.html	https://www.truyenfullmoi.com/hon-trom-55-lan.83/	https://www.truyenfullmoi.com/hon-trom-55-lan.83/	novel	true	50	20
+truyenfullmoi	truyenfullmoi/con-luan-ma-chu-ki-tai-giao-chu.751.html	https://www.truyenfullmoi.com/con-luan-ma-chu-ki-tai-giao-chu.751/	https://www.truyenfullmoi.com/con-luan-ma-chu-ki-tai-giao-chu.751/	novel	false	50	21
+truyenfullmoi	truyenfullmoi/bac-si-nguy-hiem-bac-si-than-thong.776.html	https://www.truyenfullmoi.com/bac-si-nguy-hiem-bac-si-than-thong.776/	https://www.truyenfullmoi.com/bac-si-nguy-hiem-bac-si-than-thong.776/	novel	false	50	22
+truyenfullmoi	truyenfullmoi/ke-hoach-theo-duoi-vo-yeu.798.html	https://www.truyenfullmoi.com/ke-hoach-theo-duoi-vo-yeu.798/	https://www.truyenfullmoi.com/ke-hoach-theo-duoi-vo-yeu.798/	novel	true	50	23
+truyenfullmoi	truyenfullmoi/binh-vuong-than-bi.842.html	https://www.truyenfullmoi.com/binh-vuong-than-bi.842/	https://www.truyenfullmoi.com/binh-vuong-than-bi.842/	novel	false	50	27
+truyenfullmoi	truyenfullmoi/bay-vi-su-phu-dinh-phong-de-nhat-than-vuong.742.html	https://www.truyenfullmoi.com/bay-vi-su-phu-dinh-phong-de-nhat-than-vuong.742/	https://www.truyenfullmoi.com/bay-vi-su-phu-dinh-phong-de-nhat-than-vuong.742/	novel	false	50	30
+truyenfullmoi	truyenfullmoi/but-ky-phan-cong-cua-nu-phu-phao-hoi.129.html	https://www.truyenfullmoi.com/but-ky-phan-cong-cua-nu-phu-phao-hoi.129/	https://www.truyenfullmoi.com/but-ky-phan-cong-cua-nu-phu-phao-hoi.129/	novel	false	50	30
+truyenfullmoi	truyenfullmoi/chu-gioi-tan-the-online-ngay-tan-cua-the-gioi.150.html	https://www.truyenfullmoi.com/chu-gioi-tan-the-online-ngay-tan-cua-the-gioi.150/	https://www.truyenfullmoi.com/chu-gioi-tan-the-online-ngay-tan-cua-the-gioi.150/	novel	false	50	31
+truyenfullmoi	truyenfullmoi/duong-chuyen.93.html	https://www.truyenfullmoi.com/duong-chuyen.93/	https://www.truyenfullmoi.com/duong-chuyen.93/	novel	true	50	31
+truyenfullmoi	truyenfullmoi/dao-kiem-than-hoang.200.html	https://www.truyenfullmoi.com/dao-kiem-than-hoang.200/	https://www.truyenfullmoi.com/dao-kiem-than-hoang.200/	novel	true	50	32
+truyenfullmoi	truyenfullmoi/hoanh-tao-hoang-vu.73.html	https://www.truyenfullmoi.com/hoanh-tao-hoang-vu.73/	https://www.truyenfullmoi.com/hoanh-tao-hoang-vu.73/	novel	true	50	32
+truyenfullmoi	truyenfullmoi/dau-pha-thuong-khung.9.html	https://www.truyenfullmoi.com/dau-pha-thuong-khung.9/	https://www.truyenfullmoi.com/dau-pha-thuong-khung.9/	novel	true	50	33
+truyenfullmoi	truyenfullmoi/dan-dai-chi-ton.349.html	https://www.truyenfullmoi.com/dan-dai-chi-ton.349/	https://www.truyenfullmoi.com/dan-dai-chi-ton.349/	novel	false	50	38
+truyenfullmoi	truyenfullmoi/huyen-thien-hon-ton.108.html	https://www.truyenfullmoi.com/huyen-thien-hon-ton.108/	https://www.truyenfullmoi.com/huyen-thien-hon-ton.108/	novel	true	50	39
+truyenfullmoi	truyenfullmoi/huyen-thien-ton-de.645.html	https://www.truyenfullmoi.com/huyen-thien-ton-de.645/	https://www.truyenfullmoi.com/huyen-thien-ton-de.645/	novel	true	50	39
+truyenfullmoi	truyenfullmoi/co-vo-ngot-ngao-co-chut-bat-luong-vo-moi-bat-luong-co-chut-ngot.11.html	https://www.truyenfullmoi.com/co-vo-ngot-ngao-co-chut-bat-luong-vo-moi-bat-luong-co-chut-ngot.11/	https://www.truyenfullmoi.com/co-vo-ngot-ngao-co-chut-bat-luong-vo-moi-bat-luong-co-chut-ngot.11/	novel	true	50	50
+truyenfullmoi	truyenfullmoi/cuc-cung-co-chieu.29.html	https://www.truyenfullmoi.com/cuc-cung-co-chieu.29/	https://www.truyenfullmoi.com/cuc-cung-co-chieu.29/	novel	false	50	50
+truyenfullmoi	truyenfullmoi/bac-tong-phong-luu.132.html	https://www.truyenfullmoi.com/bac-tong-phong-luu.132/	https://www.truyenfullmoi.com/bac-tong-phong-luu.132/	novel	true	50	56
+truyenfullmoi	truyenfullmoi/bi-thu-trung-sinh.154.html	https://www.truyenfullmoi.com/bi-thu-trung-sinh.154/	https://www.truyenfullmoi.com/bi-thu-trung-sinh.154/	novel	true	50	56
+truyenfullmoi	truyenfullmoi/de-ton.45.html	https://www.truyenfullmoi.com/de-ton.45/	https://www.truyenfullmoi.com/de-ton.45/	novel	true	50	58
+truyenfullmoi	truyenfullmoi/cung-chieu-vo-nho-troi-ban.38.html	https://www.truyenfullmoi.com/cung-chieu-vo-nho-troi-ban.38/	https://www.truyenfullmoi.com/cung-chieu-vo-nho-troi-ban.38/	novel	false	50	59
+truyenfullmoi	truyenfullmoi/dinh-cap-tong-su.175.html	https://www.truyenfullmoi.com/dinh-cap-tong-su.175/	https://www.truyenfullmoi.com/dinh-cap-tong-su.175/	novel	true	50	59
+truyenfullmoi	truyenfullmoi/cao-thu-tu-chan.94.html	https://www.truyenfullmoi.com/cao-thu-tu-chan.94/	https://www.truyenfullmoi.com/cao-thu-tu-chan.94/	novel	true	50	66
+truyenfullmoi	truyenfullmoi/chien-than-thanh-y.528.html	https://www.truyenfullmoi.com/chien-than-thanh-y.528/	https://www.truyenfullmoi.com/chien-than-thanh-y.528/	novel	false	50	72
+truyenfullmoi	truyenfullmoi/doc-ton-tam-gioi.21.html	https://www.truyenfullmoi.com/doc-ton-tam-gioi.21/	https://www.truyenfullmoi.com/doc-ton-tam-gioi.21/	novel	true	50	73
+truyenfullmoi	truyenfullmoi/co-vo-cam-qua-ba-dao.692.html	https://www.truyenfullmoi.com/co-vo-cam-qua-ba-dao.692/	https://www.truyenfullmoi.com/co-vo-cam-qua-ba-dao.692/	novel	false	50	74
+truyenfullmoi	truyenfullmoi/doc-ton-truyen-ky-thanh-van-mon.233.html	https://www.truyenfullmoi.com/doc-ton-truyen-ky-thanh-van-mon.233/	https://www.truyenfullmoi.com/doc-ton-truyen-ky-thanh-van-mon.233/	novel	false	50	80
+truyenfullmoi	truyenfullmoi/hau-due-kiem-than.375.html	https://www.truyenfullmoi.com/hau-due-kiem-than.375/	https://www.truyenfullmoi.com/hau-due-kiem-than.375/	novel	false	50	85
+truyenfullmoi	truyenfullmoi/dinh-phong-thien-ha.487.html	https://www.truyenfullmoi.com/dinh-phong-thien-ha.487/	https://www.truyenfullmoi.com/dinh-phong-thien-ha.487/	novel	true	50	95
+truyenfullmoi	truyenfullmoi/bach-luyen-thanh-tien.143.html	https://www.truyenfullmoi.com/bach-luyen-thanh-tien.143/	https://www.truyenfullmoi.com/bach-luyen-thanh-tien.143/	novel	false	50	100
+truyenfullmoi	truyenfullmoi/chien-than-bat-bai.120.html	https://www.truyenfullmoi.com/chien-than-bat-bai.120/	https://www.truyenfullmoi.com/chien-than-bat-bai.120/	novel	true	50	104
+truyenfullmoi	truyenfullmoi/de-ba.15.html	https://www.truyenfullmoi.com/de-ba.15/	https://www.truyenfullmoi.com/de-ba.15/	novel	true	50	140
+truyenfullmoi	truyenfullmoi/chang-re-quyen-the.97.html	https://www.truyenfullmoi.com/chang-re-quyen-the.97/	https://www.truyenfullmoi.com/chang-re-quyen-the.97/	novel	false	50	161

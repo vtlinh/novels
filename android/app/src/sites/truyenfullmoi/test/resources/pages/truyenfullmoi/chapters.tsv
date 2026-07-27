@@ -1,0 +1,40 @@
+# Chapter pages from truyenfullmoi.com, unedited, spread across 30 DIFFERENT
+# novels — first chapters and middle ones, from books of one listing page and
+# of fifty-nine.
+# columns: site  file  url  novel  which  heading_number  content_chars
+#          novel_max_page  novel_completed
+# content_chars is the visible text of the site's own #chapter-c container and
+# heading_number the number printed in a.chapter-title — both measured with
+# bs4/lxml rather than by Extractor, so the tests cross-check the parser
+# instead of echoing it. Counted in characters, not <p> tags: this site
+# separates paragraphs with <br>, so a tag count reads 1 for a whole chapter.
+truyenfullmoi	truyenfullmoi/chapters/co-mot-ke-cam-muon-noi-yeu-anh__chuong-1.html	https://www.truyenfullmoi.com/co-mot-ke-cam-muon-noi-yeu-anh/chuong-1.html	co-mot-ke-cam-muon-noi-yeu-anh	first	1	5376	1	true
+truyenfullmoi	truyenfullmoi/chapters/hay-goi-ta-la-quy-sai-dai-nhan__chuong-27.html	https://www.truyenfullmoi.com/hay-goi-ta-la-quy-sai-dai-nhan/chuong-27.html	hay-goi-ta-la-quy-sai-dai-nhan	mid	27	3587	1	false
+truyenfullmoi	truyenfullmoi/chapters/dai-ly-tu-khanh__chuong-1.html	https://www.truyenfullmoi.com/dai-ly-tu-khanh/chuong-1.html	dai-ly-tu-khanh	first	1	6957	1	true
+truyenfullmoi	truyenfullmoi/chapters/au-hoang-bao-hong-o-tro-choi-sinh-ton__chuong-1.html	https://www.truyenfullmoi.com/au-hoang-bao-hong-o-tro-choi-sinh-ton/chuong-1.html	au-hoang-bao-hong-o-tro-choi-sinh-ton	first	1	3320	1	false
+truyenfullmoi	truyenfullmoi/chapters/hoa-dang-gui-tam-tu__chuong-44.html	https://www.truyenfullmoi.com/hoa-dang-gui-tam-tu/chuong-44.html	hoa-dang-gui-tam-tu	mid	44	3330	1	true
+truyenfullmoi	truyenfullmoi/chapters/gioi-tu-tien-nay-ky-la-qua__chuong-27.html	https://www.truyenfullmoi.com/gioi-tu-tien-nay-ky-la-qua/chuong-27.html	gioi-tu-tien-nay-ky-la-qua	mid	27	3628	1	false
+truyenfullmoi	truyenfullmoi/chapters/con-dau-moi-la-chan-ai__chuong-1.html	https://www.truyenfullmoi.com/con-dau-moi-la-chan-ai/chuong-1.html	con-dau-moi-la-chan-ai	first	1	7895	1	true
+truyenfullmoi	truyenfullmoi/chapters/hoa-hong-trao-ken-ken__chuong-14.html	https://www.truyenfullmoi.com/hoa-hong-trao-ken-ken/chuong-14.html	hoa-hong-trao-ken-ken	mid	14	16162	2	true
+truyenfullmoi	truyenfullmoi/chapters/cach-dau-binh-vuong__chuong-50.html	https://www.truyenfullmoi.com/cach-dau-binh-vuong/chuong-50.html	cach-dau-binh-vuong	mid	50	10304	2	false
+truyenfullmoi	truyenfullmoi/chapters/am-ap-tu-anh__chuong-1.html	https://www.truyenfullmoi.com/am-ap-tu-anh/chuong-1.html	am-ap-tu-anh	first	1	7566	2	true
+truyenfullmoi	truyenfullmoi/chapters/co-vo-kem-15-tuoi-cua-ngai-trieu__chuong-29.html	https://www.truyenfullmoi.com/co-vo-kem-15-tuoi-cua-ngai-trieu/chuong-29.html	co-vo-kem-15-tuoi-cua-ngai-trieu	mid	29	3946	2	false
+truyenfullmoi	truyenfullmoi/chapters/hieu-ung-gon-song__chuong-13.html	https://www.truyenfullmoi.com/hieu-ung-gon-song/chuong-13.html	hieu-ung-gon-song	mid	13	13672	2	true
+truyenfullmoi	truyenfullmoi/chapters/ke-xau-xa-van-nha__chuong-1.html	https://www.truyenfullmoi.com/ke-xau-xa-van-nha/chuong-1.html	ke-xau-xa-van-nha	first	1	13640	2	false
+truyenfullmoi	truyenfullmoi/chapters/bach-nguyet-quang-van-nhan-me-he-voi-the-than-roi__chuong-33.html	https://www.truyenfullmoi.com/bach-nguyet-quang-van-nhan-me-he-voi-the-than-roi/chuong-33.html	bach-nguyet-quang-van-nhan-me-he-voi-the-than-roi	mid	33	5836	3	false
+truyenfullmoi	truyenfullmoi/chapters/ben-le-su-co-ngoai-y-muon__chuong-21.html	https://www.truyenfullmoi.com/ben-le-su-co-ngoai-y-muon/chuong-21.html	ben-le-su-co-ngoai-y-muon	mid	21	17232	4	false
+truyenfullmoi	truyenfullmoi/chapters/doi-nay-dep-lam-giong-nhu-loi-nguoi-noi__chuong-1.html	https://www.truyenfullmoi.com/doi-nay-dep-lam-giong-nhu-loi-nguoi-noi/chuong-1.html	doi-nay-dep-lam-giong-nhu-loi-nguoi-noi	first	1	15431	4	true
+truyenfullmoi	truyenfullmoi/chapters/huong-dan-hanh-phuc-cho-nu-phu-thap-nien-70__chuong-34.html	https://www.truyenfullmoi.com/huong-dan-hanh-phuc-cho-nu-phu-thap-nien-70/chuong-34.html	huong-dan-hanh-phuc-cho-nu-phu-thap-nien-70	mid	34	21151	4	true
+truyenfullmoi	truyenfullmoi/chapters/ban-ghi-chep-am-thuc-vung-nui-cua-nuong-tu-thu-lang__chuong-10.html	https://www.truyenfullmoi.com/ban-ghi-chep-am-thuc-vung-nui-cua-nuong-tu-thu-lang/chuong-10.html	ban-ghi-chep-am-thuc-vung-nui-cua-nuong-tu-thu-lang	mid	10	7217	4	true
+truyenfullmoi	truyenfullmoi/chapters/cung-tuong-van-tam__chuong-1.html	https://www.truyenfullmoi.com/cung-tuong-van-tam/chuong-1.html	cung-tuong-van-tam	first	1	6347	5	true
+truyenfullmoi	truyenfullmoi/chapters/am-quan-minh-the__chuong-38.html	https://www.truyenfullmoi.com/am-quan-minh-the/chuong-38.html	am-quan-minh-the	mid	38	9190	6	false
+truyenfullmoi	truyenfullmoi/chapters/ho-quoc-chien-than__chuong-11.html	https://www.truyenfullmoi.com/ho-quoc-chien-than/chuong-11.html	ho-quoc-chien-than	mid	11	4655	9	false
+truyenfullmoi	truyenfullmoi/chapters/dau-la-dai-luc__chuong-1.html	https://www.truyenfullmoi.com/dau-la-dai-luc/chuong-1.html	dau-la-dai-luc	first	1	15554	11	true
+truyenfullmoi	truyenfullmoi/chapters/hao-mon-kinh-mong-iii-dung-de-lo-nhau__chuong-6.html	https://www.truyenfullmoi.com/hao-mon-kinh-mong-iii-dung-de-lo-nhau/chuong-6.html	hao-mon-kinh-mong-iii-dung-de-lo-nhau	mid	6	4674	15	true
+truyenfullmoi	truyenfullmoi/chapters/bac-si-nguy-hiem-bac-si-than-thong__chuong-7.html	https://www.truyenfullmoi.com/bac-si-nguy-hiem-bac-si-than-thong/chuong-7.html	bac-si-nguy-hiem-bac-si-than-thong	mid	7	5031	22	false
+truyenfullmoi	truyenfullmoi/chapters/bay-vi-su-phu-dinh-phong-de-nhat-than-vuong__chuong-1.html	https://www.truyenfullmoi.com/bay-vi-su-phu-dinh-phong-de-nhat-than-vuong/chuong-1.html	bay-vi-su-phu-dinh-phong-de-nhat-than-vuong	first	1	7420	30	false
+truyenfullmoi	truyenfullmoi/chapters/chu-gioi-tan-the-online-ngay-tan-cua-the-gioi__chuong-27.html	https://www.truyenfullmoi.com/chu-gioi-tan-the-online-ngay-tan-cua-the-gioi/chuong-27.html	chu-gioi-tan-the-online-ngay-tan-cua-the-gioi	mid	27	7695	31	false
+truyenfullmoi	truyenfullmoi/chapters/dau-pha-thuong-khung__chuong-45.html	https://www.truyenfullmoi.com/dau-pha-thuong-khung/chuong-45.html	dau-pha-thuong-khung	mid	45	7555	33	true
+truyenfullmoi	truyenfullmoi/chapters/huyen-thien-ton-de__chuong-1.html	https://www.truyenfullmoi.com/huyen-thien-ton-de/chuong-1.html	huyen-thien-ton-de	first	1	6125	39	true
+truyenfullmoi	truyenfullmoi/chapters/bi-thu-trung-sinh__chuong-34.html	https://www.truyenfullmoi.com/bi-thu-trung-sinh/chuong-34.html	bi-thu-trung-sinh	mid	34	8071	56	true
+truyenfullmoi	truyenfullmoi/chapters/cung-chieu-vo-nho-troi-ban__chuong-30.html	https://www.truyenfullmoi.com/cung-chieu-vo-nho-troi-ban/chuong-30.html	cung-chieu-vo-nho-troi-ban	mid	30	3857	59	false
