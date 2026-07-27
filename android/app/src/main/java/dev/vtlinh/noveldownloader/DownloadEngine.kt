@@ -288,8 +288,26 @@ class DownloadEngine(
 
         /* move both the chapter and its translated counterpart; a compressed
            chapter is the same name with .gz on the end */
+        /* Set when a translation moved on its own — its source was named by
+           the index but is not on disk (the index is a cache, and a
+           translation whose source is gone still sits in translated/ under
+           its old name). The move itself is right: that English belongs to
+           the chapter now at `to`, and the missing source is re-fetched. But
+           nothing else on this path runs — renameChapter, and with it
+           clearChapterList, is skipped — so the CACHED listing kept pointing
+           at the translation's old document id and the reader showed no
+           English for that chapter until something else invalidated it.
+
+           Deliberately not folded into `moved`: that would call
+           renameChapter for a file that is not on disk, leaving the index
+           claiming a document that does not exist, and would add an `applied`
+           entry that remapSavedSpot would use to walk the reading mark onto a
+           name with no file behind it. */
+        var movedTranslationOnly = false
+
         fun move(from: String, to: String): Boolean {
             var moved = false
+            var movedTr = false
             for (sfx in listOf("", ".gz")) {
                 files[from + sfx]?.let { id ->
                     Saf.rename(cr, treeUri, id, to + sfx)?.let { newId ->
@@ -306,9 +324,11 @@ class DownloadEngine(
                     Saf.rename(cr, treeUri, id, to + sfx)?.let { newId ->
                         translated.remove(from + sfx)
                         translated[to + sfx] = newId
+                        movedTr = true
                     }
                 }
             }
+            if (movedTr && !moved) movedTranslationOnly = true
             if (moved) {
                 val orig = whereFrom.remove(from) ?: from
                 whereFrom[to] = orig
@@ -396,6 +416,11 @@ class DownloadEngine(
         }
         remapSavedSpot(slug, applied)
         if (applied.isNotEmpty()) bumpRenameEpoch(slug)
+        /* ...and a pass whose ONLY effect was moving translations still
+           changed the listing, so the cache of it has to go. */
+        else if (movedTranslationOnly) {
+            try { store.clearChapterList(folderKey, slug) } catch (e: Exception) {}
+        }
         if (renamed > 0) log("renamed $renamed chapter file(s) into the site's order")
         if (evicted > 0) log("$evicted file(s) the site no longer lists moved out of the numbering")
     }
