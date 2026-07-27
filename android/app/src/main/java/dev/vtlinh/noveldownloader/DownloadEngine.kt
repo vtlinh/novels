@@ -1547,8 +1547,11 @@ class DownloadEngine(
                 /* Only the locations are wrong. Which chapter each file IS is
                    still recorded, and nothing on disk can rebuild that — so
                    drop the URIs and let the re-listing below refresh them.
-                   clear() here undid the folder rename's care on the very
-                   next run. */
+                   clear() here threw the identities away too, and they are
+                   the one thing that cannot be recovered. The app no longer
+                   renames a novel's folder itself, but the user can, and a
+                   restore or a remounted card recreates one under new
+                   document ids. */
                 store.clearUris(folderKey, slug)
                 log("Saved-chapter locations were stale (folder moved) — re-listing.")
             }

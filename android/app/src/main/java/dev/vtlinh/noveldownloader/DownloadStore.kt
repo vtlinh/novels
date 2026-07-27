@@ -462,9 +462,13 @@ class DownloadStore(context: Context) :
          - a novel pushed off a colliding name lives under "Title (slug)",
            while the title rebuilds the UNSUFFIXED name — another novel's
            folder, which one screen then RECURSIVELY DELETED;
-         - a translated novel whose folder rename the provider refused keeps
-           its Vietnamese folder while the English title is already cached, so
-           the rebuilt name is a directory that does not exist;
+         - a novel downloaded before translation was switched on keeps its
+           VIETNAMESE folder for good, while the English title is cached and
+           is what every screen rebuilds the name from — so the rebuilt name
+           is a directory that does not exist. This used to be the rare case
+           of a rename the provider refused; since the rename was removed
+           (Ownership.translatedFolder) it is the ordinary state of every
+           novel translated after it was first downloaded;
          - the status sweep rewrites `novels.title`, and once an author is
            known it is stored stripped — so the name stops matching the folder
            on disk with no collision involved at all.
