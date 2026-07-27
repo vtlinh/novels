@@ -205,6 +205,49 @@ object Ownership {
         return myChapters > 0 || !indexKnowsOthers
     }
 
+    /* Which folder a novel writes into once its English title is known.
+
+       It PICKS one; it never renames one. Renaming the Vietnamese folder to
+       the English title was a tidy idea that went wrong in every direction it
+       could:
+
+         - findFile matches on the display name alone, so the directory it
+           found was not always this novel's. truyenfull serves the same title
+           under two slugs, sanitising folds tone marks so "Thần Y" and
+           "Thân Y" meet, and a folder the Library scan adopted is claimed
+           under a slug invented from its name. Renaming somebody else's
+           folder made its chapters look unclaimed, so this novel adopted
+           them and paid to translate them, and the real owner was left
+           pointing at a directory that no longer existed;
+         - a rename that FAILED, and a rename recorded in the wrong order,
+           each produced an empty folder beside a full one — the index still
+           resolved into the old directory, so nothing re-downloaded while the
+           translator saw an empty translated/ and re-sent the whole novel to
+           the API;
+         - and the check written to stop all of this ran sixty lines later,
+           so it could only ever bless a rename that had already happened.
+
+       A folder that already holds a novel keeps its name. Only a novel with
+       no directory yet is given the English one, and creating a folder is not
+       a rename — nothing existing is touched, so none of the above can
+       happen. The cost is cosmetic: a book downloaded before translation was
+       switched on keeps its Vietnamese folder name on disk. The Library and
+       the reader show the English title either way; it comes from the titles
+       cache, not from the directory. */
+    fun translatedFolder(
+        english: String,
+        vietName: String,
+        recordedDir: String?,
+        vietIsOurs: Boolean,
+        onDisk: (String) -> Boolean,
+    ): String {
+        /* the directory we are on record as using, while it is still there */
+        if (recordedDir != null) return if (onDisk(recordedDir)) recordedDir else english
+        /* no record: an earlier untranslated run's folder, if it is ours */
+        if (vietIsOurs && onDisk(vietName)) return vietName
+        return english
+    }
+
     /* The full choice. `recordedDirOnDisk` and `wantedOccupied` are lambdas
        because answering them costs SAF calls — listing a folder of several
        thousand chapters is seconds — and neither is needed on the ordinary

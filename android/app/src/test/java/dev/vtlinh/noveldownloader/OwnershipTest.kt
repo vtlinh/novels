@@ -212,6 +212,75 @@ class OwnershipTest {
         assertFalse(c.stepAside)
     }
 
+    /* ---- which folder a translated novel writes into ---- */
+
+    private fun translated(
+        english: String = "Divine Doctor (Than Y)",
+        vietName: String = "Than Y",
+        recordedDir: String? = null,
+        vietIsOurs: Boolean = true,
+        onDisk: Set<String> = emptySet(),
+    ) = Ownership.translatedFolder(english, vietName, recordedDir, vietIsOurs) { it in onDisk }
+
+    /* A novel with no folder yet saves straight into the English name —
+       creating a directory touches nothing that exists, so none of the
+       renaming failures below can happen. */
+    @Test
+    fun `a new translated novel gets the English folder name`() {
+        assertEquals("Divine Doctor (Than Y)", translated())
+    }
+
+    /* THE RENAME, REMOVED. This used to rename the Vietnamese folder to the
+       English title, and it went wrong in every direction it could: findFile
+       matches on the display name alone, so it renamed other novels' folders
+       — the sites serve one title under two slugs, and sanitising folds tone
+       marks — which made their chapters look unclaimed and got them adopted
+       and re-translated at the API's price. A rename that failed, or one
+       recorded in the wrong order, left an empty folder beside a full one and
+       the whole novel was re-sent to the API. A folder that already holds a
+       novel now simply keeps its name. */
+    @Test
+    fun `a novel that already has a folder keeps it`() {
+        assertEquals("Than Y", translated(vietIsOurs = true, onDisk = setOf("Than Y")))
+        assertEquals(
+            "Cultivation",
+            translated(recordedDir = "Cultivation", onDisk = setOf("Cultivation")),
+        )
+    }
+
+    /* ...and the folder it keeps is the one it is ON RECORD as using, not the
+       one its title happens to compute to. */
+    @Test
+    fun `the recorded folder outranks the name the title computes to`() {
+        assertEquals(
+            "Than Y (than-y-b)",
+            translated(
+                recordedDir = "Than Y (than-y-b)",
+                onDisk = setOf("Than Y", "Than Y (than-y-b)"),
+            ),
+        )
+    }
+
+    /* A Vietnamese folder that is NOT ours is left alone — that is the case
+       that used to get somebody else's book renamed and adopted. */
+    @Test
+    fun `another novel's folder is never taken over`() {
+        assertEquals(
+            "Divine Doctor (Than Y)",
+            translated(vietIsOurs = false, onDisk = setOf("Than Y")),
+        )
+    }
+
+    /* A recorded directory that has gone from disk is not a licence to move
+       into the computed name either — that may be another novel's. */
+    @Test
+    fun `a recorded folder that is gone falls back to the English name`() {
+        assertEquals(
+            "Divine Doctor (Than Y)",
+            translated(recordedDir = "Cultivation", onDisk = setOf("Than Y")),
+        )
+    }
+
     /* PUNCTUATION DRIFT. The one-time folder scan derives a slug from the
        folder NAME, so "Library of Heaven's Path" is adopted under
        "library-of-heaven-s-path" while the site's own slug for the same book
