@@ -212,6 +212,51 @@ class OwnershipTest {
         assertFalse(c.stepAside)
     }
 
+    /* ---- the directory a novel is on record as using ---- */
+
+    /* Two callers need this: the screens that hold only a slug and a title,
+       and the compress pass working out which folders are ours. They had a
+       copy each, verbatim. */
+    @Test
+    fun `a recorded directory outranks every guess`() {
+        assertEquals(
+            "Than Y (than-y-b)",
+            Ownership.recordedDir("Than Y (than-y-b)", "Divine Doctor", "Thần Y", "than-y-b"),
+        )
+    }
+
+    /* The translated title IS the folder name for a novel downloaded with
+       translation on, so it beats rebuilding from the Vietnamese title. */
+    @Test
+    fun `the translated title is preferred to rebuilding from the original`() {
+        assertEquals(
+            "Divine Doctor (Than Y)",
+            Ownership.recordedDir(null, "Divine Doctor (Than Y)", "Thần Y", "than-y"),
+        )
+    }
+
+    /* Only for a library older than the recorded column. */
+    @Test
+    fun `with nothing recorded the name is rebuilt from the title`() {
+        assertEquals("Than Y", Ownership.recordedDir(null, null, "Thần Y", "than-y"))
+    }
+
+    /* An empty string is not an answer. `dir_name` defaults to '' for every
+       row that predates the column, and a blank folder name resolves to the
+       tree root — which one screen then offered to delete recursively. */
+    @Test
+    fun `an empty recorded name is not treated as an answer`() {
+        assertEquals("Than Y", Ownership.recordedDir("", "", "Thần Y", "than-y"))
+        assertEquals("Divine Doctor", Ownership.recordedDir("", "Divine Doctor", "Thần Y", "than-y"))
+    }
+
+    /* A title that sanitises away to nothing still has to land somewhere. */
+    @Test
+    fun `a title that reduces to nothing falls back to the slug`() {
+        assertEquals("than-y", Ownership.recordedDir(null, null, "", "than-y"))
+        assertEquals("than-y", Ownership.recordedDir(null, null, "《》", "than-y"))
+    }
+
     /* ---- which folder a translated novel writes into ---- */
 
     private fun translated(

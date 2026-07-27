@@ -208,6 +208,28 @@ object Ownership {
         return myChapters > 0 || !indexKnowsOthers
     }
 
+    /* The directory a novel is on record as using.
+
+       Three answers in falling order of trust: what was actually recorded;
+       the translated title, which IS the folder name for a novel downloaded
+       with translation on; and last the name the title computes to, which is
+       only a guess and only right for a library older than the recorded
+       column.
+
+       One definition because two call sites need it — the screens that hold
+       just a slug and a title, and the compress pass working out which folders
+       are ours. They had a copy each, verbatim, with a comment on one saying
+       it was "the same chain" as the other. That is how the two drift. */
+    fun recordedDir(
+        recorded: String?,
+        translatedTitle: String?,
+        title: String,
+        slug: String,
+    ): String =
+        recorded?.ifEmpty { null }
+            ?: translatedTitle?.ifEmpty { null }
+            ?: Extractor.folderName(title.ifEmpty { slug }, slug)
+
     /* Which folder a novel writes into once its English title is known.
 
        It PICKS one; it never renames one. Renaming the Vietnamese folder to

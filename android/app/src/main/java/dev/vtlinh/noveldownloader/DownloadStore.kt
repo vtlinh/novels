@@ -244,9 +244,9 @@ class DownloadStore(context: Context) :
            chain dirNameOrGuess uses, which is the best answer available for a
            row that predates the column. */
         for (rec in novels(folder)) {
-            val dir = dirNameFor(folder, rec.slug)
-                ?: getTitle(folder, rec.slug)
-                ?: Extractor.folderName(rec.title.ifEmpty { rec.slug }, rec.slug)
+            val dir = Ownership.recordedDir(
+                dirNameFor(folder, rec.slug), getTitle(folder, rec.slug), rec.title, rec.slug,
+            )
             if (dir.isNotEmpty()) out.add(dir)
         }
         return out
@@ -476,9 +476,7 @@ class DownloadStore(context: Context) :
        The recorded directory is the answer to all three. The rest is only a
        fallback for a library older than the column. */
     fun dirNameOrGuess(folder: String, slug: String, title: String): String =
-        dirNameFor(folder, slug)
-            ?: getTitle(folder, slug)
-            ?: Extractor.folderName(title.ifEmpty { slug }, slug)
+        Ownership.recordedDir(dirNameFor(folder, slug), getTitle(folder, slug), title, slug)
 
     fun setDirName(folder: String, slug: String, name: String) {
         writableDatabase.execSQL(
