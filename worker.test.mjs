@@ -137,6 +137,60 @@ await check("fetch-many returns no body for a challenged page", async () => {
   eq(j.results[0].html, "", "html must be empty rather than the challenge page");
 });
 
+/* The allowlist used to be applied to the URL the CALLER sent and to nothing
+ * else: the fetch followed redirects itself, so one open redirect on either
+ * novel site turned this into a proxy for anything at all — link-local
+ * addresses included, which is exactly what the allowlist exists to stop. The
+ * worker even reported the foreign final host back in x-upstream-url. */
+const redirect = (to, status = 302) => new Response("", { status, headers: { location: to } });
+
+await check("a redirect off the allowlist is refused, not followed", async () => {
+  let reached = null;
+  stub = async (u) => {
+    reached = u;
+    if (u.includes("truyenfull")) return redirect("http://169.254.169.254/latest/meta-data/");
+    return html("<html>SECRET</html>");
+  };
+  const r = await call(
+    "/?token=" + ENV.FETCH_TOKEN + "&url=" + encodeURIComponent("https://truyenfull.today/x/"),
+  );
+  eq(r.status, 403, "status");
+  eq(reached.includes("169.254"), false, "the off-site host must never be fetched");
+  eq((await r.text()).includes("SECRET"), false, "no off-site body may reach the caller");
+});
+
+await check("a redirect within the allowlist is followed", async () => {
+  stub = async (u) =>
+    u.includes("truyenfull.today") ? redirect("https://truyenfull.live/x/") : html("<html>the page</html>");
+  const r = await call(
+    "/?token=" + ENV.FETCH_TOKEN + "&url=" + encodeURIComponent("https://truyenfull.today/x/"),
+  );
+  eq(r.status, 200, "status");
+  eq((await r.text()).includes("the page"), true, "body");
+});
+
+await check("a redirect loop stops rather than spinning", async () => {
+  let hops = 0;
+  stub = async () => { hops++; return redirect("https://truyenfull.live/loop/"); };
+  const r = await call(
+    "/?token=" + ENV.FETCH_TOKEN + "&url=" + encodeURIComponent("https://truyenfull.today/loop/"),
+  );
+  eq(r.status, 508, "status");
+  eq(hops <= 8, true, `stopped after ${hops} hops`);
+});
+
+await check("fetch-many refuses an off-allowlist redirect too", async () => {
+  stub = async (u) =>
+    u.includes("novelfull") ? redirect("https://example.com/") : html("<html>ok</html>");
+  const r = await call("/fetch-many?token=" + ENV.FETCH_TOKEN, {
+    method: "POST",
+    body: JSON.stringify({ urls: ["https://novelfull.com/a.html"] }),
+  });
+  const j = await r.json();
+  eq(j.results[0].status, 403, "status");
+  eq(j.results[0].html, "", "html must be empty");
+});
+
 await check("health needs no token", async () => {
   stub = () => { throw new Error("must not reach upstream"); };
   const r = await call("/health");

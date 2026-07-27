@@ -125,6 +125,36 @@ class RealPageTest {
         }
     }
 
+    /* ...and the flag has to be able to FIRE. The test above only ever
+       asserts it is false, so `fellBack` could be hard-wired to false and the
+       whole suite stayed green — while `fellBack` is the one thing that stops
+       a run renaming and deleting the library against the "latest chapters"
+       widget: five links, in the wrong order, on a page whose real listing
+       failed to render. Take the container out of a real page and check the
+       collector notices, rather than quietly reading the rest of the
+       document as if it were the listing. */
+    @Test
+    fun `a page with no chapter list is recognised as a fallback, not read as one`() {
+        var fired = 0
+        for (f in fixtures.filter { it.kind == "novel" }) {
+            val d = doc(f)
+            (d.selectFirst(f.site.listScope) ?: continue).remove()
+            val found = Listing.collect(d, f.site, f.slug)
+            if (found.links.isEmpty()) continue   // nothing left to mistake for a listing
+            fired++
+            assertTrue(
+                "${f.file}: found ${found.links.size} links with the listing gone and " +
+                    "did not flag them — that is the widget, and a run would rename and " +
+                    "delete the library against it",
+                found.fellBack,
+            )
+        }
+        /* ...and the check above has to have been exercised: several captured
+           pages carry a five-link "latest chapters" box outside the listing,
+           which is exactly the document this flag exists for. */
+        assertTrue("no fixture produced a fallback listing at all", fired >= 5)
+    }
+
     /* ...and it finds exactly what is in that container — no more (the
        pagination links live inside it) and no fewer. */
     @Test

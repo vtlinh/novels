@@ -123,13 +123,24 @@ class ChapterListActivity : AppCompatActivity() {
                reports no size at all gives -1, and dropping those would empty
                the library. */
             fun empty(e: Saf.Entry) = e.size == 0L
+            /* ...but the chapter still EXISTS. Dropping the name outright took
+               it out of `ordered` altogether, and `retainAll` below then threw
+               away its translation with it — content the user paid for, which
+               the reader was perfectly able to show. Keep the name and leave
+               it unresolved: readAt returns null for a name with no source,
+               which is the reader's unreadable-chapter path — it says so and
+               stops recording a place it never reached. */
+            val truncated = HashSet<String>()
             for (e in Saf.children(cr, treeUri, dir.docId)) {
                 if (e.isDir && e.name == "translated") translatedId = e.docId
-                else if (e.isDir || empty(e)) continue
+                else if (e.isDir) continue
                 else if (Zips.isGzName(e.name)) {
                     val n = e.name.removeSuffix(".gz")
-                    if (CHAPTER_RE.matches(n)) gzSource[n] = Zips.gzRef(e.docId)
-                } else if (CHAPTER_RE.matches(e.name)) source[e.name] = e.docId
+                    if (!CHAPTER_RE.matches(n)) continue
+                    if (empty(e)) truncated.add(n) else gzSource[n] = Zips.gzRef(e.docId)
+                } else if (CHAPTER_RE.matches(e.name)) {
+                    if (empty(e)) truncated.add(e.name) else source[e.name] = e.docId
+                }
             }
             val translated = HashMap<String, String>()
             val gzTranslated = HashMap<String, String>()
@@ -145,7 +156,10 @@ class ChapterListActivity : AppCompatActivity() {
             /* compressed chapters fill in behind loose .txt files */
             for ((n, r) in gzSource) if (n !in source) source[n] = r
             for ((n, r) in gzTranslated) if (n !in translated) translated[n] = r
-            translated.keys.retainAll(source.keys)
+            /* a good copy under either name settles it — only a chapter with
+               nothing readable left stays on the truncated list */
+            truncated.removeAll(source.keys)
+            translated.keys.retainAll(source.keys + truncated)
             /* The site's listing sequence is the order, and it has to be: a
                site can name chapters after their titles rather than number
                them, so the number in a filename is only as good as what
@@ -170,8 +184,9 @@ class ChapterListActivity : AppCompatActivity() {
             /* (slot, tie-break), computed once rather than on every compare.
                A listed chapter ties at 0, so an unlisted one sharing its slot
                follows it and both stay ahead of the next listed chapter. */
-            val rank = HashMap<String, Pair<Int, Int>>(source.size)
-            for (name in source.keys) {
+            val listable = source.keys + truncated
+            val rank = HashMap<String, Pair<Int, Int>>(listable.size)
+            for (name in listable) {
                 val listed = siteOrder[name]
                 rank[name] = if (listed != null) {
                     Pair(listed, 0)
@@ -181,7 +196,7 @@ class ChapterListActivity : AppCompatActivity() {
                     else Pair(ordinalByNumber.floorEntry(n)?.value ?: -1, n)
                 }
             }
-            val ordered = source.keys.sortedWith(
+            val ordered = listable.sortedWith(
                 compareBy(
                     { rank[it]?.first ?: Int.MAX_VALUE },
                     { rank[it]?.second ?: Int.MAX_VALUE },

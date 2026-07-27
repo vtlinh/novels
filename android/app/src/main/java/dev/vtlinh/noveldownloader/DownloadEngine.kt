@@ -931,16 +931,33 @@ class DownloadEngine(
         val tailSuspects = missed.toList()
         if (tailSuspects.isNotEmpty()) {
             val htmls = arrayOfNulls<String>(tailSuspects.size)
+            /* ...and here it matters more than in run(): this pass has no
+               retry loop behind it, so whatever `gone` says now is what
+               forgiveness decides on — and a status check renames and deletes
+               without ever downloading, so nothing self-corrects. A page that
+               did not answer 404 this time is no longer evidence of an
+               over-read; leaving it in `missed` makes the check refuse the
+               novel, which is the safe direction. */
+            val codes = IntArray(tailSuspects.size)
             coroutineScope {
                 val sem = Semaphore(10)
                 for ((i, p) in tailSuspects.withIndex()) {
-                    launch { sem.withPermit { htmls[i] = fetch(site.listPageUrl(base, slug, p)).html } }
+                    launch {
+                        sem.withPermit {
+                            val r = fetch(site.listPageUrl(base, slug, p))
+                            htmls[i] = r.html
+                            codes[i] = r.status
+                        }
+                    }
                 }
             }
             for ((i, html) in htmls.withIndex()) {
-                if (html == null) continue
-                /* there after all — a real page, not an over-read */
                 val p = tailSuspects[i]
+                if (html == null) {
+                    if (codes[i] != 404 && codes[i] != 410) gone.remove(p)
+                    continue
+                }
+                /* there after all — a real page, not an over-read */
                 pageHtml[p] = html
                 gone.remove(p)
                 missed.remove(p)
@@ -1182,20 +1199,35 @@ class DownloadEngine(
         if (tailSuspects.isNotEmpty() && !stopRequested) {
             status("Confirming ${tailSuspects.size} listing page(s) that report missing…")
             val htmls = arrayOfNulls<String>(tailSuspects.size)
+            /* The status, not just "did it load". This is the LAST word on a
+               tail page before forgiveness is decided a few lines below, and
+               forgiveness treats the page's chapters as never having existed
+               — the dedupe deletes their files and their paid translations.
+               Throwing the code away meant a page that 404'd once and then
+               merely timed out here was forgiven on the strength of the first
+               answer, and a timeout is no evidence at all. */
+            val codes = IntArray(tailSuspects.size)
             coroutineScope {
                 val sem = Semaphore(conc)
                 for ((i, p) in tailSuspects.withIndex()) {
                     launch {
                         sem.withPermit {
-                            if (!stopRequested) htmls[i] = fetch(site.listPageUrl(base, slug, p)).html
+                            if (!stopRequested) {
+                                val r = fetch(site.listPageUrl(base, slug, p))
+                                htmls[i] = r.html
+                                codes[i] = r.status
+                            }
                         }
                     }
                 }
             }
             for ((i, html) in htmls.withIndex()) {
-                if (html == null) continue
-                /* it was there after all — a real page, not an over-read */
                 val p = tailSuspects[i]
+                if (html == null) {
+                    if (codes[i] != 404 && codes[i] != 410) gone.remove(p)
+                    continue
+                }
+                /* it was there after all — a real page, not an over-read */
                 pageHtml[p] = html
                 gone.remove(p)
                 missed.remove(p)
