@@ -41,13 +41,39 @@ object Listing {
        different document, and nothing destructive may run against it. */
     class Found(val links: List<Pair<String, String>>, val fellBack: Boolean)
 
+    /* The path of a link, for a url the JDK's parser will not accept.
+
+       java.net.URI rejects a raw space and any character outside its allowed
+       set, and a real chapter link contains both: read-novel.com serves
+       ".../chapter6-…-no-problem- 5.html" and ".../we-understand-”.html" on
+       the same listing page. Those are links the site printed and a browser
+       follows, and dropping them was silent — the chapter simply was not in
+       the listing. Positions name files, so every chapter after a dropped one
+       is renamed onto its neighbour, and the surplus sweep then deletes
+       against the short list. Two links on one captured page, which is two
+       novels' worth of damage.
+
+       Returns null only when there is no path at all to take. */
+    private fun pathOf(href: String): String? {
+        try {
+            return java.net.URI(href).path ?: ""
+        } catch (e: Exception) {
+            /* by hand, the way the browser reads it: everything after the
+               authority, up to the query */
+            val i = href.indexOf("://")
+            val rest = if (i < 0) href else href.substring(i + 3).substringAfter('/', "")
+            val path = if (i < 0) href else "/$rest"
+            return path.substringBefore('?').ifEmpty { null }
+        }
+    }
+
     fun collect(d: org.jsoup.nodes.Document, site: Site, slug: String): Found {
         fun scan(root: org.jsoup.nodes.Element, inList: Boolean): List<Pair<String, String>> {
             val out = ArrayList<Pair<String, String>>()
             for (a in root.select("a[href]")) {
                 val href = a.absUrl("href").substringBefore('#')
                 if (href.isEmpty()) continue
-                val path = try { java.net.URI(href).path ?: "" } catch (e: Exception) { continue }
+                val path = pathOf(href) ?: continue
                 /* Inside the site's list, being there is what identifies a
                    chapter; outside it there is no such evidence, so the
                    stricter URL test applies. */

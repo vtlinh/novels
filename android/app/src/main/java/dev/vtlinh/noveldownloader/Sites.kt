@@ -1,6 +1,7 @@
 package dev.vtlinh.noveldownloader
 
 import dev.vtlinh.noveldownloader.sites.Novelfull
+import dev.vtlinh.noveldownloader.sites.Readnovel
 import dev.vtlinh.noveldownloader.sites.Truyenfull
 import dev.vtlinh.noveldownloader.sites.Truyenfullmoi
 
@@ -9,7 +10,7 @@ import dev.vtlinh.noveldownloader.sites.Truyenfullmoi
    through the Site interface. */
 object Sites {
 
-    val all: List<Site> = listOf(Truyenfull, Truyenfullmoi, Novelfull)
+    val all: List<Site> = listOf(Truyenfull, Truyenfullmoi, Novelfull, Readnovel)
 
     fun forUrl(url: String): Site? = all.firstOrNull { it.matches(url) }
 }
