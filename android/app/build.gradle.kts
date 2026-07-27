@@ -75,4 +75,11 @@ dependencies {
        engine: reasoning about it in place kept getting it wrong in ways that
        deleted or misfiled chapters. */
     testImplementation("junit:junit:4.13.2")
+
+    /* A real SQLite for the migration tests. The statements live in Schema,
+       which has no Android in it, so the same list the app executes on a
+       device can be executed here against a real engine — see SchemaTest.
+       Migrations run once per install on the only copy of a library the user
+       has, and a swallowed exception in one of them already shipped. */
+    testImplementation("org.xerial:sqlite-jdbc:3.46.1.0")
 }
