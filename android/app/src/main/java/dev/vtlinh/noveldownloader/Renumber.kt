@@ -128,11 +128,29 @@ object Listing {
     }
 
     /* Apply that to the two sets the listing walk carries. Returns true when
-       the page turned out to be real, so the caller can go on to read it. */
-    fun record(page: Int, a: Answer, gone: MutableSet<Int>, missed: MutableSet<Int>): Boolean {
+       the page turned out to be real, so the caller can go on to read it.
+
+       `mayMarkMissing` is false for a pass that must not CREATE forgiveness,
+       only withdraw it. The status check is one: it confirms every page still
+       outstanding, not just the ones already reported missing, and it renames
+       and deletes without ever downloading — so a page that failed pass one
+       for some other reason (throttled, timed out) and answers 404 on the
+       confirmation would otherwise become newly forgivable, and its fifty-odd
+       chapters would be deleted along with their paid translations by a check
+       that has nothing to put them back. Leaving it in `missed` makes the
+       check refuse the novel instead, which is the safe direction and what
+       the pass's own comment promises. A page already in `gone` stays there:
+       it reported missing twice, which is the case forgiveness is for. */
+    fun record(
+        page: Int,
+        a: Answer,
+        gone: MutableSet<Int>,
+        missed: MutableSet<Int>,
+        mayMarkMissing: Boolean = true,
+    ): Boolean {
         when (a) {
             Answer.PRESENT -> { gone.remove(page); missed.remove(page) }
-            Answer.MISSING -> gone.add(page)
+            Answer.MISSING -> if (mayMarkMissing) gone.add(page)
             /* no evidence either way — it must not keep counting as proof */
             Answer.NO_ANSWER -> gone.remove(page)
         }

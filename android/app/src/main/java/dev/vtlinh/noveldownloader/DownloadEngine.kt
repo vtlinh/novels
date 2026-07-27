@@ -978,7 +978,17 @@ class DownloadEngine(
             }
             for ((i, html) in htmls.withIndex()) {
                 val p = tailSuspects[i]
-                if (!Listing.record(p, Listing.answer(html, codes[i]), gone, missed)) continue
+                /* mayMarkMissing = false: this pass confirms EVERY outstanding
+                   page, not only the ones already reported missing, so a
+                   404 here for a page that failed pass one some other way is
+                   a first report, not a second. Letting it into `gone` made
+                   it newly forgivable and its chapters were deleted by a
+                   check that never downloads. */
+                if (!Listing.record(
+                        p, Listing.answer(html, codes[i]), gone, missed,
+                        mayMarkMissing = false,
+                    )
+                ) continue
                 /* there after all — a real page, not an over-read */
                 pageHtml[p] = html!!
                 last = maxOf(last, site.maxPage(Jsoup.parse(html, base), slug))

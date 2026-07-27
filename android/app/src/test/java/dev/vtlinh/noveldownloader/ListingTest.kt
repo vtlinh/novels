@@ -249,6 +249,45 @@ class ListingTest {
         assertFalse(90 in missed)
     }
 
+    /* THE STATUS CHECK'S ASYMMETRY. The download's confirmation pass re-fetches
+       only pages already reported missing, so a 404 there is a SECOND report
+       and forgiveness is what it is for. The status check confirms every page
+       still outstanding — including ones that merely timed out — so a 404
+       there is a FIRST report, and treating it as a second made the page
+       newly forgivable. That check renames and deletes without ever
+       downloading, so its fifty-odd chapters and their paid translations went
+       with nothing able to put them back. */
+    @Test
+    fun `a status check never newly forgives a page on one report`() {
+        val gone = mutableSetOf<Int>()
+        val missed = mutableSetOf(10)
+        Listing.record(10, Listing.answer(null, 404), gone, missed, mayMarkMissing = false)
+        assertFalse("one report must not create forgiveness", 10 in gone)
+        assertTrue("...and the page is still outstanding, so the check refuses", 10 in missed)
+        assertEquals(emptyList<Int>(), Listing.forgivableTailPages(missed, gone, setOf(9), 10))
+    }
+
+    /* ...but a page that already reported missing keeps its standing: it has
+       now said so twice, which is exactly the over-read case. */
+    @Test
+    fun `a page that already reported missing stays forgivable`() {
+        val gone = mutableSetOf(10)
+        val missed = mutableSetOf(10)
+        Listing.record(10, Listing.answer(null, 404), gone, missed, mayMarkMissing = false)
+        assertTrue(10 in gone)
+        assertEquals(listOf(10), Listing.forgivableTailPages(missed, gone, setOf(9), 10))
+    }
+
+    /* ...and withdrawing forgiveness still works on that pass — that is the
+       direction it is always allowed to move. */
+    @Test
+    fun `a page that stops answering loses its standing even on the safe pass`() {
+        val gone = mutableSetOf(10)
+        val missed = mutableSetOf(10)
+        Listing.record(10, Listing.answer(null, 0), gone, missed, mayMarkMissing = false)
+        assertFalse(10 in gone)
+    }
+
     /* record() answers "was it really there", because that is what decides
        whether the caller goes on to parse it. */
     @Test
