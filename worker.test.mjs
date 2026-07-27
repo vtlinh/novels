@@ -101,8 +101,15 @@ await check("every allowlisted novel host is reachable", async () => {
     "https://allnovelupdates.com/book/x",
     "https://read-novel.com/novel1000-x.html",
     "https://xtruyen.vn/x/",
+    /* both spellings: these two redirect the apex to www, and the allowlist
+       is applied to the REDIRECT TARGET as well as to the url asked for — so
+       a missing www alternative reads as the site refusing us rather than as
+       the proxy refusing itself. That is exactly how empirenovel.com looked
+       until this line was added. */
     "https://empirenovel.com/x",
+    "https://www.empirenovel.com/x",
     "https://novellive.app/x",
+    "https://www.novellive.app/x",
     "https://freewebnovel.com/x.html",
     "https://www.freewebnovel.com/x.html",
   ]) {
