@@ -557,14 +557,8 @@ class ReaderActivity : AppCompatActivity() {
                 /* the notification button sends no "want" and toggles; a media
                    key sends what it actually means, so a dedicated PLAY on the
                    earbuds can't pause a read that's already going */
-                val want = i?.getStringExtra("want")
-                runOnUiThread {
-                    when (want) {
-                        "play" -> if (!speaking) playButtonAction()
-                        "pause" -> if (speaking) pauseTts()
-                        else -> playButtonAction()
-                    }
-                }
+                val want = MediaKeys.parse(i?.getStringExtra("want"))
+                runOnUiThread { applyMediaAction(want) }
             }
         }
         androidx.core.content.ContextCompat.registerReceiver(
@@ -595,14 +589,38 @@ class ReaderActivity : AppCompatActivity() {
            the buttons reach us even backgrounded / on OEM ROMs. */
         mediaSession = android.support.v4.media.session.MediaSessionCompat(this, "reader-tts").apply {
             setCallback(object : android.support.v4.media.session.MediaSessionCompat.Callback() {
+                /* Answer the key HERE rather than let MediaSessionCompat
+                   decide. Its default resolves a headset press against the
+                   PlaybackState it was last told — a copy of `speaking` — and
+                   delivers the result a third of a second later, watching for
+                   the double tap that means "skip to next". Both halves cost
+                   presses, and MediaKeys says why at length: the short of it
+                   is that a copy which has fallen behind picks the branch
+                   that then does nothing, and nothing puts it right
+                   afterwards, so the button stays dead. Taking the event
+                   answers it now, from the flag that actually knows whether
+                   the reader is reading. */
+                override fun onMediaButtonEvent(mediaButtonEvent: android.content.Intent): Boolean {
+                    @Suppress("DEPRECATION")
+                    val ev = mediaButtonEvent
+                        .getParcelableExtra<android.view.KeyEvent>(android.content.Intent.EXTRA_KEY_EVENT)
+                        ?: return super.onMediaButtonEvent(mediaButtonEvent)
+                    val want = MediaKeys.want(ev.keyCode, ev.action, ev.repeatCount)
+                        ?: return super.onMediaButtonEvent(mediaButtonEvent)
+                    runOnUiThread { applyMediaAction(want) }
+                    return true
+                }
+                /* Bluetooth also sends these as transport commands with no key
+                   event behind them (AVRCP play/pause), so they still have to
+                   work on their own — through the same decision. */
                 override fun onPlay() {
-                    runOnUiThread { if (!speaking) playButtonAction() }
+                    runOnUiThread { applyMediaAction(MediaKeys.Want.PLAY) }
                 }
                 override fun onPause() {
-                    runOnUiThread { if (speaking) pauseTts() }
+                    runOnUiThread { applyMediaAction(MediaKeys.Want.PAUSE) }
                 }
                 override fun onStop() {
-                    runOnUiThread { if (speaking) pauseTts() }
+                    runOnUiThread { applyMediaAction(MediaKeys.Want.PAUSE) }
                 }
             })
             isActive = true
@@ -761,7 +779,16 @@ class ReaderActivity : AppCompatActivity() {
                    as its data finishes loading */
                 voiceRestoreTicks = 0
                 ensureSavedVoice()
-                runOnUiThread { updatePlayBtn() }   // spinner → play triangle
+                runOnUiThread {
+                    updatePlayBtn()   // spinner → play triangle
+                    /* a play pressed while the engine was away — carry it out
+                       now rather than make the user press again */
+                    val asked = pendingPlayUntil
+                    pendingPlayUntil = 0L
+                    if (!speaking && asked > android.os.SystemClock.elapsedRealtime()) {
+                        playButtonAction()
+                    }
+                }
             } else {
                 ttsReady = false
                 ttsInitState = "FAILED to bind Google TTS — is it installed and enabled?"
@@ -986,6 +1013,38 @@ class ReaderActivity : AppCompatActivity() {
         )
     }
 
+    /* Carry out what a headset button asked for, whichever route it came by.
+       Every caller lands here so the media session's callback, the manifest
+       receiver's broadcast and the notification's own Pause/Play button
+       cannot disagree about what a press means.
+
+       The state pushed at the end is the point of the last line: a press
+       always leaves the session's copy of `speaking` in step with the real
+       one, so the NEXT press is resolved against something true even if this
+       one turned out to be a no-op. */
+    private fun applyMediaAction(want: MediaKeys.Want) {
+        when (MediaKeys.act(want, speaking)) {
+            MediaKeys.Act.START -> playButtonAction()
+            MediaKeys.Act.PAUSE -> pauseTts()
+            MediaKeys.Act.NOTHING -> {
+                /* A pause with nothing to pause still cancels a play that is
+                   waiting on the engine to come back — otherwise the read
+                   starts speaking moments after the user asked it not to. */
+                if (want == MediaKeys.Want.PAUSE) pendingPlayUntil = 0L
+                updateMediaSessionState()
+            }
+        }
+    }
+
+    /* A play arrived while the TTS engine was unbound: speak when it comes
+       back, but only if it comes back promptly. A bind normally takes well
+       under a second; the watchdog goes on retrying a dead engine for as long
+       as the reader is open, and a press from ten minutes ago is not a reason
+       to start reading out of someone's pocket. Held as the deadline itself —
+       0 for "nothing asked". */
+    private var pendingPlayUntil = 0L
+    private val PLAY_WAIT_MS = 30_000L
+
     /* the play/pause behavior, shared by the footer button and headset keys */
     private fun playButtonAction() {
         if (speaking) {
@@ -1049,9 +1108,19 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun startTtsFrom(off: Int) {
         if (!ttsReady) {
-            initTts()   // engine dropped — rebind Google TTS for the next tap
+            /* The engine drops its binding while the reader sits paused with
+               the screen off, which is precisely when the next thing to
+               happen is a play press from a headset. Rebinding and returning
+               threw that press away: on screen there is at least a spinner to
+               explain it, but from an earbud the button simply did nothing
+               and the user pressed it again. Remember the ask and honour it
+               when the engine comes back. */
+            pendingPlayUntil = android.os.SystemClock.elapsedRealtime() + PLAY_WAIT_MS
+            initTts()
+            updatePlayBtn()
             return
         }
+        pendingPlayUntil = 0L
         speakCursor = sentStartOf(off)
         speaking = true
         clearTextSelection()  // remove the start-tap cursor so it can't yank later
@@ -1275,6 +1344,7 @@ class ReaderActivity : AppCompatActivity() {
     /* pause replays the interrupted sentence on resume */
     private fun pauseTts() {
         speaking = false
+        pendingPlayUntil = 0L
         cancelAutoScroll()
         cancelSleepTimer()
         stopShakeDetection()
@@ -1295,6 +1365,10 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun stopTts() {
         speaking = false
+        /* nothing is waiting on the engine any more — a play remembered from
+           before this stop must not start speaking when the watchdog's next
+           rebind succeeds */
+        pendingPlayUntil = 0L
         cancelAutoScroll()
         cancelSleepTimer()
         stopShakeDetection()
