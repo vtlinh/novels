@@ -82,14 +82,32 @@ class ChapterListActivity : AppCompatActivity() {
             if (slug != null && store != null) {
                 val cached = try { store.getChapterList(folder, slug) } catch (e: Exception) { null }
                 if (cached != null) {
+                    /* Has anything ARRIVED? The probes below only ask after
+                       what the cache already knows about, so a translation
+                       written into translated/ after the listing was cached
+                       was invisible for ever — see Folder.Stamp. Two
+                       single-row queries, not a second walk. */
+                    val here = cached.stamp?.let { s ->
+                        Folder.Stamp(
+                            s.dirId,
+                            Saf.modified(cr, treeUri, s.dirId),
+                            s.trId,
+                            /* no translated/ when this was cached: its
+                               creation moves the novel folder's own mtime,
+                               which the other half of the stamp catches */
+                            if (s.trId.isEmpty()) 0L else Saf.modified(cr, treeUri, s.trId),
+                        )
+                    }
                     /* Probing only the ends missed anything removed between
                        them — a chapter deleted outside the app stayed in the
                        listing, and the reader silently skipped over it with no
                        gap shown. Spread the sample across the novel; still a
                        handful of lookups, not a walk. */
-                    val ok = Folder.cacheValid(
-                        cached.ordered, cached.source, CACHE_PROBES,
-                    ) { ref -> refUsable(context, cr, treeUri, ref) }
+                    val ok = here != null &&
+                        Folder.folderUnchanged(cached.stamp, here) &&
+                        Folder.cacheValid(
+                            cached.ordered, cached.source, CACHE_PROBES,
+                        ) { ref -> refUsable(context, cr, treeUri, ref) }
                     if (ok) return Chapters(cached.ordered, cached.source, cached.translated)
                     try { store.clearChapterList(folder, slug) } catch (e: Exception) {}
                 }
@@ -108,10 +126,17 @@ class ChapterListActivity : AppCompatActivity() {
                releases came out of reasoning about them in place, and SAF
                cannot be faked off-device, so the folder is handed over as a
                list. This end does the walking; that end does the deciding. */
+            /* Each mtime is read BEFORE the listing it stamps. The other way
+               round, a file written between the listing and the read would be
+               missing from the listing and yet stamped as already seen, and
+               the cache would answer for it for good. Read first and the same
+               race costs one extra walk instead. */
+            val dirMod = Saf.modified(cr, treeUri, dir.docId)
             val kids = Saf.children(cr, treeUri, dir.docId)
             fun items(list: List<Saf.Entry>) =
                 list.map { Folder.Item(it.name, it.docId, it.isDir, it.size) }
             val translatedId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
+            val trMod = translatedId?.let { Saf.modified(cr, treeUri, it) } ?: 0L
             val got = Folder.resolve(
                 items(kids),
                 translatedId?.let { items(Saf.children(cr, treeUri, it)) } ?: emptyList(),
@@ -126,7 +151,10 @@ class ChapterListActivity : AppCompatActivity() {
                 try {
                     store.saveChapterList(
                         folder, slug,
-                        CachedChapterList(ordered, source, translated),
+                        CachedChapterList(
+                            ordered, source, translated,
+                            Folder.Stamp(dir.docId, dirMod, translatedId ?: "", trMod),
+                        ),
                         epoch,
                     )
                 } catch (e: Exception) {}

@@ -1850,6 +1850,13 @@ class DownloadEngine(
             } catch (e: Exception) {
                 log("TRANSLATION FAILED — ${e.message}")
             }
+            /* Whatever the run managed, translated/ may hold chapters the
+               cached listing was taken before. It would otherwise go on
+               reporting none of them — the listing is only invalidated by
+               writes to the chapter index, and a translation is not one. The
+               folder stamp catches this too, but only where the provider
+               reports a directory's mtime; here we know. */
+            try { store.clearChapterList(folderKey, slug) } catch (e: Exception) {}
         }
         /* "Compress my novels" on → gzip this novel's chapters after download */
         if (!stopRequested &&

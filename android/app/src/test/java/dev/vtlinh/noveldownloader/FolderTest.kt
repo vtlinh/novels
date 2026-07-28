@@ -147,6 +147,26 @@ class FolderTest {
         assertEquals(listOf("Chapter 1.txt"), c.ordered)
     }
 
+    /* A translation is filed under its chapter's filename, whatever that
+       filename is — including the "Chapter N - Title.txt" form an older build
+       wrote, which a library can still be full of, and compressed on both
+       sides. This is the shape a real folder turned up in. */
+    @Test
+    fun `a compressed translation is found under a legacy titled name`() {
+        val c = resolve(
+            listOf(
+                f("Chapter 1 - Khong chi thich mot nguoi.txt.gz", "vi1"),
+                f("Chapter 1.txt.gz", "vi1b"),
+            ),
+            translated = listOf(f("Chapter 1 - Khong chi thich mot nguoi.txt.gz", "en1")),
+        )
+        assertTrue(
+            "the reader has nothing to switch to unless this is found",
+            c.translated.isNotEmpty(),
+        )
+        assertTrue(Zips.isGzRef(c.translated["Chapter 1 - Khong chi thich mot nguoi.txt"]!!))
+    }
+
     /* ---- the cached listing's spot-check ---- */
 
     @Test
@@ -190,6 +210,67 @@ class FolderTest {
         assertTrue("must probe the last", 999 in probes)
         assertTrue("must probe the middle", probes.any { it in 300..700 })
         assertTrue("a handful of lookups, not a walk", probes.size <= 8)
+    }
+
+    /* ---- the folder stamp ---- */
+
+    /* DEFECT 4, and the reason the stamp exists. Every check above asks
+       whether what the cache RECORDED is still there. Nothing asked whether
+       anything had ARRIVED — and translated/ fills in after the chapters do,
+       from a translation run that finishes long after the listing was cached
+       or from a computer writing into the same folder. The listing went on
+       reporting no translations for ever, so the reader offered no language to
+       switch to while the English sat on disk beside the Vietnamese. */
+    @Test
+    fun `a translation appearing after the listing was cached invalidates it`() {
+        val cached = Folder.Stamp("novel", 1000L, "tr", 2000L)
+        val now = Folder.Stamp("novel", 1000L, "tr", 2500L)   // a file landed in translated/
+        assertFalse(Folder.folderUnchanged(cached, now))
+    }
+
+    /* translated/ created since — the novel folder's own mtime is what moves */
+    @Test
+    fun `a translated folder appearing invalidates the listing`() {
+        val cached = Folder.Stamp("novel", 1000L, "", 0L)
+        val now = Folder.Stamp("novel", 3000L, "", 0L)
+        assertFalse(Folder.folderUnchanged(cached, now))
+    }
+
+    @Test
+    fun `a folder nothing has touched keeps its listing`() {
+        val s = Folder.Stamp("novel", 1000L, "tr", 2000L)
+        assertTrue(Folder.folderUnchanged(s, s.copy()))
+    }
+
+    /* Every listing cached by a build that could not notice a translation
+       arriving carries no stamp. Trusting those would leave exactly the
+       libraries this fixes still broken, so one re-walk repairs them. */
+    @Test
+    fun `a listing cached without a stamp is stale`() {
+        assertFalse(Folder.folderUnchanged(null, Folder.Stamp("novel", 1000L, "", 0L)))
+    }
+
+    /* A provider that reports no mtime reports none on both sides. The check
+       then says nothing rather than something wrong — and must not re-walk a
+       seven-thousand-file folder on every open for want of an answer. */
+    @Test
+    fun `a provider that reports no times does not force a re-walk`() {
+        val s = Folder.Stamp("novel", 0L, "tr", 0L)
+        assertTrue(Folder.folderUnchanged(s, Folder.Stamp("novel", 0L, "tr", 0L)))
+    }
+
+    @Test
+    fun `a stamp survives the round trip through the two columns it is kept in`() {
+        val s = Folder.Stamp("primary:Novels/His Freud", 1_700_000_000_000L, "primary:x/tr", 12L)
+        val (dir, tr) = Folder.encodeStamp(s)
+        assertEquals(s, Folder.decodeStamp(dir, tr))
+    }
+
+    /* the meta row an older build left behind is not a stamp */
+    @Test
+    fun `anything that is not a stamp decodes to none`() {
+        assertNull(Folder.decodeStamp("", ""))
+        assertNull(Folder.decodeStamp("id", "id"))
     }
 
     @Test

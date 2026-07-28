@@ -38,6 +38,28 @@ object Saf {
 
     fun rootId(treeUri: Uri): String = DocumentsContract.getTreeDocumentId(treeUri)
 
+    /* One document's last-modified time, as a single-row query.
+
+       For a DIRECTORY this moves whenever a child is added or removed, which
+       is how the cached chapter listing notices files that ARRIVED rather than
+       only files that went — see Folder.Stamp.
+
+       0 both when the document is gone and when the provider reports no time
+       at all. Neither is worth telling apart here: a provider that never
+       reports one compares 0 against 0 and the check simply says nothing,
+       while a document that has gone takes its whole listing with it anyway. */
+    fun modified(cr: ContentResolver, treeUri: Uri, docId: String): Long = try {
+        cr.query(
+            DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
+            arrayOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+            null, null, null,
+        )?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else 0L
+        } ?: 0L
+    } catch (e: Exception) {
+        0L
+    }
+
     /* rename one document in place; returns its new docId (SAF may mint a
        fresh one) or null if the provider refused */
     fun rename(cr: ContentResolver, treeUri: Uri, docId: String, newName: String): String? = try {

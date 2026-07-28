@@ -47,6 +47,10 @@ class CachedChapterList(
     val ordered: List<String>,
     val source: Map<String, String>,
     val translated: Map<String, String>,
+    /* what the folder looked like when this was written, so the next open can
+       tell whether anything has ARRIVED since — see Folder.Stamp. Null for a
+       listing cached before this was recorded, which counts as stale. */
+    val stamp: Folder.Stamp? = null,
 )
 
 class DownloadStore(context: Context) :
@@ -63,6 +67,12 @@ class DownloadStore(context: Context) :
            five seconds, thrown away each time. */
         private val chlistEpochs = java.util.concurrent.ConcurrentHashMap<String, Long>()
         private val chlistEpochAll = java.util.concurrent.atomic.AtomicLong(0)
+
+        /* The cached listing's one non-chapter row, holding the folder stamp.
+           A negative position, so every query that wants chapters filters it
+           out by asking for pos>=0 — as they already did, an earlier meta row
+           having lived here before. */
+        private const val STAMP_POS = -1
 
         private fun epochKey(folder: String, slug: String) = "$folder\u0000$slug"
     }
@@ -138,6 +148,17 @@ class DownloadStore(context: Context) :
                     arrayOf(folder, slug, i, name, list.source[name] ?: "", list.translated[name] ?: ""),
                 )
             }
+            /* the stamp rides in the same two columns the chapter rows use for
+               their refs — a listing and the folder it was taken from are one
+               fact, and splitting them across two tables would let a clear
+               remove one and leave the other */
+            list.stamp?.let { s ->
+                val (dir, tr) = Folder.encodeStamp(s)
+                db.execSQL(
+                    "INSERT INTO chlist(folder,slug,pos,name,src,tr) VALUES(?,?,?,?,?,?)",
+                    arrayOf(folder, slug, STAMP_POS, "", dir, tr),
+                )
+            }
             /* this listing is the truest on-disk count — it sees loose AND
                compressed chapters, which the scan/index counters don't — so
                persist it and the Library's x/y stays right. Set it, don't
@@ -167,6 +188,7 @@ class DownloadStore(context: Context) :
         val ordered = ArrayList<String>()
         val source = HashMap<String, String>()
         val translated = HashMap<String, String>()
+        var stamp: Folder.Stamp? = null
         var any = false
         readableDatabase.query(
             "chlist", arrayOf("pos", "name", "src", "tr"),
@@ -174,7 +196,12 @@ class DownloadStore(context: Context) :
         ).use { c ->
             while (c.moveToNext()) {
                 any = true
-                if (c.getInt(0) < 0) continue      // legacy meta row
+                if (c.getInt(0) < 0) {
+                    /* the folder stamp, or a meta row from an older build,
+                       which decodes to nothing and so reads as no stamp */
+                    stamp = Folder.decodeStamp(c.getString(2) ?: "", c.getString(3) ?: "")
+                    continue
+                }
                 val name = c.getString(1)
                 ordered.add(name)
                 c.getString(2).ifEmpty { null }?.let { source[name] = it }
@@ -182,7 +209,7 @@ class DownloadStore(context: Context) :
             }
         }
         if (!any || ordered.isEmpty()) return null
-        return CachedChapterList(ordered, source, translated)
+        return CachedChapterList(ordered, source, translated, stamp)
     }
 
     private fun bumpChlistEpoch(folder: String, slug: String) {

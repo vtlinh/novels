@@ -126,6 +126,62 @@ object Folder {
         return Contents(ordered, source, translated, truncated)
     }
 
+    /* What the folder looked like when its listing was cached: the novel's own
+       directory and its translated/ subdirectory, each as (document id, last
+       modified). An absent translated/ is the empty id and 0.
+
+       The spot-check below asks whether the chapters the cache RECORDED are
+       still on disk. Nothing asked whether anything had ARRIVED — and one
+       thing routinely does. translated/ is filled in after the chapters are,
+       by a translation run that can finish long after the listing was cached
+       (or, for a library kept in a folder the user also writes to from a
+       computer, by something that is not this app at all). The cached listing
+       then went on reporting no translations for ever: the English sat on disk
+       beside the Vietnamese and the reader offered no language to switch to,
+       because as far as it could see there was nothing to switch to.
+
+       A directory's mtime moves when a child is added or removed, so two
+       single-row queries answer "has anything appeared?" without listing a
+       seven-thousand-file folder again — and not re-listing it is the only
+       reason the cache exists. A provider that reports no mtime reports 0 on
+       both sides, and the check says nothing rather than something wrong. */
+    data class Stamp(
+        val dirId: String,
+        val dirMod: Long,
+        val trId: String,
+        val trMod: Long,
+    )
+
+    /* Does a cached listing still describe this folder?
+
+       A cache with NO stamp is stale by definition — it was written before
+       anything recorded one, so nothing can be said about what has arrived
+       since. That includes every listing cached by a build that could not
+       notice a translation appearing at all, which is the point: one re-walk
+       repairs those libraries instead of leaving them wrong for good. */
+    fun folderUnchanged(cached: Stamp?, now: Stamp): Boolean = cached != null && cached == now
+
+    /* The stamp as the two strings the cached listing has spare to hold it
+       (see DownloadStore.saveChapterList). NUL-separated: a document id is
+       the provider's own string and may hold anything a path may hold, but
+       not this. */
+    private const val SEP = "\u0000"
+
+    fun encodeStamp(s: Stamp): Pair<String, String> =
+        Pair(s.dirId + SEP + s.dirMod, s.trId + SEP + s.trMod)
+
+    /* Null for anything that isn't a stamp this build wrote — which is
+       treated as no stamp at all, i.e. stale. */
+    fun decodeStamp(dir: String, tr: String): Stamp? {
+        val d = dir.split(SEP)
+        val t = tr.split(SEP)
+        if (d.size != 2 || t.size != 2) return null
+        return Stamp(
+            d[0], d[1].toLongOrNull() ?: return null,
+            t[0], t[1].toLongOrNull() ?: return null,
+        )
+    }
+
     /* Which positions to spot-check a cached listing at. Probing only the ends
        missed anything removed between them — a chapter deleted outside the app
        stayed in the listing and the reader skipped it with no gap shown. */
