@@ -105,26 +105,15 @@ class TtsService : Service() {
         return START_NOT_STICKY
     }
 
-    /* Translate a media key into the reader's toggle broadcast. PLAY and PAUSE
-       are explicit so an earbud's dedicated key can't do the opposite of what
-       it says; PLAY_PAUSE and the single-button HEADSETHOOK toggle. */
+    /* Translate a media key into the reader's toggle broadcast — through the
+       same mapping the session's own callback uses, so a press means the same
+       thing whichever route carried it here. */
     private fun handleMediaButton(intent: Intent) {
         @Suppress("DEPRECATION")
         val ev = intent.getParcelableExtra<android.view.KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return
-        /* one dispatch per press: ignore the UP half and auto-repeats */
-        if (ev.action != android.view.KeyEvent.ACTION_DOWN || ev.repeatCount > 0) return
-        val want = when (ev.keyCode) {
-            android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> "play"
-            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE,
-            android.view.KeyEvent.KEYCODE_MEDIA_STOP,
-            -> "pause"
-            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-            android.view.KeyEvent.KEYCODE_HEADSETHOOK,
-            -> "toggle"
-            else -> return
-        }
+        val want = MediaKeys.want(ev.keyCode, ev.action, ev.repeatCount) ?: return
         sendBroadcast(
-            Intent(ACTION_TOGGLE).setPackage(packageName).putExtra("want", want),
+            Intent(ACTION_TOGGLE).setPackage(packageName).putExtra("want", MediaKeys.name(want)),
         )
     }
 
