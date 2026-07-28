@@ -17,10 +17,11 @@ import kotlinx.coroutines.withContext
 
 /* Reading mode, screen 3: the reader.
 
-   Opening a chapter loads it plus its neighbours (previous prepended, next
-   appended). Scrolling past HALF of the loaded content appends the next
-   chapter; scrolling to the top prepends the previous one (scroll position
-   preserved), so reading is seamless in both directions.
+   Opening a chapter loads a small window around it — LOAD_BATCH either side
+   — and the buffer is topped up from there: reaching the last loaded chapter
+   appends the next ones, scrolling back into the first prepends the previous
+   ones (scroll position preserved), so reading is seamless in both
+   directions.
 
    The ≡ button opens a right-side drawer with the full chapter list for
    jumping anywhere. EN/VI switches between the English translation and the
@@ -2279,8 +2280,11 @@ class ReaderActivity : AppCompatActivity() {
     /* jump to a chapter: load it, append the next, prepend the previous.
        targetPara scrolls to that paragraph of the opened chapter (used by
        the language toggle to keep the reading position). */
-    /* how many chapters to (pre)load in each direction / batch */
-    private val LOAD_BATCH = 20
+    /* How many chapters to (pre)load in each direction, and how many a
+       top-up adds. Small on purpose: the buffer is a window on the novel, not
+       a copy of it, and the border-driven loading below keeps it fed in both
+       directions. */
+    private val LOAD_BATCH = 2
 
     private var gotoJob: kotlinx.coroutines.Job? = null
 
@@ -2309,12 +2313,20 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /* Open a chapter: the chapter plus LOAD_BATCH ahead are loaded, and only
+    /* Open a chapter: LOAD_BATCH either side of it are loaded too, and only
        THEN is the scroll placed — so the page is always tall enough to reach
-       the target and nothing loads afterwards to disturb it. The opened
-       chapter sits at offset 0, so the target is just its paragraph. Previous
-       chapters load lazily when the reader scrolls up into the top chapter
-       (see maybeLoadMore). */
+       the target and nothing loads afterwards to disturb it.
+
+       Both directions, not just ahead. The opened chapter used to sit at
+       offset 0 with nothing above it, so the first thing a reader who wanted
+       the previous page did was scroll up into a hard stop and wait for a
+       prepend to notice and fire. Loading behind as well means back is
+       already there.
+
+       That also means the opened chapter no longer starts at offset 0, so the
+       place to scroll to is its own start plus the paragraph within it — the
+       one thing the old "target is just its paragraph" shortcut got for
+       free. */
     private fun openAt(pos: Int, targetPara: Int = 0, anchor: String? = null) {
         /* Both early returns disarm the Play flag. It is set right before the
            call at the Play button, and nothing else ever cleared it — so a
@@ -2341,9 +2353,12 @@ class ReaderActivity : AppCompatActivity() {
                reached, and the page could only grow after the placement had
                already given up. Placing last means nothing can disturb it. */
             val last = (p + LOAD_BATCH).coerceAtMost(ch.ordered.size - 1)
+            val firstWanted = (p - LOAD_BATCH).coerceAtLeast(0)
             val sb = StringBuilder()
+            /* where the opened chapter lands once the ones above it are in */
+            var openStart = 0
             var targetBodyLen = 0
-            for (i in p..last) {
+            for (i in firstWanted..last) {
                 val b = readAt(i)
                 if (b == null) {
                     /* The chapter is listed but its file won't read — a
@@ -2369,10 +2384,15 @@ class ReaderActivity : AppCompatActivity() {
                 }
                 if (sb.isNotEmpty()) sb.append(SEP)
                 loadedChapters.add(LoadedChapter(i, sb.length, headingOf(b)))
+                if (i == p) {
+                    openStart = sb.length
+                    targetBodyLen = b.length
+                }
                 sb.append(b)
-                if (i == p) targetBodyLen = b.length
             }
-            firstIdx = p
+            /* the first chapter actually READ, which is not firstWanted when
+               one above the target wouldn't open */
+            firstIdx = loadedChapters.firstOrNull()?.idx ?: p
             nextIdx = (loadedChapters.lastOrNull()?.idx ?: (p - 1)) + 1
             setTextFocusable(false)   // nothing may scroll to the text while we place it
             text.setText(sb, TextView.BufferType.EDITABLE)
@@ -2383,16 +2403,19 @@ class ReaderActivity : AppCompatActivity() {
 
             val targetOff =
                 if (targetPara > 0 && targetBodyLen > 0) {
-                    restoreOffsetIn(0, targetBodyLen, targetPara, anchor)
+                    restoreOffsetIn(openStart, openStart + targetBodyLen, targetPara, anchor)
                 } else {
-                    0
+                    openStart
                 }
             scroll.post {
                 placeAt(targetOff, fifth = targetPara > 0) {
                     setTextFocusable(true)
                     loading = false
                     loadReady = true
-                    prependArmed = false   // just landed on the first chapter
+                    /* Landing point, not a scroll-up. maybeLoadMore arms this
+                       itself on the first scroll now that an open lands PAST
+                       the first loaded chapter rather than on it. */
+                    prependArmed = false
                     updateHeader()
                     if (pendingSpeakAfterOpen) {
                         pendingSpeakAfterOpen = false
@@ -2444,15 +2467,20 @@ class ReaderActivity : AppCompatActivity() {
 
 
     /* ---- border-driven chapter loading ----
-       openAt loads the opened chapter + LOAD_BATCH ahead; from there scrolling
-       tops the buffer up LOAD_BATCH at a time: reaching the LAST loaded chapter
-       appends more, scrolling UP into the FIRST loaded chapter prepends the
-       previous batch (never during speech, since prepends shift coordinates). */
+       openAt loads LOAD_BATCH either side of the opened chapter; from there
+       scrolling tops the buffer up LOAD_BATCH at a time: reaching the LAST
+       loaded chapter appends more, scrolling UP into the FIRST loaded chapter
+       prepends the previous batch (never during speech, since prepends shift
+       coordinates). */
 
     private var loadReady = false
-    /* the prepend only arms once the reader has moved PAST the first loaded
-       chapter; a fresh open/jump lands ON the first chapter, so without this a
-       settle scroll would immediately load the previous batch */
+    /* The prepend only arms once the reader is PAST the first loaded chapter.
+       An open now lands in the middle of its window, so this arms on the first
+       scroll and the queue still waits for the reader to come back down into
+       the top chapter — the two conditions can't hold at once. It still earns
+       its keep at the head of the novel and after a jump, where the landing
+       IS the first loaded chapter and a settle scroll would otherwise load a
+       batch nobody asked for. */
     private var prependArmed = false
 
     /* ---- touch + scroll-settle gating ----
@@ -2587,7 +2615,20 @@ class ReaderActivity : AppCompatActivity() {
                 pendingSpeakContinue = false
                 if (speaking) speakNext()
             }
-            scroll.post { updateHeader() }
+            scroll.post {
+                updateHeader()
+                /* Ask again if the page still isn't tall enough to scroll.
+                   Every other top-up is driven by a scroll event, and a page
+                   that doesn't scroll produces none — with a batch of twenty
+                   that could not happen, with a small one and short chapters
+                   it can, and the reader would sit at the end of the buffer
+                   with more novel behind it and no way to ask for it. */
+                if (!speaking && loadReady && nextIdx < ch.ordered.size &&
+                    text.height in 1 until scroll.height * 3 / 2
+                ) {
+                    appendChapters(n)
+                }
+            }
         }
     }
 
