@@ -1036,6 +1036,11 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    /* Started with the speech and stopped with it. The one thing that puts
+       this app on the list Android picks the media-button session from — see
+       Silence for why nothing else did. */
+    private val silence by lazy { Silence(ttsAudioAttributes()) }
+
     /* A play arrived while the TTS engine was unbound: speak when it comes
        back, but only if it comes back promptly. A bind normally takes well
        under a second; the watchdog goes on retrying a dead engine for as long
@@ -1124,7 +1129,11 @@ class ReaderActivity : AppCompatActivity() {
         speakCursor = sentStartOf(off)
         speaking = true
         clearTextSelection()  // remove the start-tap cursor so it can't yank later
-        requestAudioFocus()   // makes us the media-button session in the background
+        requestAudioFocus()
+        /* What actually makes us the media-button session: a player of our
+           own, running. Focus does not — see Silence, and the comment that
+           used to sit on this line claiming it did. */
+        silence.start()
         scheduleSleepTimer()  // the timer counts from each play
         startShakeDetection()
         /* foreground service keeps reading alive with the screen off */
@@ -1345,6 +1354,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun pauseTts() {
         speaking = false
         pendingPlayUntil = 0L
+        silence.stop()
         cancelAutoScroll()
         cancelSleepTimer()
         stopShakeDetection()
@@ -1369,6 +1379,7 @@ class ReaderActivity : AppCompatActivity() {
            before this stop must not start speaking when the watchdog's next
            rebind succeeds */
         pendingPlayUntil = 0L
+        silence.stop()
         cancelAutoScroll()
         cancelSleepTimer()
         stopShakeDetection()
@@ -1582,6 +1593,7 @@ class ReaderActivity : AppCompatActivity() {
         settleHandler.removeCallbacks(settleRunnable)
         stopShakeDetection()
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
+        silence.stop()
         abandonAudioFocus()
         try { mediaSession?.release() } catch (e: Exception) {}
         mediaSession = null
