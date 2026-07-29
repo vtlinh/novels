@@ -552,14 +552,12 @@ class ReaderActivity : AppCompatActivity() {
         }
         updatePlayBtn()   // engine still binding at this point → show the spinner
 
-        /* the notification's Pause/Play action broadcasts back to us */
+        /* The notification's Pause/Play action broadcasts back to us. It is
+           the only sender, and a button labelled with whichever state the
+           reader is not in can only mean toggle. */
         ttsToggleReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context?, i: android.content.Intent?) {
-                /* the notification button sends no "want" and toggles; a media
-                   key sends what it actually means, so a dedicated PLAY on the
-                   earbuds can't pause a read that's already going */
-                val want = MediaKeys.parse(i?.getStringExtra("want"))
-                runOnUiThread { applyMediaAction(want) }
+                runOnUiThread { applyMediaAction(MediaKeys.Want.TOGGLE) }
             }
         }
         androidx.core.content.ContextCompat.registerReceiver(
@@ -589,9 +587,10 @@ class ReaderActivity : AppCompatActivity() {
 
            What gets a press here is being the media-button SESSION, which
            Android grants to an app that is playing audio under its own UID —
-           see Silence. The manifest MediaButtonReceiver this constructor
-           wires up is only the fallback for when no session can take the key,
-           and an earlier note here credited it with the whole job. */
+           see Silence. Nothing else does: this app also carried a manifest
+           MediaButtonReceiver for a while, credited in a note here with the
+           whole job, and it was never able to deliver a press to a live
+           reader at all. */
         mediaSession = android.support.v4.media.session.MediaSessionCompat(this, "reader-tts").apply {
             setCallback(object : android.support.v4.media.session.MediaSessionCompat.Callback() {
                 /* Answer the key HERE rather than let MediaSessionCompat
@@ -1018,15 +1017,13 @@ class ReaderActivity : AppCompatActivity() {
         )
     }
 
-    /* Carry out what a headset button asked for, whichever route it came by.
-       Every caller lands here so the media session's callback, the manifest
-       receiver's broadcast and the notification's own Pause/Play button
-       cannot disagree about what a press means.
+    /* Carry out what a press asked for, whichever control it came from: the
+       media session's callback (a headset key, or AVRCP's play/pause) and the
+       notification's own Pause/Play button both land here, so neither can
+       disagree with the other about what a press means.
 
-       The state pushed at the end is the point of the last line: a press
-       always leaves the session's copy of `speaking` in step with the real
-       one, so the NEXT press is resolved against something true even if this
-       one turned out to be a no-op. */
+       Even a press that turns out to be a no-op pushes the playback state, so
+       the session's copy of `speaking` never drifts from the real one. */
     private fun applyMediaAction(want: MediaKeys.Want) {
         when (MediaKeys.act(want, speaking)) {
             MediaKeys.Act.START -> playButtonAction()

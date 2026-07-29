@@ -7,10 +7,8 @@ import org.junit.Test
 
 /* What a headset's buttons do to a read in progress.
 
-   There is no way to press an earbud from a test, and the two routes a press
-   arrives by (the media session's callback, and the broadcast the manifest
-   receiver forwards to TtsService) both used to decide for themselves what a
-   key meant. So the deciding is here, where it can be asked. */
+   There is no way to press an earbud from a test, so the deciding lives where
+   it can be asked instead. */
 class MediaKeysTest {
 
     private fun press(keyCode: Int) =
@@ -76,23 +74,5 @@ class MediaKeysTest {
             "a held button is not a stream of presses",
             MediaKeys.want(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.ACTION_DOWN, 3),
         )
-    }
-
-    /* The broadcast route carries the decision as a word. It has to survive
-       the trip unchanged, or the two routes mean different things. */
-    @Test
-    fun `a want survives the trip through the broadcast`() {
-        for (w in MediaKeys.Want.entries) {
-            assertEquals(w, MediaKeys.parse(MediaKeys.name(w)))
-        }
-    }
-
-    /* The notification's own Pause/Play button has no key behind it and
-       carries no word — it means whichever of the two the reader isn't
-       doing. */
-    @Test
-    fun `no word at all is a toggle`() {
-        assertEquals(MediaKeys.Want.TOGGLE, MediaKeys.parse(null))
-        assertEquals(MediaKeys.Want.TOGGLE, MediaKeys.parse("something else"))
     }
 }
