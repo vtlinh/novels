@@ -58,5 +58,4 @@ object MediaKeys {
         Want.PAUSE -> if (speaking) Act.PAUSE else Act.NOTHING
         Want.TOGGLE -> if (speaking) Act.PAUSE else Act.START
     }
-
 }
