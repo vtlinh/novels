@@ -15,16 +15,25 @@ import androidx.core.app.NotificationCompat
    reader's TTS is speaking, so reading continues with the screen off or the
    app in the background. All actual TTS work stays in ReaderActivity — this
    service holds the foreground notification and a partial wake lock that is
-   only held while speaking. The notification uses MediaStyle so the
-   play/pause control is centered and the media template stays expanded, with
-   the chapter as the only title and no status line. */
+   only held while speaking.
+
+   The notification uses MediaStyle so the play/pause control is centered and
+   the media template stays expanded, with the chapter as the only title and
+   no status line.
+
+   Headset buttons do not come through here. They reach the reader's media
+   session directly; this service once forwarded them as a broadcast, from a
+   route that could not fire while there was a reader to act on it — see the
+   manifest, where the pairing that made it up has been removed. */
 class TtsService : Service() {
 
     companion object {
         private const val CHANNEL = "tts"
         private const val NOTIF_ID = 2
 
-        /* notification action → ReaderActivity's in-app receiver */
+        /* The notification's Pause/Play button → ReaderActivity's in-app
+           receiver. Its only sender, so it carries no argument: it means
+           whichever of the two the reader is not doing. */
         const val ACTION_TOGGLE = "dev.vtlinh.noveldownloader.TTS_TOGGLE"
 
         /* true while a reading session is active — the auto-updater checks
@@ -48,14 +57,6 @@ class TtsService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
-    /* the last notification we posted, so a media-button delivery (which
-       carries none of these extras) can re-post the SAME notification instead
-       of clobbering the chapter title and play/pause state */
-    private var lastTitle: String? = null
-    private var lastSpeaking = true
-    private var lastToken: MediaSessionCompat.Token? = null
-    private var lastSlug: String? = null
-
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -63,28 +64,6 @@ class TtsService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Read aloud", NotificationManager.IMPORTANCE_LOW),
         )
-
-        /* A headset/Bluetooth button arrives here (MediaButtonReceiver forwards
-           it to the service advertising ACTION_MEDIA_BUTTON). We were started
-           with startForegroundService, so we must post a notification right
-           away — re-post the current one — then act on the key. */
-        if (intent?.action == Intent.ACTION_MEDIA_BUTTON) {
-            postNotification(lastTitle, lastSpeaking, lastToken, lastSlug)
-            handleMediaButton(intent)
-            /* Nothing here reads: a media key can start this service long
-               after the reader is gone (the manifest receiver is exported and
-               the process may have been killed since), and the toggle it
-               broadcasts is only listened for by a live ReaderActivity. Left
-               alone, that posted an ongoing "Reading aloud" notification with
-               a Pause button that did nothing and no way to dismiss it —
-               nothing would ever call stop(). If no reader took the key, take
-               the notification back down. */
-            if (lastTitle == null) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf(startId)
-            }
-            return START_NOT_STICKY
-        }
 
         val speaking = intent?.getBooleanExtra("speaking", true) ?: true
         @Suppress("DEPRECATION")
@@ -105,28 +84,12 @@ class TtsService : Service() {
         return START_NOT_STICKY
     }
 
-    /* Translate a media key into the reader's toggle broadcast — through the
-       same mapping the session's own callback uses, so a press means the same
-       thing whichever route carried it here. */
-    private fun handleMediaButton(intent: Intent) {
-        @Suppress("DEPRECATION")
-        val ev = intent.getParcelableExtra<android.view.KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return
-        val want = MediaKeys.want(ev.keyCode, ev.action, ev.repeatCount) ?: return
-        sendBroadcast(
-            Intent(ACTION_TOGGLE).setPackage(packageName).putExtra("want", MediaKeys.name(want)),
-        )
-    }
-
     private fun postNotification(
         title: String?,
         speaking: Boolean,
         token: MediaSessionCompat.Token?,
         slug: String?,
     ) {
-        lastTitle = title
-        lastSpeaking = speaking
-        lastToken = token
-        lastSlug = slug
         /* tapping the notification brings the existing task (the reader) back */
         val openIntent = PendingIntent.getActivity(
             this, 2,

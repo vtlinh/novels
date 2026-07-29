@@ -6,15 +6,8 @@ import android.view.KeyEvent
 
    Nothing here touches Android at run time — KeyEvent's key codes are compile
    -time constants and land in the bytecode as the numbers they are — so the
-   mapping can be exercised directly. It needs to be: a media key is delivered
-   by two different routes and there is no way to press one from a test.
-
-   The routes are the media session's callback, while this app owns the
-   buttons, and — when it doesn't — a broadcast the manifest receiver forwards
-   to TtsService. Both used to decide for themselves what a key meant. A
-   button that behaves differently depending on which route carried it is
-   worse than one that plainly doesn't work, so there is one mapping and both
-   callers use it.
+   mapping can be exercised directly. It needs to be: there is no way to press
+   an earbud from a test.
 
    Every decision is made from `speaking` — whether the reader is actually
    reading — and from nothing else. That is the fix. Left to
@@ -66,20 +59,4 @@ object MediaKeys {
         Want.TOGGLE -> if (speaking) Act.PAUSE else Act.START
     }
 
-    /* the word the TtsService broadcast carries, so the two routes cannot
-       drift into meaning different things */
-    fun name(want: Want): String = when (want) {
-        Want.PLAY -> "play"
-        Want.PAUSE -> "pause"
-        Want.TOGGLE -> "toggle"
-    }
-
-    /* Anything else is a toggle — including the null the notification's own
-       Pause/Play button carries, which has no key behind it and means
-       whichever of the two the reader isn't doing. */
-    fun parse(name: String?): Want = when (name) {
-        "play" -> Want.PLAY
-        "pause" -> Want.PAUSE
-        else -> Want.TOGGLE
-    }
 }
