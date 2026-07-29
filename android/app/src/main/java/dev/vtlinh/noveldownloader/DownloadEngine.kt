@@ -562,7 +562,53 @@ class DownloadEngine(
             return out
         }
 
-        fun remove(x: OnDisk): Boolean {
+        /* Hand this file's translation to the chapter that is keeping its
+           text, before the file itself goes. See Translations: the English
+           was only ever written under the OLD names, so the copy about to be
+           deleted is the one holding it and the copy being kept has none.
+           Deleting it with its source lost the novel's translation one
+           chapter at a time, at the moment the duplicate was tidied away.
+
+           Returns false if a move it was asked to make didn't happen, and
+           then the source stays too: a translation stranded under a name
+           nothing points at is worse than a duplicate left for the next
+           pass, and keeping the pair together means the next pass can try
+           again. */
+        fun handOver(x: OnDisk, keeper: String): Boolean {
+            val tid = translatedId ?: return true
+            val here = Saf.children(cr, treeUri, tid).filter { !it.isDir }
+            val moves = Translations.handover(x.base, keeper, here.mapTo(HashSet()) { it.name })
+            if (moves.isEmpty()) return true
+            var ok = true
+            for (m in moves) {
+                when (m) {
+                    is Translations.Move.Rename -> {
+                        val from = here.firstOrNull { it.name == m.from } ?: continue
+                        if (Saf.rename(cr, treeUri, from.docId, m.to) == null) {
+                            log("! could not move the translation of ${m.from} onto ${m.to} — keeping both files")
+                            ok = false
+                        }
+                    }
+                    is Translations.Move.Delete -> {
+                        val f = here.firstOrNull { it.name == m.name } ?: continue
+                        try {
+                            DocumentsContract.deleteDocument(
+                                cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, f.docId),
+                            )
+                        } catch (e: Exception) {}
+                    }
+                }
+            }
+            /* translated/ changed under the cached listing */
+            if (ok) try { store.clearChapterList(folderKey, slug) } catch (e: Exception) {}
+            return ok
+        }
+
+        /* `keeper` is the chapter whose text this file duplicates, when there
+           is one. Without it there is nothing to hand a translation to and it
+           goes with its source — right for a chapter the site has dropped. */
+        fun remove(x: OnDisk, keeper: String? = null): Boolean {
+            if (keeper != null && !handOver(x, keeper)) return false
             val ok = try {
                 DocumentsContract.deleteDocument(
                     cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, x.docId),
@@ -577,7 +623,10 @@ class DownloadEngine(
                        left the translation orphaned — a file the reader hides,
                        the sweeps ignore, and the next chapter to take that
                        name inherits. purgeUnreferenced already keys on the
-                       base; this is the same rule. */
+                       base; this is the same rule.
+
+                       Anything handOver moved is already gone from this name,
+                       so this only reaches what it left behind. */
                     if (!t.isDir && t.name.removeSuffix(".gz") == x.base) {
                         try {
                             DocumentsContract.deleteDocument(
@@ -667,8 +716,9 @@ class DownloadEngine(
             val xh = if (candidates.isEmpty()) null else bodyHash(x)
             val twin = if (xh == null) null else candidates.firstOrNull { bodyHash(it) == xh }
             if (twin == null) { kept++; log("  extra kept (text found nowhere else): ${x.name}"); continue }
-            /* same bytes as a chapter we're keeping — drop the copy */
-            if (remove(x)) removed++
+            /* same bytes as a chapter we're keeping — drop the copy, after
+               giving that chapter this one's translation */
+            if (remove(x, twin.base)) removed++
         }
         if (removed > 0) log("removed $removed duplicate chapter file(s) — same text as a chapter we kept")
         if (dropped > 0) log("removed $dropped chapter file(s) the site no longer lists")
