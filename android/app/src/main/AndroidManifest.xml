@@ -85,10 +85,15 @@
             android:foregroundServiceType="dataSync" />
 
         <!-- Foreground service: TTS keeps reading with the screen off.
-             The MEDIA_BUTTON filter is REQUIRED by androidx's
-             MediaButtonReceiver: it forwards the broadcast to a service
-             advertising this action, and throws IllegalStateException when
-             the app has none — which is why headset play/pause did nothing. -->
+
+             The MEDIA_BUTTON filter is what androidx's MediaButtonReceiver
+             forwards to; without a service advertising this action it throws.
+             That pairing is a FALLBACK for when no session is available, not
+             the route a press normally takes: a live press goes straight to
+             the media session's callback. An earlier note here said the
+             missing filter "is why headset play/pause did nothing" — it was
+             not. See Silence: this app was never eligible for the buttons at
+             all, because it never played audio under its own UID. -->
         <service
             android:name=".TtsService"
             android:exported="false"
@@ -114,7 +119,12 @@
             android:name=".UpdateReceiver"
             android:exported="false" />
 
-        <!-- routes Bluetooth / wired media-button events to the TTS session -->
+        <!-- Where the system sends media buttons when NO session can take
+             them. Both this and the session route need the app to have been
+             the media-button session at some point (the system only remembers
+             a receiver for a session it has chosen), so this cannot be the
+             thing that gets a press to a reader that is alive — by then the
+             session itself has it. Kept as the fallback it is. -->
         <receiver
             android:name="androidx.media.session.MediaButtonReceiver"
             android:exported="true">
