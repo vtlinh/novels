@@ -586,8 +586,12 @@ class ReaderActivity : AppCompatActivity() {
         )
 
         /* Bluetooth headset / media-button play & pause control the TTS.
-           MediaSessionCompat wires up the manifest MediaButtonReceiver so
-           the buttons reach us even backgrounded / on OEM ROMs. */
+
+           What gets a press here is being the media-button SESSION, which
+           Android grants to an app that is playing audio under its own UID —
+           see Silence. The manifest MediaButtonReceiver this constructor
+           wires up is only the fallback for when no session can take the key,
+           and an earlier note here credited it with the whole job. */
         mediaSession = android.support.v4.media.session.MediaSessionCompat(this, "reader-tts").apply {
             setCallback(object : android.support.v4.media.session.MediaSessionCompat.Callback() {
                 /* Answer the key HERE rather than let MediaSessionCompat
