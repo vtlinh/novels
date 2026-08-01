@@ -1,5 +1,6 @@
 package dev.vtlinh.noveldownloader
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -87,6 +88,79 @@ class VoicesTest {
     fun `the word has to end the name`() {
         assertFalse(Voices.isNetworkName("en-us-network-x-iob-local"))
         assertFalse(Voices.isNetworkName(""))
+    }
+
+    /* ---- the order the picker lists them in ---- */
+
+    /* THE DEFECT, from a real device's list. Sorting by Voice.name with the
+       ordinary String compare is case-sensitive, and Google names its general
+       voices "en-AU-language" but its specific ones "en-au-x-aua-local" — so
+       every uppercase name sorted ahead of every lowercase one and the locale
+       column came out en_AU, en_GB, en_IN, en_NG, en_US, and then en_AU
+       again. Sorted by a key nobody can see, which reads as not sorted. */
+    @Test
+    fun `the case a voice is named in does not decide where it goes`() {
+        val asTheEngineGaveThem = listOf(
+            "en_US" to "en-US-language",
+            "en_AU" to "en-au-x-aua-local",
+            "en_AU" to "en-AU-language",
+            "en_GB" to "en-gb-x-gba-local",
+            "en_IN" to "en-IN-language",
+        )
+        val sorted = asTheEngineGaveThem
+            .sortedBy { (loc, name) -> Voices.sortKey(loc, name) }
+            .map { (loc, name) -> Voices.label(loc, name) }
+
+        assertEquals(
+            listOf(
+                "en_AU — en-AU-language",
+                "en_AU — en-au-x-aua-local",
+                "en_GB — en-gb-x-gba-local",
+                "en_IN — en-IN-language",
+                "en_US — en-US-language",
+            ),
+            sorted,
+        )
+    }
+
+    /* Locale first, so the column a reader scans down is the one in order.
+       Sorting on the name alone would put en_IN's "en-IN-language" ahead of
+       en_GB's "en-gb-x-gba-local" — right by the hidden key, wrong on screen. */
+    @Test
+    fun `the locale decides the order before the name does`() {
+        assertTrue(Voices.sortKey("en_GB", "en-gb-x-gba-local") < Voices.sortKey("en_IN", "en-IN-language"))
+        assertTrue("and within one locale, the name breaks the tie",
+            Voices.sortKey("en_AU", "en-au-x-aua-local") < Voices.sortKey("en_AU", "en-au-x-aub-local"))
+    }
+
+    /* Sort and display read the same string, so they cannot drift apart. */
+    @Test
+    fun `what is sorted is what is shown`() {
+        assertEquals("en_AU — en-AU-language", Voices.label("en_AU", "en-AU-language"))
+        assertEquals(Voices.label("en_AU", "en-AU-language").lowercase(),
+            Voices.sortKey("en_AU", "en-AU-language"))
+    }
+
+    /* Folded by Locale.ROOT, not the device's. A Turkish phone's default fold
+       turns I into ı, which sorts past z — that reader would get a different
+       list from everyone else, for no reason they could ever see. */
+    @Test
+    fun `the device's own language does not change the order`() {
+        val was = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale("tr", "TR"))
+            assertEquals("en_in — en-in-language", Voices.sortKey("en_IN", "en-IN-language"))
+        } finally {
+            java.util.Locale.setDefault(was)
+        }
+    }
+
+    /* A voice the engine describes only partly still has a place in the list,
+       rather than crashing the picker that has to draw it. */
+    @Test
+    fun `a voice missing a locale or a name still sorts`() {
+        assertEquals(" — en-US-language", Voices.label("", "en-US-language"))
+        assertEquals("en_US — ", Voices.label("en_US", ""))
     }
 
     /* ---- which language a stretch of the novel is in ---- */

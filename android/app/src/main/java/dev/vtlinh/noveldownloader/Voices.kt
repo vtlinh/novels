@@ -37,6 +37,31 @@ object Voices {
     fun isNetworkName(voiceName: String): Boolean =
         voiceName.endsWith("-network", ignoreCase = true)
 
+    /* What the picker shows for one voice — locale first, because that is the
+       column a reader scans down. */
+    fun label(voiceLocale: String, voiceName: String): String = "$voiceLocale — $voiceName"
+
+    /* And the order it shows them in: that same label, case-folded.
+
+       THE DEFECT. The list was sorted by Voice.name alone, with the ordinary
+       String compare, which is case-SENSITIVE. Google names its general
+       voices "en-AU-language" and its specific ones "en-au-x-aua-local", so
+       every uppercase name sorted ahead of every lowercase one, and the
+       locale column the reader actually reads came out en_AU, en_GB, en_IN,
+       en_NG, en_US, en_AU, en_AU, en_AU… A list sorted by a key nobody can
+       see reads as a list that is not sorted at all.
+
+       Ordering by the whole visible label is also the only arrangement the
+       display cannot drift away from — sort on one string, show the other,
+       and the next change to either puts them back out of step.
+
+       lowercase() with no argument folds by Locale.ROOT rather than the
+       device's, deliberately: on a Turkish phone the default fold turns I
+       into ı, which sorts past z and would hand that reader a different
+       order from everyone else. */
+    fun sortKey(voiceLocale: String, voiceName: String): String =
+        label(voiceLocale, voiceName).lowercase()
+
     private val VI_CHARS = Regex(
         "[\u0103\u00e2\u0111\u00ea\u00f4\u01a1\u01b0\u00e0\u1ea3\u00e3\u00e1\u1ea1\u1eb1\u1eb3\u1eb5\u1eaf\u1eb7\u1ea7\u1ea9\u1eab\u1ea5\u1ead\u00e8\u1ebb\u1ebd\u00e9\u1eb9\u1ec1\u1ec3\u1ec5\u1ebf\u1ec7\u00ec\u1ec9\u0129\u00ed\u1ecb\u00f2\u1ecf\u00f5\u00f3\u1ecd\u1ed3\u1ed5\u1ed7\u1ed1\u1ed9\u1edd\u1edf\u1ee1\u1edb\u1ee3\u00f9\u1ee7\u0169\u00fa\u1ee5\u1eeb\u1eed\u1eef\u1ee9\u1ef1\u1ef3\u1ef7\u1ef9\u00fd\u1ef5]",
         RegexOption.IGNORE_CASE,

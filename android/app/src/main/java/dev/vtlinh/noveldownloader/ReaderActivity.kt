@@ -867,7 +867,9 @@ class ReaderActivity : AppCompatActivity() {
         try { v.isNetworkConnectionRequired } catch (e: Exception) { false } ||
             Voices.isNetworkName(v.name.orEmpty())
 
-    /* Every voice this reader will offer, in name order.
+    /* Every voice this reader will offer, in the order the picker lists them —
+       A to Z down the label a reader sees, which Voices.sortKey defines and
+       explains.
 
        Network voices are not among them. Google ships each voice twice, once
        rendering on the phone and once on its servers, and the second kind is
@@ -879,7 +881,8 @@ class ReaderActivity : AppCompatActivity() {
        One definition, used by the pickers AND by the restore, so the voice in
        use is always one the picker would have shown. */
     private fun offerableVoices(): List<android.speech.tts.Voice> = try {
-        tts?.voices.orEmpty().filter { !isNetworkVoice(it) }.sortedBy { it.name }
+        tts?.voices.orEmpty().filter { !isNetworkVoice(it) }
+            .sortedBy { Voices.sortKey(it.locale?.toString().orEmpty(), it.name.orEmpty()) }
     } catch (e: Exception) {
         emptyList()
     }
@@ -1856,7 +1859,7 @@ class ReaderActivity : AppCompatActivity() {
         val spinner = android.widget.Spinner(ctx)
         spinner.adapter = android.widget.ArrayAdapter(
             ctx, android.R.layout.simple_spinner_dropdown_item,
-            listOf("Default") + voices.map { "${it.locale} — ${it.name}" },
+            listOf("Default") + voices.map { Voices.label(it.locale?.toString().orEmpty(), it.name.orEmpty()) },
         )
         val savedVoice = prefs.getString("ttsVoice:$lang", null)
         val savedIdx = voices.indexOfFirst { it.name == savedVoice }
@@ -2097,7 +2100,7 @@ class ReaderActivity : AppCompatActivity() {
         fun fillSpinner() {
             spinner.adapter = android.widget.ArrayAdapter(
                 ctx, android.R.layout.simple_spinner_dropdown_item,
-                listOf("Default") + voices.map { "${it.locale} — ${it.name}" },
+                listOf("Default") + voices.map { Voices.label(it.locale?.toString().orEmpty(), it.name.orEmpty()) },
             )
             val savedVoice = prefs.getString("ttsVoice:$lang", null)
             val savedIdx = voices.indexOfFirst { it.name == savedVoice }
