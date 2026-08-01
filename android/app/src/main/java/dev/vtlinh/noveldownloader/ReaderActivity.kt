@@ -859,15 +859,35 @@ class ReaderActivity : AppCompatActivity() {
     private fun localeFor(lang: String): java.util.Locale =
         if (lang == "vi") java.util.Locale("vi", "VN") else java.util.Locale.US
 
-    /* The engine's voices for this language, in name order. Matching lives in
-       Voices, which says why one spelling of the code was not enough. */
-    private fun voicesFor(lang: String): List<android.speech.tts.Voice> = try {
-        tts?.voices.orEmpty()
-            .filter { Voices.matches(it.locale?.language.orEmpty(), lang) }
-            .sortedBy { it.name }
+    /* Is this a voice that renders on Google's servers rather than here?
+
+       The engine's own answer first, the name as a backstop — see
+       Voices.isNetworkName. */
+    private fun isNetworkVoice(v: android.speech.tts.Voice): Boolean =
+        try { v.isNetworkConnectionRequired } catch (e: Exception) { false } ||
+            Voices.isNetworkName(v.name.orEmpty())
+
+    /* Every voice this reader will offer, in name order.
+
+       Network voices are not among them. Google ships each voice twice, once
+       rendering on the phone and once on its servers, and the second kind is
+       no use to a reader whose whole point is a downloaded novel: it needs a
+       connection to say a word, so it goes silent on a train or a plane, and
+       every sentence waits on a round trip. Dropping them also halves a list
+       that was long enough to have to scroll.
+
+       One definition, used by the pickers AND by the restore, so the voice in
+       use is always one the picker would have shown. */
+    private fun offerableVoices(): List<android.speech.tts.Voice> = try {
+        tts?.voices.orEmpty().filter { !isNetworkVoice(it) }.sortedBy { it.name }
     } catch (e: Exception) {
         emptyList()
     }
+
+    /* Those of them in this language. Matching lives in Voices, which says why
+       one spelling of the code was not enough. */
+    private fun voicesFor(lang: String): List<android.speech.tts.Voice> =
+        offerableVoices().filter { Voices.matches(it.locale?.language.orEmpty(), lang) }
 
     /* Why this language has no voice, in the engine's own words.
 
@@ -891,7 +911,22 @@ class ReaderActivity : AppCompatActivity() {
                 "The engine says $name is available but offers no voice for it — " +
                     "its data may still be downloading."
         }
-        return "$why Every other voice is listed above."
+        /* A language whose only voices are the network ones reads as "nothing
+           installed", which is true and actionable — but not the whole truth
+           when we are the ones holding voices back. Say so where it applies:
+           silently substituting a list is the mistake this note exists to
+           correct, and it would be a poor one to repeat one line down. */
+        val hidden = try {
+            tts?.voices.orEmpty().any {
+                isNetworkVoice(it) && Voices.matches(it.locale?.language.orEmpty(), lang)
+            }
+        } catch (e: Exception) { false }
+        val also = if (hidden) {
+            " (online-only $name voices exist but aren't offered — they need a connection to say a word.)"
+        } else {
+            ""
+        }
+        return "$why Every other voice is listed above.$also"
     }
 
     /* voice/rate/pitch are stored PER LANGUAGE ("ttsRate:en", ...) */
@@ -900,10 +935,12 @@ class ReaderActivity : AppCompatActivity() {
         curTtsLang = lang
         t.setSpeechRate(prefs.getFloat("ttsRate:$lang", 1f))
         t.setPitch(prefs.getFloat("ttsPitch:$lang", 1f))
+        /* From the offerable set, so a network voice saved before they were
+           dropped cannot go on being applied behind a picker that no longer
+           lists it — it simply stops resolving, and the locale default below
+           takes over, which is what the picker shows. */
         val saved = prefs.getString("ttsVoice:$lang", null)
-        val v = saved?.let { name ->
-            try { t.voices?.firstOrNull { it.name == name } } catch (e: Exception) { null }
-        }
+        val v = saved?.let { name -> offerableVoices().firstOrNull { it.name == name } }
         if (v != null) {
             t.voice = v
         } else {
@@ -937,7 +974,7 @@ class ReaderActivity : AppCompatActivity() {
             return
         }
         val saved = prefs.getString("ttsVoice:$lang", null) ?: return  // default → nothing to restore
-        val present = try { t.voices?.any { it.name == saved } == true } catch (e: Exception) { false }
+        val present = offerableVoices().any { it.name == saved }
         if (present) {
             applyTtsConfig(lang)   // sets curTtsLang + the saved voice
             voiceRestoreTicks = 0
@@ -1815,9 +1852,7 @@ class ReaderActivity : AppCompatActivity() {
             },
         )
         val forLang = voicesFor(lang)
-        val voices = forLang.ifEmpty {
-            try { tts?.voices.orEmpty().sortedBy { it.name } } catch (e: Exception) { emptyList() }
-        }
+        val voices = forLang.ifEmpty { offerableVoices() }
         val spinner = android.widget.Spinner(ctx)
         spinner.adapter = android.widget.ArrayAdapter(
             ctx, android.R.layout.simple_spinner_dropdown_item,
@@ -2049,9 +2084,7 @@ class ReaderActivity : AppCompatActivity() {
         root.addView(label("Voice"))
         /* nothing for this language → show everything rather than nothing,
            and say so underneath rather than leave the mismatch unexplained */
-        fun voiceList(): List<android.speech.tts.Voice> = voicesFor(lang).ifEmpty {
-            try { tts?.voices.orEmpty().sortedBy { it.name } } catch (e: Exception) { emptyList() }
-        }
+        fun voiceList(): List<android.speech.tts.Voice> = voicesFor(lang).ifEmpty { offerableVoices() }
         var voices = voiceList()
         val spinner = android.widget.Spinner(ctx)
         /* Only a real tap on the spinner may overwrite the saved voice. A
