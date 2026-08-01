@@ -1,0 +1,184 @@
+name: auto-merge
+
+# Merges a pull request once the android workflow passes on it.
+#
+# GitHub's own auto-merge needs "Allow auto-merge" plus a branch protection
+# rule naming a required check, and both are paid-plan features on a private
+# repository. This does the same job with nothing but a workflow.
+#
+# workflow_run always executes the copy of this file on the DEFAULT BRANCH, not
+# the one in the pull request. So edits here take effect only once merged —
+# including this one, which is why a change to this file has to be merged by
+# hand the first time.
+on:
+  workflow_run:
+    workflows: ["android"]
+    types: [completed]
+
+# A permissions block REPLACES the defaults rather than adding to them, so
+# every scope this job touches has to be listed. Leaving one out does not fail
+# loudly: the call 403s with "Resource not accessible by integration", naming
+# only the endpoint.
+permissions:
+  contents: write        # perform the merge
+  pull-requests: write   # read PR state, merge
+  checks: read           # list the commit's other check runs
+  actions: write         # dispatch the publish run, see the last step
+
+jobs:
+  merge:
+    # Only PR runs, and only passing ones. Excluding workflow_dispatch here is
+    # also what stops the dispatch at the end of this job from looping back
+    # round into another merge.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge if the PR is ready and every other check passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          # The run that just went green. Handed to the publish dispatch below
+          # so it can republish that run's APK rather than build the same code
+          # again; android.yml decides whether it may, by comparing the tree.
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          # The event already names the pull requests this run belongs to, for
+          # same-repo PRs. Reading it costs no API call and no permission,
+          # which is the difference between working and 403 if the token turns
+          # out to be short of pull-requests scope.
+          PAYLOAD_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -uo pipefail
+
+          PR="$PAYLOAD_PR"
+          if [ -z "$PR" ]; then
+            echo "Event payload carried no PR number; asking the API."
+            PR=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+                   --jq '[.[] | select(.state == "open")][0].number // empty') || PR=""
+          fi
+          if [ -z "$PR" ]; then
+            echo "No open pull request for $SHA — nothing to merge."
+            exit 0
+          fi
+          echo "Considering PR #$PR"
+
+          # Each guard below is skipped rather than fatal when the lookup
+          # itself fails: a job that can read enough to merge but not enough to
+          # check a label should still merge, and the android run — the check
+          # that actually gates what reaches a device — has already passed.
+          #
+          # Skipping has to be driven by gh's EXIT STATUS, not by whether the
+          # output is empty. On an error gh prints the API's JSON to stdout, so
+          # `x=$(gh ...) || x=""` still captures that body — which would make a
+          # 403 on the check-runs call below look like the name of a failing
+          # check and silently hold up a merge while reporting success.
+          DRAFT=""
+          if OUT=$(gh api "repos/$REPO/pulls/$PR" --jq .draft 2>/dev/null); then DRAFT="$OUT"; fi
+          if [ "$DRAFT" = "true" ]; then
+            echo "PR #$PR is a draft — leaving it alone."
+            exit 0
+          fi
+
+          # Escape hatch: label a PR no-auto-merge to hold it open.
+          LABELS=""
+          if OUT=$(gh api "repos/$REPO/pulls/$PR" --jq '[.labels[].name] | join(" ")' 2>/dev/null); then
+            LABELS="$OUT"
+          fi
+          for l in $LABELS; do
+            if [ "$l" = "no-auto-merge" ]; then
+              echo "PR #$PR is labelled no-auto-merge — leaving it alone."
+              exit 0
+            fi
+          done
+
+          # By NAME, because these are the job names and therefore the
+          # check-run names: `build` and `worker` in android.yml. Renaming
+          # either silently stops this waiting for it — which is why that file
+          # says so next to both jobs.
+          #
+          # Missing counts as not-yet, not as absent. A check that has not
+          # reported is one still queued, and merging past it is exactly the
+          # race this exists to lose.
+          #
+          # Each of them skips itself when its half of the repository is
+          # untouched, and a skipped check counts as passing below — so a
+          # Worker-only pull request spends no Gradle build, while a break in
+          # either half still holds the merge.
+          REQUIRED="build worker"
+          if RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
+            --jq '[.check_runs[] | select(.status == "completed")
+                   | select([.conclusion] | inside(["success","neutral","skipped"]))
+                   | .name] | join(" ")' 2>/dev/null); then
+            for want in $REQUIRED; do
+              case " $RUNS " in
+                *" $want "*) ;;
+                *) echo "Waiting for $want to finish and pass — not merging yet."; exit 0 ;;
+              esac
+            done
+          else
+            echo "Could not read the commit's check runs; proceeding on this run's result alone."
+          fi
+
+          # And anything else reporting on the commit gets a say too. Checks
+          # still running are not counted here: the required ones are handled
+          # above, and waiting on the rest would mean polling.
+          FAILED=""
+          if OUT=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
+            --jq '[.check_runs[]
+                   | select(.status == "completed")
+                   | select([.conclusion] | inside(["success","neutral","skipped"]) | not)
+                   | .name] | join(", ")' 2>/dev/null); then
+            FAILED="$OUT"
+          else
+            echo "Could not read the commit's check runs; proceeding on the android result alone."
+          fi
+          if [ -n "$FAILED" ]; then
+            echo "Not merging PR #$PR — failing checks: $FAILED"
+            exit 0
+          fi
+
+          # Squash, which is this repository's history: one commit per change,
+          # with the PR's own title and body as its message.
+          echo "Merging PR #$PR"
+          gh pr merge "$PR" --repo "$REPO" --squash
+
+          # A push made with GITHUB_TOKEN deliberately does not trigger further
+          # workflow runs, which would leave this merge sitting on main with no
+          # build and no published release — a change that never reaches a
+          # single device, silently. Kick the publish off by hand; android.yml
+          # carries workflow_dispatch for exactly this.
+          #
+          # But only when the app actually changed. android.yml's push trigger
+          # is path-filtered to android/**; a workflow_dispatch is not, so
+          # without this every merge would publish a new build — a docs-only PR
+          # shipping a fresh versionCode to every installed device, an update
+          # with nothing in it. This applies the same filter the push trigger
+          # uses.
+          #
+          # Failing to read the file list means publishing anyway. The wrong
+          # direction to be wrong in is the one where an app change quietly
+          # never ships.
+          PUBLISH=yes
+          if FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
+            PUBLISH=no
+            for f in $FILES; do
+              case "$f" in
+                android/*|.github/workflows/android.yml) PUBLISH=yes ;;
+              esac
+            done
+          else
+            echo "Could not list PR #$PR's files; publishing rather than risk not shipping."
+          fi
+
+          if [ "$PUBLISH" = "yes" ]; then
+            # Offer this run's build to the publish. It is only taken if main's
+            # tree turns out to be the tree that run built — i.e. if nothing
+            # else merged in between — so passing it is never wrong, only
+            # sometimes ignored.
+            echo "Dispatching the publish build on main, offering run $RUN_ID's APK"
+            gh workflow run android.yml --repo "$REPO" --ref main -f reuse_run_id="$RUN_ID"
+          else
+            echo "PR #$PR touched nothing under android/ — not publishing a build."
+          fi
