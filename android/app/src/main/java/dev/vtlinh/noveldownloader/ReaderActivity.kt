@@ -833,6 +833,48 @@ class ReaderActivity : AppCompatActivity() {
     /* Vietnamese text always carries diacritics within a sentence or two */
     private fun detectLang(sentence: String) = if (viCharsRe.containsMatchIn(sentence)) "vi" else "en"
 
+    /* The locale a language profile speaks in. One definition, because the
+       voice filter, the note that explains an empty filter and the fallback
+       applied when no voice is picked all have to mean the same thing by
+       "vi". */
+    private fun localeFor(lang: String): java.util.Locale =
+        if (lang == "vi") java.util.Locale("vi", "VN") else java.util.Locale.US
+
+    /* The engine's voices for this language, in name order. Matching lives in
+       Voices, which says why one spelling of the code was not enough. */
+    private fun voicesFor(lang: String): List<android.speech.tts.Voice> = try {
+        tts?.voices.orEmpty()
+            .filter { Voices.matches(it.locale?.language.orEmpty(), lang) }
+            .sortedBy { it.name }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    /* Why this language has no voice, in the engine's own words.
+
+       The picker falls back to listing every voice it has, which is better
+       than an empty box — but on its own it is baffling: the card says
+       Tiếng Việt and then offers en_US. Worse, the two reasons want opposite
+       things from the reader. Voice data not installed is a fix they can go
+       and make; a language the engine does not speak is not. Say which. */
+    private fun noVoiceNote(lang: String): String {
+        val name = Voices.nameOf(lang)
+        val why = when (
+            try { tts?.isLanguageAvailable(localeFor(lang)) } catch (e: Exception) { null }
+        ) {
+            android.speech.tts.TextToSpeech.LANG_MISSING_DATA ->
+                "$name voice data isn't installed — Android TTS settings below, " +
+                    "then Google Text-to-speech → Install voice data → $name."
+            android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED ->
+                "Google TTS has no $name voice on this device."
+            null -> "The engine didn't answer about $name."
+            else ->
+                "The engine says $name is available but offers no voice for it — " +
+                    "its data may still be downloading."
+        }
+        return "$why Every other voice is listed above."
+    }
+
     /* voice/rate/pitch are stored PER LANGUAGE ("ttsRate:en", ...) */
     private fun applyTtsConfig(lang: String) {
         val t = tts ?: return
@@ -846,7 +888,7 @@ class ReaderActivity : AppCompatActivity() {
         if (v != null) {
             t.voice = v
         } else {
-            t.language = if (lang == "vi") java.util.Locale("vi", "VN") else java.util.Locale.US
+            t.language = localeFor(lang)
         }
     }
 
@@ -1740,11 +1782,10 @@ class ReaderActivity : AppCompatActivity() {
                 setPadding(0, dp(12), 0, dp(4))
             },
         )
-        val voices = try {
-            val all = tts?.voices.orEmpty()
-            val forLang = all.filter { it.locale.language == lang }
-            (forLang.ifEmpty { all }).sortedBy { it.name }
-        } catch (e: Exception) { emptyList() }
+        val forLang = voicesFor(lang)
+        val voices = forLang.ifEmpty {
+            try { tts?.voices.orEmpty().sortedBy { it.name } } catch (e: Exception) { emptyList() }
+        }
         val spinner = android.widget.Spinner(ctx)
         spinner.adapter = android.widget.ArrayAdapter(
             ctx, android.R.layout.simple_spinner_dropdown_item,
@@ -1762,7 +1803,11 @@ class ReaderActivity : AppCompatActivity() {
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
         }
         aloud.addView(spinner)
-        if (voices.isEmpty()) hint(aloud, "No voices found — open the ♪ menu while stopped to reconnect Google TTS.")
+        if (voices.isEmpty()) {
+            hint(aloud, "No voices found — open the ♪ menu while stopped to reconnect Google TTS.")
+        } else if (forLang.isEmpty()) {
+            hint(aloud, noVoiceNote(lang))
+        }
 
         fun slider(title: String, key: String) {
             aloud.addView(
@@ -1970,12 +2015,11 @@ class ReaderActivity : AppCompatActivity() {
         )
 
         root.addView(label("Voice"))
-        fun voiceList(): List<android.speech.tts.Voice> = try {
-            val all = tts?.voices.orEmpty()
-            val forLang = all.filter { it.locale.language == lang }
-            /* nothing for this language → show everything rather than nothing */
-            (forLang.ifEmpty { all }).sortedBy { it.name }
-        } catch (e: Exception) { emptyList() }
+        /* nothing for this language → show everything rather than nothing,
+           and say so underneath rather than leave the mismatch unexplained */
+        fun voiceList(): List<android.speech.tts.Voice> = voicesFor(lang).ifEmpty {
+            try { tts?.voices.orEmpty().sortedBy { it.name } } catch (e: Exception) { emptyList() }
+        }
         var voices = voiceList()
         val spinner = android.widget.Spinner(ctx)
         /* Only a real tap on the spinner may overwrite the saved voice. A
@@ -2011,6 +2055,7 @@ class ReaderActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
         root.addView(spinner)
+        if (voices.isNotEmpty() && voicesFor(lang).isEmpty()) root.addView(label(noVoiceNote(lang)))
         if (voices.isEmpty()) {
             /* Engine dropped, still connecting, or genuinely broken (e.g. a
                crashed Google TTS). Keep polling while the sheet is open,
