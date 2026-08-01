@@ -130,12 +130,25 @@
 
 ## Workflow
 
-- After completing a fix, always merge it RIGHT AWAY: push the branch, open
-  the PR (ready, not draft), and squash-merge immediately — do not wait for
-  CI or for the user to ask. Fix forward: check the android workflow on main
-  after merging and, if red, fix on a fresh branch and merge that the same
-  way. A red main build is safe — it just doesn't publish a new APK, the
-  previous release stays live.
+- After completing a fix, push the branch and open the PR (ready, not draft)
+  — then STOP. **Do not merge it yourself.** `.github/workflows/auto-merge.yml`
+  merges it once `build` and `worker` report green on the PR, and
+  `claude-autofix.yml` takes a swing at the PR first if the android run goes
+  red. Waiting is the whole point: nothing merged before CI had seen it.
+  - Label a PR `no-auto-merge` to hold it open for a person.
+  - A PR that changes a workflow still has to be merged by hand: `workflow_run`
+    always runs the copy of the workflow on the DEFAULT branch, so an edit to
+    one of these files does not take effect until it is already on main.
+  - Fix forward: check the android workflow on main after it merges and, if
+    red, open a fresh PR. A red main build is safe — it just doesn't publish a
+    new APK, the previous release stays live.
+- The publish on main REUSES the APK the PR build already made, when it can.
+  auto-merge dispatches android.yml with `reuse_run_id`, and the reuse step
+  takes that run's artifact only if `git rev-parse HEAD:android` matches the
+  tree that run recorded building. A mismatch — anything else merged in
+  between — falls through to a full build, which is also exactly when the
+  tests need running again. The check can only skip work already done; its
+  failure mode is a needless rebuild, never a stale publish.
 - The human-facing versionName is computed by the android.yml "Compute
   version name" step as `<year>.<week>.<patch>` and passed to Gradle via the
   `APP_VERSION_NAME` env var (so it's baked into both the APK and
