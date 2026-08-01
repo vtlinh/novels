@@ -26,4 +26,29 @@ object Voices {
 
     /* The name to say it by, for a reader who has to go and install it. */
     fun nameOf(lang: String): String = if (lang == "vi") "Vietnamese" else "English"
+
+    private val VI_CHARS = Regex(
+        "[\u0103\u00e2\u0111\u00ea\u00f4\u01a1\u01b0\u00e0\u1ea3\u00e3\u00e1\u1ea1\u1eb1\u1eb3\u1eb5\u1eaf\u1eb7\u1ea7\u1ea9\u1eab\u1ea5\u1ead\u00e8\u1ebb\u1ebd\u00e9\u1eb9\u1ec1\u1ec3\u1ec5\u1ebf\u1ec7\u00ec\u1ec9\u0129\u00ed\u1ecb\u00f2\u1ecf\u00f5\u00f3\u1ecd\u1ed3\u1ed5\u1ed7\u1ed1\u1ed9\u1edd\u1edf\u1ee1\u1edb\u1ee3\u00f9\u1ee7\u0169\u00fa\u1ee5\u1eeb\u1eed\u1eef\u1ee9\u1ef1\u1ef3\u1ef7\u1ef9\u00fd\u1ef5]",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /* Which language a stretch of the novel is in — Vietnamese always carries
+       diacritics within a sentence or two — or NULL when there is nothing to
+       judge.
+
+       Null is the whole point. Asked "is this Vietnamese?", an empty string
+       answers no, and a plain no reads as English. The TTS engine connects
+       while the chapter is still loading, so the restore that runs on connect
+       asked this about an EMPTY buffer, was told English, and applied the
+       English profile — latching it, since the profile is only re-derived
+       while it is unset. The voice sheet then said "TTS — English" over a
+       Vietnamese chapter and offered English voices to a reader who wanted a
+       Vietnamese one, and nothing ever put it right.
+
+       An absence of evidence is not evidence. Say so, and let the caller wait
+       for text worth reading. */
+    fun detect(sample: String): String? {
+        if (sample.isBlank()) return null
+        return if (VI_CHARS.containsMatchIn(sample)) "vi" else "en"
+    }
 }

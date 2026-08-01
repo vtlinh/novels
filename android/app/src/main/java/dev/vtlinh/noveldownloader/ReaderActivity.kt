@@ -825,13 +825,32 @@ class ReaderActivity : AppCompatActivity() {
         tts = t
     }
 
-    private val viCharsRe = Regex(
-        "[\u0103\u00e2\u0111\u00ea\u00f4\u01a1\u01b0\u00e0\u1ea3\u00e3\u00e1\u1ea1\u1eb1\u1eb3\u1eb5\u1eaf\u1eb7\u1ea7\u1ea9\u1eab\u1ea5\u1ead\u00e8\u1ebb\u1ebd\u00e9\u1eb9\u1ec1\u1ec3\u1ec5\u1ebf\u1ec7\u00ec\u1ec9\u0129\u00ed\u1ecb\u00f2\u1ecf\u00f5\u00f3\u1ecd\u1ed3\u1ed5\u1ed7\u1ed1\u1ed9\u1edd\u1edf\u1ee1\u1edb\u1ee3\u00f9\u1ee7\u0169\u00fa\u1ee5\u1eeb\u1eed\u1eef\u1ee9\u1ef1\u1ef3\u1ef7\u1ef9\u00fd\u1ef5]",
-        RegexOption.IGNORE_CASE,
-    )
+    /* A sentence about to be spoken always has words in it, so the "nothing
+       to judge" answer cannot arise here — see Voices.detect for where it
+       can, and what it cost. */
+    private fun detectLang(sentence: String) = Voices.detect(sentence) ?: "en"
 
-    /* Vietnamese text always carries diacritics within a sentence or two */
-    private fun detectLang(sentence: String) = if (viCharsRe.containsMatchIn(sentence)) "vi" else "en"
+    /* The text the reader is actually looking at.
+
+       NOT the first 600 characters of the buffer: that window starts two
+       chapters before the one on screen, so sampling from offset 0 asks
+       about a chapter the reader may never have reached. Null while nothing
+       is loaded — the reader opens before its chapter does. */
+    private fun visibleSample(): String? {
+        val body = text.text.toString()
+        if (body.isBlank()) return null
+        val from = loadedChapters.firstOrNull { it.idx == currentChapterIdx }
+            ?.start?.coerceIn(0, body.length) ?: 0
+        return body.substring(from, (from + 600).coerceAtMost(body.length)).ifBlank { null }
+    }
+
+    /* Which language profile a screen is about: the one being spoken if
+       there is one, otherwise whatever is on screen. Only for SHOWING and
+       EDITING — it never sets curTtsLang, so a guess made before the chapter
+       arrived cannot latch. English is the last resort of a reader with no
+       text at all, and the next open asks again. */
+    private fun profileLang(): String =
+        curTtsLang.ifEmpty { visibleSample()?.let { Voices.detect(it) } ?: "en" }
 
     /* The locale a language profile speaks in. One definition, because the
        voice filter, the note that explains an empty filter and the fallback
@@ -903,7 +922,20 @@ class ReaderActivity : AppCompatActivity() {
     private fun ensureSavedVoice() {
         val t = tts ?: return
         if (!ttsReady) return
-        val lang = curTtsLang.ifEmpty { detectLang(text.text.toString().take(600)) }
+        /* The engine connects while the chapter is still loading, and this
+           runs the moment it does. Deciding the language from an empty buffer
+           got "English" and applyTtsConfig then LATCHED it — the voice sheet
+           said "TTS — English" over a Vietnamese chapter for the rest of the
+           session. With nothing to judge there is nothing to restore yet, so
+           come back when there is; the retry below is already here. */
+        val lang = curTtsLang.ifEmpty { visibleSample()?.let { Voices.detect(it) } ?: "" }
+        if (lang.isEmpty()) {
+            if (voiceRestoreTicks < 15) {
+                voiceRestoreTicks++
+                android.os.Handler(mainLooper).postDelayed({ ensureSavedVoice() }, 800)
+            }
+            return
+        }
         val saved = prefs.getString("ttsVoice:$lang", null) ?: return  // default → nothing to restore
         val present = try { t.voices?.any { it.name == saved } == true } catch (e: Exception) { false }
         if (present) {
@@ -1774,7 +1806,7 @@ class ReaderActivity : AppCompatActivity() {
         /* ── Reading aloud: voice + rate + pitch (bottom / voice menu only) ── */
         if (voiceOnly) {
         val aloud = card()
-        val lang = curTtsLang.ifEmpty { detectLang(text.text.toString().take(600)) }
+        val lang = profileLang()
         cardTitle(aloud, "Reading aloud — " + if (lang == "vi") "Tiếng Việt" else "English")
         aloud.addView(
             TextView(ctx).apply {
@@ -2003,7 +2035,7 @@ class ReaderActivity : AppCompatActivity() {
 
         /* settings are per language; edit the profile of what's being read.
            The language is named once in the header, not on every row. */
-        val lang = curTtsLang.ifEmpty { detectLang(text.text.toString().take(600)) }
+        val lang = profileLang()
         root.addView(
             TextView(ctx).apply {
                 text = "TTS — " + if (lang == "vi") "Tiếng Việt" else "English"

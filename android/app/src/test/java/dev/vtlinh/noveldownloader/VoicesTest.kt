@@ -1,6 +1,7 @@
 package dev.vtlinh.noveldownloader
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -60,5 +61,33 @@ class VoicesTest {
     fun `each profile has a name to go and find`() {
         assertTrue(Voices.nameOf("vi") == "Vietnamese")
         assertTrue(Voices.nameOf("en") == "English")
+    }
+
+    /* ---- which language a stretch of the novel is in ---- */
+
+    /* THE OTHER DEFECT, and why this answer is nullable. Asked "is this
+       Vietnamese?", an empty string answers no, and a plain no reads as
+       English. The engine connects while the chapter is still loading, so
+       the restore that runs on connect judged an EMPTY buffer, was told
+       English, and LATCHED the English profile — the voice sheet then said
+       "TTS — English" over a Vietnamese chapter, and offered English voices
+       to a reader who wanted a Vietnamese one, for the rest of the session.
+
+       An absence of evidence is not evidence of English. */
+    @Test
+    fun `nothing to judge is not English`() {
+        assertNull("an empty buffer says nothing at all", Voices.detect(""))
+        assertNull("nor does one holding only layout", Voices.detect("   \n\n  "))
+    }
+
+    @Test
+    fun `Vietnamese is known by its diacritics`() {
+        assertTrue(Voices.detect("Chương 1: Không chỉ thích một người") == "vi")
+        assertTrue("one marked word in a line is enough", Voices.detect("A B c ngoại") == "vi")
+    }
+
+    @Test
+    fun `unmarked latin text is English`() {
+        assertTrue(Voices.detect("Chapter 1: He did not like anyone") == "en")
     }
 }
