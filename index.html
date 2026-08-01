@@ -38,8 +38,11 @@
   <img class="logo" src="icon-192.png" alt="">
   <h1>Novel Downloader</h1>
   <p class="sub">Download web novels to your phone, chapter by chapter — with browsing, resume, and Claude-powered English translation built in.</p>
-  <a class="download" href="https://github.com/vtlinh/novels/releases/download/android-latest/app-release.apk">Download for Android</a>
-  <p class="note">The app checks for updates and upgrades itself.</p>
+  <!-- served from this same domain (the Pages workflow bundles the signed APK
+       next to this page), so the tap downloads the file directly instead of
+       bouncing through a github.com release redirect -->
+  <a class="download" id="dl" href="novel-downloader.apk" download="novel-downloader.apk">Download for Android</a>
+  <p class="note" id="ver">The app checks for updates and upgrades itself.</p>
 </main>
 <script>
   /* this page replaced an installable web app — clean up its old service
@@ -48,6 +51,29 @@
     navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
   }
   if (window.caches) { caches.keys().then(ks => ks.forEach(k => caches.delete(k))); }
+
+  /* show which build the bundled APK is */
+  fetch("version.json", { cache: "no-store" })
+    .then(r => r.ok ? r.json() : null)
+    .then(v => {
+      if (v && v.versionName) {
+        document.getElementById("ver").textContent =
+          "v" + v.versionName + " — the app checks for updates and upgrades itself.";
+      }
+    })
+    .catch(() => {});
+
+  /* if the bundle is missing (first deploy, or a release that never
+     published), fall back to downloading from the GitHub release */
+  fetch("novel-downloader.apk", { method: "HEAD" })
+    .then(r => {
+      if (!r.ok) throw 0;
+    })
+    .catch(() => {
+      const a = document.getElementById("dl");
+      a.href = "https://truyenfull.vtlinh87.workers.dev/app/app-release.apk";
+      a.removeAttribute("download");
+    });
 </script>
 </body>
 </html>

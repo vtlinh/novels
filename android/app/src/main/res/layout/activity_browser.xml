@@ -6,8 +6,10 @@
     android:orientation="vertical"
     android:background="@color/bg">
 
-    <!-- sticky header -->
+    <!-- sticky header: back, address bar, download. Present on every screen,
+         start page included, so a URL can always be typed -->
     <LinearLayout
+        android:id="@+id/browserHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -15,24 +17,25 @@
         android:padding="8dp"
         android:gravity="center_vertical">
 
-        <Button
-            android:id="@+id/browseDownload"
+        <TextView
+            android:id="@+id/browseBack"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Download"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="#ffffff"
-            app:backgroundTint="@color/btn_accent"
-            app:cornerRadius="8dp"
-            android:enabled="false" />
+            android:paddingStart="8dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="←"
+            android:textSize="22sp"
+            android:textColor="@color/fg"
+            android:clickable="true"
+            android:focusable="true" />
 
         <EditText
             android:id="@+id/browseUrl"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="8dp"
             android:background="@drawable/bg_input"
             android:padding="8dp"
             android:hint="Enter URL"
@@ -44,20 +47,95 @@
             android:imeOptions="actionGo"
             android:importantForAutofill="no" />
 
+        <!-- icon-only download -->
         <Button
-            android:id="@+id/browseClose"
+            android:id="@+id/browseDownload"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="✕"
-            android:textSize="14sp"
-            android:textColor="@color/fg"
-            app:backgroundTint="@color/btn_secondary"
-            app:cornerRadius="8dp" />
+            android:layout_marginStart="8dp"
+            android:minWidth="0dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="↓"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#ffffff"
+            app:backgroundTint="@color/btn_accent"
+            app:cornerRadius="8dp"
+            android:enabled="false" />
     </LinearLayout>
 
-    <WebView
-        android:id="@+id/webview"
+    <!-- this novel is already downloaded: tap to jump to its chapter list -->
+    <TextView
+        android:id="@+id/libraryBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/ok_bg"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:text="Already in your novels — tap to open it"
+        android:textSize="13sp"
+        android:textColor="@color/ok_fg"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone" />
+
+    <!-- translate-on-download toggle; disabled outright on English sites -->
+    <CheckBox
+        android:id="@+id/browseTranslate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/card"
+        android:paddingStart="6dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="6dp"
+        android:text="Translate to English"
+        android:textSize="13sp"
+        android:textColor="@color/fg" />
+
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- start screen: recently visited domains, newest first -->
+        <LinearLayout
+            android:id="@+id/recentPanel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="@color/bg"
+            android:visibility="gone">
+
+            <!-- the address bar above doubles as this screen's header, so all
+                 that's left is a caption for the list -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="14dp"
+                android:paddingBottom="8dp"
+                android:text="Recent sites"
+                android:textSize="13sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.08"
+                android:textColor="@color/muted" />
+
+            <ListView
+                android:id="@+id/recentList"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:divider="@color/card"
+                android:dividerHeight="1dp" />
+        </LinearLayout>
+    </FrameLayout>
 </LinearLayout>

@@ -1,0 +1,297 @@
+name: claude-autofix
+
+# Fixes a pull request whose android run went red, so the PR can go green and
+# auto-merge.yml can take it from there — without anyone watching for it.
+#
+# Like auto-merge.yml, this runs the copy of itself on the DEFAULT BRANCH, so
+# edits here take effect only once merged, and the first merge has to be by
+# hand.
+#
+# What it needs to be set up:
+#   ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN   - repository secret, required
+#   AUTOFIX_TOKEN                                  - optional but see below
+#
+# AUTOFIX_TOKEN matters more than it looks. A push made with the default
+# GITHUB_TOKEN deliberately does not trigger further workflow runs, so a fix
+# pushed with it lands on the branch and android NEVER RE-RUNS — the PR keeps
+# the red check it already had and auto-merge, which waits for a passing run,
+# waits forever. With a personal access token (repo scope) the push looks like
+# a person's and android runs again. Without one this workflow still writes the
+# fix; someone just has to push an empty commit to set CI going.
+on:
+  workflow_run:
+    workflows: ["android"]
+    types: [completed]
+
+# A permissions block REPLACES the defaults; every scope used below has to be
+# named. See the note in auto-merge.yml about how a missing one fails.
+permissions:
+  contents: write        # push the fix
+  pull-requests: write   # read PR state, label, comment
+  actions: read          # read the failed run's logs
+
+concurrency:
+  # One fix at a time per branch. Two overlapping attempts would each push on
+  # top of the other's work.
+  group: autofix-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    # Only failed pull-request runs, and only from this repository. A fork's
+    # branch cannot be pushed to, and running a model over a fork's diff with
+    # write scopes is how a stranger's PR gets to write to this repo.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether this run is worth fixing
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PAYLOAD_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -uo pipefail
+
+          PR="$PAYLOAD_PR"
+          if [ -z "$PR" ]; then
+            PR=$(gh api "repos/$REPO/pulls?head=${REPO%%/*}:$BRANCH&state=open" \
+                   --jq '.[0].number // empty') || PR=""
+          fi
+          if [ -z "$PR" ]; then
+            echo "No open pull request for $BRANCH — nothing to fix."
+            exit 0
+          fi
+
+          # The same escape hatch auto-merge.yml honours, plus one of its own.
+          LABELS=""
+          if OUT=$(gh api "repos/$REPO/pulls/$PR" --jq '[.labels[].name] | join(" ")' 2>/dev/null); then
+            LABELS="$OUT"
+          fi
+          for l in $LABELS; do
+            case "$l" in
+              no-autofix|no-auto-merge)
+                echo "PR #$PR is labelled $l — leaving it alone."
+                exit 0 ;;
+            esac
+          done
+
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          echo "go=yes" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == 'yes'
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.AUTOFIX_TOKEN || github.token }}
+
+      # Stop after three attempts on one branch. A model that cannot fix a
+      # failure in three tries is not going to on the fourth, and the failure
+      # mode without this is a branch that rebuilds and re-fixes itself all
+      # night. The count comes from the commits themselves, so it survives
+      # anything this workflow does not remember between runs.
+      - name: Stop if this branch has been fixed too many times already
+        id: attempts
+        if: steps.gate.outputs.go == 'yes'
+        run: |
+          set -uo pipefail
+          git fetch --quiet origin main
+          N=$(git log origin/main..HEAD --grep='^Auto-fix CI' --oneline | wc -l | tr -d ' ')
+          echo "Previous auto-fix commits on this branch: $N"
+          if [ "$N" -ge 3 ]; then
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect what actually failed
+        id: logs
+        if: steps.attempts.outputs.go == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -uo pipefail
+          # Only the failing steps, and bounded: a full Gradle log is mostly
+          # noise and the tail is where the assertion is.
+          gh run view "$RUN_ID" --repo "$REPO" --log-failed > full.log 2>&1 || true
+          tail -c 60000 full.log > failure.log
+          echo "--- failure.log (tail) ---"
+          tail -40 failure.log
+
+      # The same toolchain android.yml uses, so the fix can be verified here
+      # rather than guessed at and pushed.
+      - uses: actions/setup-java@v4
+        if: steps.attempts.outputs.go == 'yes'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.attempts.outputs.go == 'yes'
+        with:
+          gradle-version: "8.9"
+
+      # Deliberately a warning and a skip rather than a failed job. This
+      # workflow's own run reports a check on the head commit, and auto-merge
+      # refuses to merge a commit carrying a failed check — so failing loudly
+      # here for a missing secret would block merges rather than just this fix.
+      - name: Check a Claude credential is configured
+        id: creds
+        if: steps.attempts.outputs.go == 'yes'
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        run: |
+          if [ "$HAS_KEY" = "true" ]; then
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set, so auto-fix can do nothing."
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Let Claude fix it
+        if: steps.creds.outputs.go == 'yes'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          claude_args: --allowed-tools "Read,Edit,Write,Glob,Grep,Bash(gradle:*),Bash(node:*),Bash(git diff:*),Bash(git status:*),Bash(ls:*),Bash(cat:*)"
+          prompt: |
+            The `android` workflow failed on this pull request branch. Fix it.
+
+            The tail of the failing job's log is in `failure.log` in the
+            repository root. Read it first. Read CLAUDE.md too — this
+            repository has conventions that are not negotiable, and the ones
+            about capturing a site's pages before writing its adapter exist
+            because the alternative kept shipping defects that deleted
+            somebody's chapters.
+
+            Rules for this fix, in order of importance:
+
+            1. Fix the CAUSE. Never make a test pass by weakening or deleting
+               it. These tests are the only thing standing between a parser
+               change and a sweep that deletes a novel's chapters or a
+               translation the user paid an API to produce; a green run bought
+               by loosening an assertion is worse than a red one, because it
+               publishes. Nothing downstream enforces this. This paragraph is
+               the only thing between a deleted assertion and every installed
+               device. Treat it that way.
+            2. You MAY change a test, and often should: a fix that changes
+               behaviour has to change the test that pinned the old behaviour.
+               The line is whether the test still asserts the thing it was
+               written to assert. Updating an expected value because the
+               behaviour legitimately changed is fine; relaxing a matcher,
+               deleting a case, or carving out the captured page that fails is
+               not — CLAUDE.md is explicit that a page the adapter cannot read
+               is a bug to fix or a shape to handle, never an exception to add.
+               Say in your summary which tests you touched and why, in those
+               terms.
+            3. Stay inside the failure. Do not refactor, do not tidy, do not
+               fix unrelated things you notice.
+            4. Verify before you finish:
+                 gradle -p android testReleaseUnitTest
+               and, if the failure was in the build rather than the tests:
+                 gradle -p android assembleRelease
+               and, if it was the worker job:
+                 node worker.test.mjs
+            5. If you cannot work out the cause, or the failure is
+               infrastructural (a network blip, a runner problem, a rate
+               limit), change NOTHING. An empty diff is a valid outcome and is
+               handled below.
+
+            Edit files only. Do not commit, push, comment, or touch the pull
+            request — the workflow does all of that.
+
+      - name: Push the fix
+        id: push
+        if: steps.creds.outputs.go == 'yes'
+        env:
+          PR: ${{ steps.gate.outputs.pr }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -uo pipefail
+          rm -f full.log failure.log
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Claude changed nothing — nothing to push."
+            echo "pushed=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # What was touched decides whether this is allowed to merge itself.
+          #
+          # Workflows are held. A model editing the workflow that judges it can
+          # switch off the judging, and that is a different kind of mistake:
+          # one where nothing downstream ever notices.
+          #
+          # A site's captured pages are held for the same reason in a different
+          # place. They are the measurement every adapter is judged against,
+          # and CLAUDE.md is explicit that they must be captured from the real
+          # site before anything is written — so a run that "fixes" a failing
+          # test by editing the page it failed on has removed the only evidence
+          # in play. Tests themselves are NOT on this list: a fix that changes
+          # behaviour usually has to change the test that pinned the old one,
+          # and holding every such PR made the loop stop on the ordinary case
+          # rather than the dangerous one.
+          TOUCHED=$(git status --porcelain | awk '{print $NF}')
+          HOLD=no
+          for f in $TOUCHED; do
+            case "$f" in
+              .github/workflows/*) HOLD=yes ;;
+              */test/resources/pages/*) HOLD=yes ;;
+            esac
+          done
+          echo "hold=$HOLD" >> "$GITHUB_OUTPUT"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Auto-fix CI
+
+          The android run failed on this branch; this is the fix.
+          Failing run: $RUN_ID"
+          git push origin HEAD
+          echo "pushed=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Hold the PR open if the fix touched the checks themselves
+        if: steps.push.outputs.pushed == 'yes' && steps.push.outputs.hold == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.gate.outputs.pr }}
+        run: |
+          set -uo pipefail
+          gh pr edit "$PR" --repo "$REPO" --add-label no-auto-merge || true
+          gh pr comment "$PR" --repo "$REPO" --body "Auto-fix touched a workflow or a site's captured pages, so this PR is labelled \`no-auto-merge\` and will not merge itself. A change to the thing that judges the change needs a person to look at it. Remove the label to release it.
+
+          ---
+          _Generated by [Claude Code](https://claude.ai/code)_" || true
+
+      - name: Say so when nothing could be done
+        if: >-
+          (steps.attempts.outputs.go != 'yes' && steps.gate.outputs.go == 'yes') ||
+          steps.push.outputs.pushed == 'no'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.gate.outputs.pr }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          GAVE_UP: ${{ steps.attempts.outputs.go }}
+        run: |
+          set -uo pipefail
+          if [ "$GAVE_UP" != "yes" ]; then
+            BODY="Auto-fix has already tried three times on this branch and stopped. [The failing run]($RUN_URL) needs a person."
+          else
+            BODY="Auto-fix read [the failing run]($RUN_URL) and changed nothing — either the cause was not clear from the log, or the failure looks infrastructural and a re-run may be all it needs."
+          fi
+          gh pr comment "$PR" --repo "$REPO" --body "$BODY
+
+          ---
+          _Generated by [Claude Code](https://claude.ai/code)_" || true

@@ -19,13 +19,52 @@
         android:focusable="true" />
 
     <TextView
-        android:id="@+id/navNovels"
+        android:id="@+id/navBrowser"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Novels"
+        android:text="Browser"
         android:textSize="16sp"
         android:textColor="@color/fg"
         android:padding="16dp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <TextView
+        android:id="@+id/navNovels"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Library"
+        android:textSize="16sp"
+        android:textColor="@color/fg"
+        android:padding="16dp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/navSettings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Settings"
+        android:textSize="16sp"
+        android:textColor="@color/fg"
+        android:padding="16dp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <TextView
+        android:id="@+id/navAbout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="About"
+        android:textSize="16sp"
+        android:textColor="@color/fg"
+        android:padding="16dp"
+        android:layout_marginBottom="12dp"
         android:clickable="true"
         android:focusable="true" />
 </LinearLayout>

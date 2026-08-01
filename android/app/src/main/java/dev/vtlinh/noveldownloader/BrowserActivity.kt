@@ -2,7 +2,9 @@ package dev.vtlinh.noveldownloader
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebResourceRequest
@@ -10,10 +12,20 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.CheckBox
+import android.widget.CompoundButton
 import android.widget.EditText
+import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 
 /* In-app site browser. Native WebView loads the novel sites directly — no
@@ -33,13 +45,109 @@ class BrowserActivity : AppCompatActivity() {
             "mgid.com", "taboola.com", "outbrain.com", "criteo", "zedo.com",
             "adform.net", "smartadserver", "openx.net", "rubiconproject",
             "pubmatic.com", "onclickads", "clickadu", "galaksion", "adskeeper",
+            /* Vietnamese networks the novel sites actually use */
+            "admicro", "adtima", "eclick", "ants.vn", "ambientplatform",
+            "blueseed", "yomedia", "adsota", "novanet", "adsplay", "netlink.vn",
         )
         private fun isAdHost(host: String) =
             AD_HOSTS.any { host == it || host.endsWith(".$it") || host.contains(it) }
+
+        /* legitimate third-party CDNs sites need; every OTHER third-party
+           script or iframe is treated as an ad delivery vehicle */
+        private val CDN_ALLOW = listOf(
+            "googleapis.com", "gstatic.com", "cloudflare.com", "cloudflareinsights.com",
+            "jsdelivr.net", "jquery.com", "unpkg.com", "bootstrapcdn.com",
+            "fontawesome.com", "cdnjs.com",
+        )
+        private fun isAllowedCdn(host: String) =
+            CDN_ALLOW.any { host == it || host.endsWith(".$it") }
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
+    private val store by lazy { DownloadStore(this) }
     private var currentUrl: String = "https://truyenfull.today/"
+
+    /* Novel URL waiting on a download folder being picked. Kept in prefs, not
+       a field: the picker is a separate activity, so rotating (or the system
+       reclaiming us) behind it destroys this one. The result callback is
+       re-delivered on the new instance, but a plain field is gone by then —
+       the folder got saved and the download the user asked for silently never
+       started. */
+    private var pendingDownload: String?
+        get() = prefs.getString("pendingDownloadUrl", null)
+        set(v) {
+            prefs.edit().apply { if (v == null) remove("pendingDownloadUrl") else putString("pendingDownloadUrl", v) }.apply()
+        }
+
+    private val pickFolder =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+            val pending = pendingDownload
+            pendingDownload = null
+            if (uri != null) {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+                prefs.edit().putString("tree", uri.toString()).apply()
+                pending?.let { startDownload(it) }
+            }
+        }
+
+    /* ---- recent domains (start screen) ---- */
+
+    /* domain -> last access millis, kept to the 20 most recent */
+    private fun domainHistory(): MutableMap<String, Long> {
+        val out = LinkedHashMap<String, Long>()
+        try {
+            val o = org.json.JSONObject(prefs.getString("browserDomains", "{}") ?: "{}")
+            for (k in o.keys()) out[k] = o.getLong(k)
+        } catch (e: Exception) {}
+        return out
+    }
+
+    /* What the start screen lists: EVERY supported site, most recently
+       visited first.
+
+       It used to list browsing history and nothing else, which meant a site
+       became visible only after you had already found it — a newly supported
+       one was reachable solely by typing its address, and nothing in the app
+       ever said which sites it supports. The registry is the answer to that
+       question, so the list is built from Sites.all and merely ORDERED by
+       history.
+
+       A supported site that has never been opened sorts last, in registry
+       order, rather than being absent. Domains visited that no adapter claims
+       keep their place at the end, so the history this screen used to be does
+       not disappear from it. */
+    private fun startScreenDomains(): List<String> {
+        val seen = domainHistory()
+        /* www.x.com and x.com are the same site to the user, and at least one
+           supported host redirects between them. Both the ranking and the
+           leftovers below have to agree on that, or a site sorts as unvisited
+           in one and as visited in the other, and it appears twice. */
+        fun sameSite(a: String, b: String) = a == b || a == "www.$b" || b == "www.$a"
+
+        fun lastVisit(host: String) =
+            seen[host] ?: seen.entries.firstOrNull { (k, _) -> sameSite(k, host) }?.value ?: 0L
+
+        val supported = Sites.all.flatMap { it.hosts }.distinct()
+        val ranked = supported.sortedWith(
+            compareByDescending<String> { lastVisit(it) }
+                .thenBy { supported.indexOf(it) },
+        )
+        val others = seen.entries.sortedByDescending { it.value }.map { it.key }
+            .filter { h -> supported.none { sameSite(it, h) } }
+        return ranked + others
+    }
+
+    private fun recordDomainVisit(host: String) {
+        val map = domainHistory()
+        map[host] = System.currentTimeMillis()
+        val trimmed = map.entries.sortedByDescending { it.value }.take(20)
+        val o = org.json.JSONObject()
+        for (e in trimmed) o.put(e.key, e.value)
+        prefs.edit().putString("browserDomains", o.toString()).apply()
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,18 +183,66 @@ class BrowserActivity : AppCompatActivity() {
                     currentUrl = url
                     /* don't clobber the field while the user is typing in it */
                     if (!urlEdit.hasFocus()) urlEdit.setText(url)
-                    downloadBtn.isEnabled = Sites.forUrl(url) != null
+                    findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.GONE
+                    syncDownloadButton(url)
+                    syncTranslateBox(url)
+                    syncLibraryBanner(url)
+                    try {
+                        java.net.URI(url).host?.let { if (it.isNotEmpty()) recordDomainVisit(it) }
+                    } catch (e: Exception) {}
                 }
             }
 
-            /* ad filtering: swallow every request to a known ad network */
+            /* Ad filtering: swallow requests to known ad networks, and — since
+               ads arrive via scripts and iframes — any THIRD-party script or
+               sub-frame that isn't a whitelisted CDN. */
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                 val host = request?.url?.host ?: return null
-                return if (isAdHost(host)) {
-                    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
-                } else {
-                    null
+                val empty = { WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0))) }
+                if (isAdHost(host)) return empty()
+                val curHost = try { java.net.URI(currentUrl).host } catch (e: Exception) { null }
+                val curBase = curHost?.split('.')?.takeLast(2)?.joinToString(".")
+                val thirdParty = curBase != null && host != curBase && !host.endsWith(".$curBase")
+                if (thirdParty && !isAllowedCdn(host)) {
+                    val path = (request.url.path ?: "").lowercase()
+                    val accept = request.requestHeaders?.get("Accept") ?: ""
+                    if (path.endsWith(".js")) return empty()                       // foreign script
+                    if (!request.isForMainFrame && accept.contains("text/html")) {
+                        return empty()                                             // foreign iframe
+                    }
                 }
+                return null
+            }
+
+            /* cosmetic sweep: interstitial overlays are fixed, huge, and
+               high-z — remove them and unlock scrolling; repeated because ad
+               scripts often inject after load */
+            override fun onPageFinished(view: WebView?, url: String?) {
+                view?.evaluateJavascript(
+                    """
+                    (function(){
+                      function sweep(){
+                        try{
+                          var vw=window.innerWidth, vh=window.innerHeight;
+                          var els=document.querySelectorAll('div,section,aside,ins,iframe');
+                          for (var i=0;i<els.length;i++){
+                            var e=els[i], s=getComputedStyle(e);
+                            if ((s.position==='fixed'||s.position==='sticky') && (parseInt(s.zIndex)||0)>=1000){
+                              var r=e.getBoundingClientRect();
+                              if (r.width*r.height > vw*vh*0.35){
+                                e.remove();
+                                document.body.style.overflow='auto';
+                                document.documentElement.style.overflow='auto';
+                              }
+                            }
+                          }
+                        }catch(err){}
+                      }
+                      sweep(); setTimeout(sweep,1500); setTimeout(sweep,4000); setTimeout(sweep,8000);
+                    })();
+                    """.trimIndent(),
+                    null,
+                )
             }
 
             /* popup-redirect filtering: a main-frame navigation to a different
@@ -101,7 +257,16 @@ class BrowserActivity : AppCompatActivity() {
                 return host != curHost && !request.hasGesture()
             }
         }
-        web.loadUrl(start)
+        /* start screen: the last 20 domains we visited, newest first. Tapping
+           one opens its front page. With no history yet, load the old default
+           start page directly. */
+        if (domainHistory().isEmpty()) web.loadUrl(start) else showRecentPanel()
+
+        /* focusing the bar selects the whole URL, so typing replaces it
+           outright the way a real address bar does */
+        urlEdit.setOnFocusChangeListener { v, hasFocus ->
+            if (hasFocus) (v as EditText).selectAll()
+        }
 
         /* typing a URL and hitting Go navigates the WebView */
         urlEdit.setOnEditorActionListener { v, actionId, _ ->
@@ -120,24 +285,336 @@ class BrowserActivity : AppCompatActivity() {
             }
         }
 
+        /* download runs from here — the user stays on the page they were
+           reading and gets a snackbar instead of being thrown to the home
+           screen; its action is the way over to the novels list */
         downloadBtn.setOnClickListener {
             val site = Sites.forUrl(currentUrl) ?: return@setOnClickListener
-            val novel = site.normalize(currentUrl).first
+            /* An empty answer means this page names no novel — the site
+               already uses it that way for a listing page, and truyenfullmoi
+               gives it for a chapter url too, whose path carries no novel id
+               and so cannot be turned into one. Starting a download on that
+               would fetch a redirect to the site's home page and read it as a
+               chapter list. */
+            val (novel, slug) = try {
+                site.normalize(currentUrl)
+            } catch (e: Exception) { return@setOnClickListener }
+            if (slug.isEmpty() || novel.isEmpty()) return@setOnClickListener
             prefs.edit().putString("url", novel).apply()
-            // hand back to MainActivity, which auto-starts if a folder is set
-            startActivity(
-                Intent(this, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    .setAction(Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, novel),
-            )
-            finish()
+            startDownload(novel)
         }
 
-        findViewById<Button>(R.id.browseClose).setOnClickListener { finish() }
+        /* translate-on-download, sharing the home screen's "translate" pref.
+           Ticking it with no key saved asks for one there and then. */
+        findViewById<CheckBox>(R.id.browseTranslate).setOnCheckedChangeListener(translateListener)
+
+        /* follow the service so the button flips as this novel starts, gets
+           queued behind another, or finishes — including the download we
+           just started from here */
+        lifecycleScope.launch {
+            DownloadService.activeSlugFlow.collectLatest { refreshDownloadButton() }
+        }
+        lifecycleScope.launch {
+            DownloadService.queuedSlugsFlow.collectLatest { refreshDownloadButton() }
+        }
+        /* chapters landing don't move either flow, but they change what the
+           banner should say and where it should go — statusFlow ticks per
+           chapter, so ride that, throttled */
+        var lastSync = 0L
+        lifecycleScope.launch {
+            DownloadService.statusFlow.collectLatest {
+                val now = System.currentTimeMillis()
+                if (now - lastSync < 3_000) return@collectLatest
+                lastSync = now
+                refreshDownloadButton()
+            }
+        }
+
+        /* header back exits straight to the domain list, and off the list
+           leaves browser mode; the system back button is the one that walks
+           page history */
+        findViewById<android.widget.TextView>(R.id.browseBack).setOnClickListener {
+            if (findViewById<android.view.View>(R.id.recentPanel).visibility == android.view.View.VISIBLE) {
+                finish()
+            } else {
+                showRecentPanel()
+            }
+        }
+    }
+
+    /* show the recent-domains start screen, rebuilt fresh so just-visited
+       domains appear. The address bar stays up — cleared back to its hint, so
+       a URL can be typed here instead of only tapped from the list */
+    private fun showRecentPanel() {
+        val web = findViewById<WebView>(R.id.webview)
+        val history = startScreenDomains()
+        val list = findViewById<android.widget.ListView>(R.id.recentList)
+        list.adapter = object : android.widget.ArrayAdapter<String>(
+            this, android.R.layout.simple_list_item_1, history,
+        ) {
+            override fun getView(
+                position: Int,
+                convertView: android.view.View?,
+                parent: android.view.ViewGroup,
+            ): android.view.View {
+                val v = super.getView(position, convertView, parent) as android.widget.TextView
+                v.setTextColor(getColor(R.color.fg))
+                return v
+            }
+        }
+        list.setOnItemClickListener { _, _, pos, _ ->
+            web.loadUrl("https://${history[pos]}/")
+        }
+        findViewById<EditText>(R.id.browseUrl).setText("")
+        findViewById<Button>(R.id.browseDownload).isEnabled = false
+        /* no page open, so nothing to translate or to already own */
+        findViewById<View>(R.id.browseTranslate).visibility = View.GONE
+        findViewById<View>(R.id.libraryBanner).visibility = View.GONE
+        findViewById<android.view.View>(R.id.recentPanel).visibility = android.view.View.VISIBLE
+    }
+
+    /* ---- download button ---- */
+
+    /* slug key of the novel the given page belongs to, "" when it isn't one */
+    private fun slugKeyFor(url: String): String {
+        val site = Sites.forUrl(url) ?: return ""
+        return try {
+            val (base, slug) = site.normalize(url)
+            if (slug.isEmpty()) "" else NovelListActivity.slugKeyFromUrl(base)
+        } catch (e: Exception) { "" }
+    }
+
+    /* re-sync button and banner for the page that's open; on the start
+       screen there's no page, and showRecentPanel already parked both */
+    private fun refreshDownloadButton() {
+        if (findViewById<View>(R.id.recentPanel).visibility == View.VISIBLE) return
+        syncDownloadButton(currentUrl)
+        syncLibraryBanner(currentUrl)
+    }
+
+    /* the button goes dead while this novel is downloading or waiting its
+       turn, so tapping it can't start a second job for the same novel */
+    private fun syncDownloadButton(url: String) {
+        val btn = findViewById<Button>(R.id.browseDownload)
+        /* No site, or a site that says this page names no novel — a genre
+           listing, or a chapter url on a site whose chapter paths carry no
+           novel id. Either way there is nothing to download from here. */
+        if (Sites.forUrl(url) == null || slugKeyFor(url).isEmpty()) {
+            btn.isEnabled = false
+            btn.text = "↓"
+            return
+        }
+        val busy = DownloadService.isBusy(slugKeyFor(url))
+        btn.isEnabled = !busy
+        btn.text = if (busy) "⋯" else "↓"
+    }
+
+    /* ---- translate toggle ---- */
+
+    private val translateListener = CompoundButton.OnCheckedChangeListener { btn, checked ->
+        if (checked && apiKey().isEmpty()) {
+            /* can't translate without a key — ask for one rather than
+               silently failing at download time */
+            promptForApiKey(
+                onSaved = { prefs.edit().putBoolean("translate", true).apply() },
+                onCancel = { btn.isChecked = false },
+            )
+        } else {
+            prefs.edit().putBoolean("translate", checked).apply()
+        }
+    }
+
+    private fun apiKey() = (prefs.getString("apiKey", "") ?: "").trim()
+
+    /* the box tracks the saved preference, except on English sites where
+       there is nothing to translate — there it's off and untouchable */
+    private fun syncTranslateBox(url: String) {
+        val box = findViewById<CheckBox>(R.id.browseTranslate)
+        /* nothing downloadable here, so nothing to offer translating */
+        val site = Sites.forUrl(url)
+        if (site == null) { box.visibility = View.GONE; return }
+        val english = site.english
+        box.visibility = View.VISIBLE
+        /* detach while setting isChecked so syncing doesn't count as a tick */
+        box.setOnCheckedChangeListener(null)
+        box.isEnabled = !english
+        box.isChecked = !english && prefs.getBoolean("translate", false)
+        box.text = if (english) "Translate to English — already in English" else "Translate to English"
+        box.alpha = if (english) 0.5f else 1f
+        box.setOnCheckedChangeListener(translateListener)
+    }
+
+    /* key prompt, same prefs["apiKey"] the Settings screen writes */
+    private fun promptForApiKey(onSaved: () -> Unit, onCancel: () -> Unit) {
+        val view = layoutInflater.inflate(R.layout.dialog_api_key, null)
+        val input = view.findViewById<EditText>(R.id.dialogApiKey)
+        input.setText(prefs.getString("apiKey", ""))
+        view.findViewById<TextView>(R.id.dialogApiKeyLink).setOnClickListener {
+            try {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://console.anthropic.com/settings/keys")),
+                )
+            } catch (e: Exception) {}
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Anthropic API key")
+            .setMessage("Translating runs the chapters through Claude, which needs your own API key.")
+            .setView(view)
+            .setPositiveButton("Save") { _, _ ->
+                val k = input.text.toString().trim()
+                prefs.edit().putString("apiKey", k).apply()
+                if (k.isEmpty()) onCancel() else onSaved()
+            }
+            .setNegativeButton("Cancel") { _, _ -> onCancel() }
+            .setOnCancelListener { onCancel() }
+            .show()
+    }
+
+    /* ---- download ---- */
+
+    /* mirrors the home screen's gates (folder, garbage mark, API key) but
+       keeps the user on the page; the engine itself skips translating a
+       source that's already English, so there's no language pre-check here */
+    private fun startDownload(url: String) {
+        /* the button is disabled while this novel is in flight; re-check
+           anyway so a stale tap (or the folder-picker resume) can't queue it
+           a second time */
+        if (DownloadService.isBusy(NovelListActivity.slugKeyFromUrl(url))) {
+            refreshDownloadButton()
+            return
+        }
+        val tree = prefs.getString("tree", null)
+        if (tree == null) {
+            pendingDownload = url
+            pickFolder.launch(null)
+            return
+        }
+        val slugKey = NovelListActivity.slugKeyFromUrl(url)
+        val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()
+        if (slugKey.isNotEmpty() && slugKey in garbage) {
+            AlertDialog.Builder(this)
+                .setTitle("Marked as garbage")
+                .setMessage(
+                    "You previously marked this novel as garbage. " +
+                        "Remove that status and download it again?",
+                )
+                .setPositiveButton("Re-download") { _, _ ->
+                    prefs.edit()
+                        .putStringSet(NovelListActivity.GARBAGE_KEY, garbage - slugKey)
+                        .apply()
+                    startDownload(url)   // re-enter, now past this gate
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        val box = findViewById<CheckBox>(R.id.browseTranslate)
+        val translate = box.isEnabled && box.isChecked
+        val key = apiKey()
+        if (translate && key.isEmpty()) {
+            promptForApiKey(onSaved = { startDownload(url) }, onCancel = {})
+            return
+        }
+        startForegroundService(
+            Intent(this, DownloadService::class.java)
+                .putExtra("url", url).putExtra("tree", tree)
+                .putExtra("translate", translate)
+                .putExtra("forceTranslate", false)
+                .putExtra("apiKey", key),
+        )
+        /* Say so in the banner straight away. The service publishes its own
+           state a moment later and the flow collectors correct this if it
+           landed differently; the button follows the same way, but disable it
+           here so a fast second tap has nothing to hit. */
+        showBusyBanner(active = !DownloadService.runningFlow.value)
+        findViewById<Button>(R.id.browseDownload).let {
+            it.isEnabled = false
+            it.text = "⋯"
+        }
+    }
+
+    /* ---- library / download banner ---- */
+
+    private fun showBanner(text: String, onTap: () -> Unit) {
+        val banner = findViewById<TextView>(R.id.libraryBanner)
+        banner.text = text
+        banner.visibility = View.VISIBLE
+        banner.setOnClickListener { onTap() }
+    }
+
+    private fun openNovels() = startActivity(Intent(this, NovelListActivity::class.java))
+
+    private fun openChapters(dir: String, title: String, slug: String) = startActivity(
+        Intent(this, ChapterListActivity::class.java)
+            .putExtra("dir", dir).putExtra("title", title).putExtra("slug", slug),
+    )
+
+    private fun busyText(active: Boolean, chapters: Int): String {
+        val what = if (active) "Downloading this novel" else "Queued for download"
+        return if (chapters > 0) "$what — $chapters chapter(s) ready, tap to open"
+        else "$what — tap to open your novels"
+    }
+
+    /* the banner as it reads before we know what's on disk — used the moment
+       a download is started, when nothing has landed yet */
+    private fun showBusyBanner(active: Boolean) =
+        showBanner(busyText(active, 0)) { openNovels() }
+
+    /* Show the banner for the open page and point the tap where it's most
+       useful: this novel's chapter list once ANY chapter is on disk (it
+       fills in as more arrive), the novels list while it's still starting. */
+    private fun syncLibraryBanner(url: String) {
+        val banner = findViewById<TextView>(R.id.libraryBanner)
+        banner.visibility = View.GONE
+        val site = Sites.forUrl(url) ?: return
+        /* downloading right now takes precedence over "you already have it":
+           it's the newer truth, and re-downloading for new chapters is both */
+        val busy = DownloadService.isBusy(slugKeyFor(url))
+        val active = DownloadService.isActive(slugKeyFor(url))
+        if (busy) showBusyBanner(active)
+
+        val folder = prefs.getString("tree", null) ?: return
+        val (base, slug) = try { site.normalize(url) } catch (e: Exception) { return }
+        if (slug.isEmpty()) return                       // a listing page, not a novel
+        val slugKey = NovelListActivity.slugKeyFromUrl(base)
+        if (slugKey.isEmpty()) return
+        /* garbage-marked novels aren't in the list, so don't advertise them —
+           though one being downloaded right now still earns its banner */
+        val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()
+        if (!busy && slugKey in garbage) return
+
+        lifecycleScope.launch {
+            val found = withContext(Dispatchers.IO) {
+                try {
+                    val rec = store.novels(folder).firstOrNull {
+                        it.slug.lowercase().filter { c -> c.isLetterOrDigit() } == slugKey
+                    } ?: return@withContext null
+                    val dir = store.dirNameOrGuess(folder, rec.slug, rec.title)
+                    Triple(rec, dir, store.chapterCount(folder, rec.slug))
+                } catch (e: Exception) { null }
+            } ?: return@launch
+            /* the page may have moved on while the lookup ran */
+            if (currentUrl != url) return@launch
+            val (rec, dir, chapters) = found
+            val title = rec.title.ifEmpty { rec.slug }
+            when {
+                /* something's on disk already → send them to it */
+                busy && chapters > 0 ->
+                    showBanner(busyText(active, chapters)) { openChapters(dir, title, rec.slug) }
+                busy -> {}   // banner's already up, still pointing at the list
+                else -> showBanner("Already in your novels — tap to open it") {
+                    openChapters(dir, title, rec.slug)
+                }
+            }
+        }
     }
 
     override fun onBackPressed() {
+        /* on the domain list the system back exits browser mode */
+        if (findViewById<android.view.View>(R.id.recentPanel).visibility == android.view.View.VISIBLE) {
+            super.onBackPressed()
+            return
+        }
         val web = findViewById<WebView>(R.id.webview)
         if (web.canGoBack()) web.goBack() else super.onBackPressed()
     }

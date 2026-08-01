@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/readerDrawer"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@color/bg">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="@color/card"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/backBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="12dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="←"
+                android:textSize="20sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/readerTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:padding="10dp"
+                android:textSize="13sp"
+                android:textColor="@color/muted"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/chaptersBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:text="≡"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/speechEditsBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="✎&#xFE0E;"
+                android:textSize="18sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/settingsBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="10dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="⚙&#xFE0E;"
+                android:textSize="18sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <ScrollView
+                android:id="@+id/readerScroll"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:fillViewport="true">
+
+                <TextView
+                    android:id="@+id/readerText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="18dp"
+                    android:textSize="16sp"
+                    android:textColor="@color/fg"
+                    android:lineSpacingMultiplier="1.45"
+                    android:textIsSelectable="true" />
+            </ScrollView>
+
+            <!-- transient status (e.g. "shaking") shown over the text -->
+            <TextView
+                android:id="@+id/readerStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|center_horizontal"
+                android:layout_marginTop="8dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/err"
+                android:background="@color/card"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <!-- TTS footer: play/pause centered, voice settings on the right -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/card">
+
+            <TextView
+                android:id="@+id/ttsPlayBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:text="&#x25B6;&#xFE0E;"
+                android:textSize="22sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- shown in place of the play button while the TTS engine is
+                 still binding (tap = retry a given-up bind) -->
+            <ProgressBar
+                android:id="@+id/ttsSpinner"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:indeterminate="true"
+                android:indeterminateTint="@color/fg"
+                android:visibility="gone" />
+
+            <!-- ♪: monochrome, universally rendered, and reads as "audio" —
+                 the voice/rate/pitch sheet lives behind it -->
+            <TextView
+                android:id="@+id/ttsSettingsBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|center_vertical"
+                android:paddingStart="14dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:text="&#x266A;"
+                android:textSize="18sp"
+                android:textColor="@color/fg"
+                android:clickable="true"
+                android:focusable="true" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- right-side inline chapter list -->
+    <ListView
+        android:id="@+id/chapterDrawerList"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="@color/card"
+        android:divider="@color/bg"
+        android:dividerHeight="1dp"
+        android:fastScrollEnabled="true"
+        android:fastScrollAlwaysVisible="true" />
+</androidx.drawerlayout.widget.DrawerLayout>

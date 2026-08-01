@@ -104,18 +104,6 @@
             android:inputType="textUri"
             android:importantForAutofill="no" />
 
-        <Button
-            android:id="@+id/browserBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Browser mode"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/fg"
-            app:backgroundTint="@color/btn_secondary"
-            app:cornerRadius="8dp" />
-
         <CheckBox
             android:id="@+id/translateCheck"
             android:layout_width="wrap_content"
@@ -125,50 +113,6 @@
             android:textSize="14sp"
             android:textColor="@color/fg"
             app:buttonTint="@color/accent" />
-
-        <EditText
-            android:id="@+id/apiKeyInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:background="@drawable/bg_input"
-            android:padding="11dp"
-            android:hint="Anthropic API key (sk-ant-…)"
-            android:textSize="14sp"
-            android:textColor="@color/fg"
-            android:textColorHint="@color/muted"
-            android:inputType="textPassword"
-            android:importantForAutofill="no"
-            android:visibility="gone" />
-
-        <!-- saved-folder readout with an inline "change" link -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/folderLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="13sp"
-                android:textColor="@color/muted"
-                android:text="No folder selected" />
-
-            <TextView
-                android:id="@+id/folderBtn"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text=" — change"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/accent"
-                android:clickable="true"
-                android:focusable="true"
-                android:padding="4dp" />
-        </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"

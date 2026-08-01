@@ -1,0 +1,31 @@
+# Cloudflare Worker config — the same shape as before the web app was retired
+# (#102), so a git-connected Workers Build deploys worker.js on every push to
+# main. The name is kept so the deploy lands on the existing worker and its
+# truyenfull.vtlinh87.workers.dev URL rather than minting a new one.
+#
+# One-time setup, from this directory:
+#   npx wrangler deploy                 # if the git-connected build isn't on
+#   npx wrangler secret put FETCH_TOKEN # paste a long random string
+#
+# Generate one with: openssl rand -hex 24
+# Never put the token in this file — it is committed. `secret put` stores it
+# on the worker, where the code reads it as env.FETCH_TOKEN.
+#
+# This file is the only config, and adding a second one is not a tie — it is a
+# silent takeover. Wrangler resolves wrangler.json, then wrangler.jsonc, then
+# wrangler.toml, and takes the FIRST it finds; a wrangler.jsonc sitting beside
+# this file wins and this file is never read, with no warning either way.
+# (Measured in wrangler 4.118.0's own `findWranglerConfig`, not assumed.)
+#
+# That is what the Cloudflare autoconfig bot's PR (#103) proposed, and why its
+# wrangler.jsonc was dropped when that branch was merged rather than kept
+# alongside this one. Its config carried no `main`, so worker.js would simply
+# have stopped running, and an `assets.directory` of "." would have served the
+# whole repository root as public static files — android/signing.p12 among
+# them. Keep the config here, in one file.
+name = "truyenfull"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+[observability]
+enabled = true

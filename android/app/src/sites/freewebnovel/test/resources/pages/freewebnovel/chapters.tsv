@@ -1,0 +1,39 @@
+# Chapter pages from freewebnovel.com, unedited, from 30 DIFFERENT novels —
+# 10 first chapters and 20 middle ones, from books of one listing page and of
+# fifty-six.
+# columns: site  file  url  novel  which  heading_number  content_chars
+#          novel_max_page  novel_completed
+# content_chars is the visible text of #article and heading_number the number
+# printed in span.chapter — both measured with bs4/lxml rather than by
+# Extractor. span.chapter carries the heading ONCE; the h4 beside it prints it
+# twice inside a single line on 5 of these 30, and sits inside #article on 19.
+freewebnovel	freewebnovel/chapters/999999-max-stat-even-the-gods-cant-stop-me__chapter-26.html	https://freewebnovel.com/novel/999999-max-stat-even-the-gods-cant-stop-me/chapter-26	999999-max-stat-even-the-gods-cant-stop-me	mid	26	7444	1	false
+freewebnovel	freewebnovel/chapters/atticuss-odyssey-reincarnated-into-a-playground__chapter-1.html	https://freewebnovel.com/novel/atticuss-odyssey-reincarnated-into-a-playground/chapter-1	atticuss-odyssey-reincarnated-into-a-playground	first	1	5669	45	true
+freewebnovel	freewebnovel/chapters/awakening__chapter-24.html	https://freewebnovel.com/novel/awakening/chapter-24	awakening	mid	40	7858	8	true
+freewebnovel	freewebnovel/chapters/boarding-life__chapter-3.html	https://freewebnovel.com/novel/boarding-life/chapter-3	boarding-life	mid	3	7739	22	false
+freewebnovel	freewebnovel/chapters/claimed-by-the-tyrant-king__chapter-8.html	https://freewebnovel.com/novel/claimed-by-the-tyrant-king/chapter-8	claimed-by-the-tyrant-king	mid	8	5086	7	false
+freewebnovel	freewebnovel/chapters/crazy-necromancer-in-the-ruined-tower__chapter-1.html	https://freewebnovel.com/novel/crazy-necromancer-in-the-ruined-tower/chapter-1	crazy-necromancer-in-the-ruined-tower	first	1	8905	3	true
+freewebnovel	freewebnovel/chapters/dual-cultivation-ying-yang-is-way-to-chaos__chapter-1.html	https://freewebnovel.com/novel/dual-cultivation-ying-yang-is-way-to-chaos/chapter-1	dual-cultivation-ying-yang-is-way-to-chaos	first	1	9009	12	false
+freewebnovel	freewebnovel/chapters/godly-farmer-doctor-arrogant-husband-cant-afford-to-offend__chapter-1.html	https://freewebnovel.com/novel/godly-farmer-doctor-arrogant-husband-cant-afford-to-offend/chapter-1	godly-farmer-doctor-arrogant-husband-cant-afford-to-offend	first	1	3608	34	false
+freewebnovel	freewebnovel/chapters/godly-stay-home-dad__chapter-11.html	https://freewebnovel.com/novel/godly-stay-home-dad/chapter-11	godly-stay-home-dad	mid	11	15304	44	true
+freewebnovel	freewebnovel/chapters/high-school-student-with-immortal-race-system__chapter-2.html	https://freewebnovel.com/novel/high-school-student-with-immortal-race-system/chapter-2	high-school-student-with-immortal-race-system	mid	2	11679	2	false
+freewebnovel	freewebnovel/chapters/horror-game-designer__chapter-3.html	https://freewebnovel.com/novel/horror-game-designer/chapter-3	horror-game-designer	mid	3	12748	18	false
+freewebnovel	freewebnovel/chapters/i-should-have-just-died__chapter-1.html	https://freewebnovel.com/novel/i-should-have-just-died/chapter-1	i-should-have-just-died	first	1	4378	6	false
+freewebnovel	freewebnovel/chapters/my-girlfriend-is-a-zombie__chapter-31.html	https://freewebnovel.com/novel/my-girlfriend-is-a-zombie/chapter-31	my-girlfriend-is-a-zombie	mid	31	9066	40	true
+freewebnovel	freewebnovel/chapters/one-wild-night__chapter-32.html	https://freewebnovel.com/novel/one-wild-night/chapter-32	one-wild-night	mid	32	5968	26	true
+freewebnovel	freewebnovel/chapters/open-sx-world__chapter-1.html	https://freewebnovel.com/novel/open-sx-world/chapter-1	open-sx-world	first	1	5669	2	true
+freewebnovel	freewebnovel/chapters/picking-up-beautiful-girls-in-the-post-apocalyptic-world__chapter-3.html	https://freewebnovel.com/novel/picking-up-beautiful-girls-in-the-post-apocalyptic-world/chapter-3	picking-up-beautiful-girls-in-the-post-apocalyptic-world	mid	3	9030	11	true
+freewebnovel	freewebnovel/chapters/rehabilitating-the-villainess__chapter-4.html	https://freewebnovel.com/novel/rehabilitating-the-villainess/chapter-4	rehabilitating-the-villainess	mid	4	9378	4	true
+freewebnovel	freewebnovel/chapters/reincarnated-as-the-hero-ring__chapter-7.html	https://freewebnovel.com/novel/reincarnated-as-the-hero-ring/chapter-7	reincarnated-as-the-hero-ring	mid	7	2145	6	true
+freewebnovel	freewebnovel/chapters/second-world__chapter-7.html	https://freewebnovel.com/novel/second-world/chapter-7	second-world	mid	7	6876	51	true
+freewebnovel	freewebnovel/chapters/solaris-strongest-resonator__chapter-1.html	https://freewebnovel.com/novel/solaris-strongest-resonator/chapter-1	solaris-strongest-resonator	first	1	6195	9	false
+freewebnovel	freewebnovel/chapters/surviving-in-a-school-of-ghost-stories__chapter-1.html	https://freewebnovel.com/novel/surviving-in-a-school-of-ghost-stories/chapter-1	surviving-in-a-school-of-ghost-stories	first	1	6347	4	false
+freewebnovel	freewebnovel/chapters/sword-of-fate__chapter-1.html	https://freewebnovel.com/novel/sword-of-fate/chapter-1	sword-of-fate	first	1	8504	1	false
+freewebnovel	freewebnovel/chapters/thanks-to-my-unlimited-investment-im-admired-by-all-races-xianxia__chapter-17.html	https://freewebnovel.com/novel/thanks-to-my-unlimited-investment-im-admired-by-all-races-xianxia/chapter-17	thanks-to-my-unlimited-investment-im-admired-by-all-races-xianxia	mid	17	6281	9	false
+freewebnovel	freewebnovel/chapters/the-blind-sss-class-final-boss-is-obsessed-with-me__chapter-16.html	https://freewebnovel.com/novel/the-blind-sss-class-final-boss-is-obsessed-with-me/chapter-16	the-blind-sss-class-final-boss-is-obsessed-with-me	mid	16	8410	1	false
+freewebnovel	freewebnovel/chapters/the-clan-master-cant-possibly-be-a-mortal__chapter-13.html	https://freewebnovel.com/novel/the-clan-master-cant-possibly-be-a-mortal/chapter-13	the-clan-master-cant-possibly-be-a-mortal	mid	13	8204	56	true
+freewebnovel	freewebnovel/chapters/the-cockroach-like-girl-is-my-beast__chapter-1.html	https://freewebnovel.com/novel/the-cockroach-like-girl-is-my-beast/chapter-1	the-cockroach-like-girl-is-my-beast	first	1	9281	23	false
+freewebnovel	freewebnovel/chapters/the-harem-teacher-at-elreis-sorceress-academy__chapter-7.html	https://freewebnovel.com/novel/the-harem-teacher-at-elreis-sorceress-academy/chapter-7	the-harem-teacher-at-elreis-sorceress-academy	mid	6	7449	3	true
+freewebnovel	freewebnovel/chapters/the-hero-is-an-academy-librarian__chapter-39.html	https://freewebnovel.com/novel/the-hero-is-an-academy-librarian/chapter-39	the-hero-is-an-academy-librarian	mid	39	7184	3	false
+freewebnovel	freewebnovel/chapters/throne-of-magical-arcana__chapter-24.html	https://freewebnovel.com/novel/throne-of-magical-arcana/chapter-24	throne-of-magical-arcana	mid	24	9168	23	true
+freewebnovel	freewebnovel/chapters/ultimate-check-in-system__chapter-9.html	https://freewebnovel.com/novel/ultimate-check-in-system/chapter-9	ultimate-check-in-system	mid	9	8932	2	true
