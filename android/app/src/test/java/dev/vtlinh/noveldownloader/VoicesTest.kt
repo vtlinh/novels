@@ -63,6 +63,32 @@ class VoicesTest {
         assertTrue(Voices.nameOf("en") == "English")
     }
 
+    /* ---- local voices only ---- */
+
+    /* Google ships each voice twice: one rendering on the phone, one on its
+       servers. The second kind is no use to a reader whose whole point is a
+       downloaded novel — it needs a connection to say a word, so it goes
+       silent on a train, and every sentence waits on a round trip. */
+    @Test
+    fun `a voice that renders on Google's servers is known by its name`() {
+        assertTrue(Voices.isNetworkName("en-us-x-iob-network"))
+        assertTrue(Voices.isNetworkName("vi-vn-x-vic-network"))
+    }
+
+    @Test
+    fun `the local half of the pair is kept`() {
+        assertFalse(Voices.isNetworkName("en-us-x-iob-local"))
+        assertFalse(Voices.isNetworkName("vi-vn-x-vic-local"))
+    }
+
+    /* The suffix, not the word. A voice is not online because its name
+       happens to contain those letters somewhere. */
+    @Test
+    fun `the word has to end the name`() {
+        assertFalse(Voices.isNetworkName("en-us-network-x-iob-local"))
+        assertFalse(Voices.isNetworkName(""))
+    }
+
     /* ---- which language a stretch of the novel is in ---- */
 
     /* THE OTHER DEFECT, and why this answer is nullable. Asked "is this

@@ -27,6 +27,16 @@ object Voices {
     /* The name to say it by, for a reader who has to go and install it. */
     fun nameOf(lang: String): String = if (lang == "vi") "Vietnamese" else "English"
 
+    /* Google's voice names end in how they are synthesised: "en-us-x-iob-local"
+       renders on the phone, "en-us-x-iob-network" renders on Google's servers.
+
+       The name is the SECOND test, not the first — Voice.isNetworkConnectionRequired
+       is the engine's own answer and is asked before this. This catches a voice
+       that says nothing while naming itself plainly, which costs a line and
+       saves offering a voice that goes silent on a train. */
+    fun isNetworkName(voiceName: String): Boolean =
+        voiceName.endsWith("-network", ignoreCase = true)
+
     private val VI_CHARS = Regex(
         "[\u0103\u00e2\u0111\u00ea\u00f4\u01a1\u01b0\u00e0\u1ea3\u00e3\u00e1\u1ea1\u1eb1\u1eb3\u1eb5\u1eaf\u1eb7\u1ea7\u1ea9\u1eab\u1ea5\u1ead\u00e8\u1ebb\u1ebd\u00e9\u1eb9\u1ec1\u1ec3\u1ec5\u1ebf\u1ec7\u00ec\u1ec9\u0129\u00ed\u1ecb\u00f2\u1ecf\u00f5\u00f3\u1ecd\u1ed3\u1ed5\u1ed7\u1ed1\u1ed9\u1edd\u1edf\u1ee1\u1edb\u1ee3\u00f9\u1ee7\u0169\u00fa\u1ee5\u1eeb\u1eed\u1eef\u1ee9\u1ef1\u1ef3\u1ef7\u1ef9\u00fd\u1ef5]",
         RegexOption.IGNORE_CASE,
