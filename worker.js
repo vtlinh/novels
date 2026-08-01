@@ -32,7 +32,7 @@
  *   x-upstream-status, x-upstream-url, x-challenge
  *
  * Deploy: pushes to main auto-deploy via the git-connected Worker
- * (wrangler.jsonc). Set the secret once, from the repo root:
+ * (wrangler.toml). Set the secret once, from the repo root:
  *   npx wrangler secret put FETCH_TOKEN
  */
 

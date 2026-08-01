@@ -11,11 +11,18 @@
 # Never put the token in this file — it is committed. `secret put` stores it
 # on the worker, where the code reads it as env.FETCH_TOKEN.
 #
-# Note there is an unmerged branch (cloudflare/workers-autoconfig) carrying a
-# wrangler.jsonc with `assets.directory = "."`. Do not merge it as-is: with no
-# `main` it publishes the repository itself as static files — including the
-# Android sources and the ~2 MB of test fixtures — instead of running the
-# worker.
+# This file is the only config, and adding a second one is not a tie — it is a
+# silent takeover. Wrangler resolves wrangler.json, then wrangler.jsonc, then
+# wrangler.toml, and takes the FIRST it finds; a wrangler.jsonc sitting beside
+# this file wins and this file is never read, with no warning either way.
+# (Measured in wrangler 4.118.0's own `findWranglerConfig`, not assumed.)
+#
+# That is what the Cloudflare autoconfig bot's PR (#103) proposed, and why its
+# wrangler.jsonc was dropped when that branch was merged rather than kept
+# alongside this one. Its config carried no `main`, so worker.js would simply
+# have stopped running, and an `assets.directory` of "." would have served the
+# whole repository root as public static files — android/signing.p12 among
+# them. Keep the config here, in one file.
 name = "truyenfull"
 main = "worker.js"
 compatibility_date = "2026-07-01"
