@@ -163,7 +163,66 @@ class VoicesTest {
         assertEquals("en_US — ", Voices.label("en_US", ""))
     }
 
-    /* ---- which language a stretch of the novel is in ---- */
+    /* ---- which language a chapter is in ---- */
+
+    /* Both of these are the real opening of a real captured chapter, lifted
+       out of the corpus under the sites' own test/resources rather than
+       written here — the same reason nothing else in this repo is judged
+       against invented text. */
+    private val vietnameseChapter =
+        "Ánh đèn trong đại sảnh biệt thự Lục gia phủ lên mọi vật một màu lạnh " +
+            "lẽo, tang tóc. Những vòng hoa trắng xếp thành tường, lặng lẽ che đi " +
+            "những ánh mắt dò xét, toan tính. Đội bảo vệ mặc vest đen đứng rải " +
+            "rác, tạo thành một rào chắn vô hình, khiến bầu không khí vốn nặng " +
+            "nề lại càng thêm nghẹt thở."
+
+    private val englishChapter =
+        "Chapter 1: Prince Charming Next Door (1) Translator: Nyoi-Bo Studio " +
+            "Editor: Nyoi-Bo Studio To me, the perfect love is having you with me " +
+            "for the rest of my life. -Ye Feiyan, Prince Charming Next Door When " +
+            "I finally met Gu Yusheng after two years of waiting, I was going to " +
+            "ask him why he stood me up that day."
+
+    @Test
+    fun `a chapter is read as the language it is written in`() {
+        assertEquals("vi", Voices.detect(vietnameseChapter))
+        assertEquals("en", Voices.detect(englishChapter))
+    }
+
+    /* THE DEFECT, off a real screen. Vietnamese used to mean "holds any
+       Vietnamese character", and é is one — so an English chapter turned
+       Vietnamese on the word `d'état`, and the voice changed part-way down the
+       page and stayed changed. é is also French, and a translated novel is
+       exactly the kind of text that borrows one.
+
+       A borrowed word cannot move a proportion. That is the whole fix. */
+    @Test
+    fun `a borrowed french word does not make an english chapter vietnamese`() {
+        val borrowed =
+            englishChapter + " Are you completely certain they are here to " +
+                "listen to a lecture on fundamental knowledge of cultivation, " +
+                "not to start a coup d'état?"
+        assertEquals("en", Voices.detect(borrowed))
+        assertEquals("en", Voices.detect("$englishChapter They met at the café, déjà vu."))
+    }
+
+    /* Where the line sits, and how much room is either side of it. Measured
+       over the 150 real chapters in the corpus: the English sites run
+       99.3–100% unaccented, the Vietnamese ones 69.2–74.2%. Nothing at all
+       falls between. These four pin both the rule and that margin, so moving
+       the constant has to be a decision rather than a slip. */
+    @Test
+    fun `above four fifths unaccented is English and below it is not`() {
+        fun mix(plain: Int, marked: Int) = "a".repeat(plain) + "ố".repeat(marked)
+
+        assertEquals("just over four fifths", "en", Voices.detect(mix(81, 19)))
+        assertEquals("exactly four fifths is not over it", "vi", Voices.detect(mix(80, 20)))
+
+        assertEquals("the most ascii any captured Vietnamese chapter was",
+            "vi", Voices.detect(mix(74, 26)))
+        assertEquals("the least ascii any captured English chapter was",
+            "en", Voices.detect(mix(99, 1)))
+    }
 
     /* THE OTHER DEFECT, and why this answer is nullable. Asked "is this
        Vietnamese?", an empty string answers no, and a plain no reads as
@@ -180,14 +239,15 @@ class VoicesTest {
         assertNull("nor does one holding only layout", Voices.detect("   \n\n  "))
     }
 
+    /* A handful of words is not a chapter, and a proportion taken over one is
+       noise: "café" alone is 75% unaccented, which would answer Vietnamese
+       with real confidence. Better to say nothing and be asked again once the
+       chapter has loaded — which is exactly what the reader does. */
     @Test
-    fun `Vietnamese is known by its diacritics`() {
-        assertTrue(Voices.detect("Chương 1: Không chỉ thích một người") == "vi")
-        assertTrue("one marked word in a line is enough", Voices.detect("A B c ngoại") == "vi")
-    }
-
-    @Test
-    fun `unmarked latin text is English`() {
-        assertTrue(Voices.detect("Chapter 1: He did not like anyone") == "en")
+    fun `too little text is not judged at all`() {
+        assertNull(Voices.detect("café"))
+        assertNull(Voices.detect("Chapter 1: He did not like anyone"))
+        assertNull("one sentence of Vietnamese is still not a chapter",
+            Voices.detect("Chương 1: Không chỉ thích một người"))
     }
 }
