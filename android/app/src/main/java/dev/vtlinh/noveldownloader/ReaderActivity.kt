@@ -825,24 +825,25 @@ class ReaderActivity : AppCompatActivity() {
         tts = t
     }
 
-    /* A sentence about to be spoken always has words in it, so the "nothing
-       to judge" answer cannot arise here — see Voices.detect for where it
-       can, and what it cost. */
-    private fun detectLang(sentence: String) = Voices.detect(sentence) ?: "en"
+    /* A WHOLE chapter of the buffer, which is the unit the language is judged
+       over — see Voices.detect for why a smaller sample is not worth asking
+       about. Null before the chapter it is asked for has loaded.
 
-    /* The text the reader is actually looking at.
-
-       NOT the first 600 characters of the buffer: that window starts two
-       chapters before the one on screen, so sampling from offset 0 asks
-       about a chapter the reader may never have reached. Null while nothing
-       is loaded — the reader opens before its chapter does. */
-    private fun visibleSample(): String? {
+       Not the first N characters of the buffer either: that window starts two
+       chapters before the one on screen, so sampling from offset 0 asks about
+       a chapter the reader may never have reached. */
+    private fun chapterTextAt(off: Int): String? {
         val body = text.text.toString()
         if (body.isBlank()) return null
-        val from = loadedChapters.firstOrNull { it.idx == currentChapterIdx }
-            ?.start?.coerceIn(0, body.length) ?: 0
-        return body.substring(from, (from + 600).coerceAtMost(body.length)).ifBlank { null }
+        val (s, e) = chapterSpanAt(off) ?: return null
+        val from = s.coerceIn(0, body.length)
+        val to = e.coerceIn(from, body.length)
+        return body.substring(from, to).ifBlank { null }
     }
+
+    /* The chapter on screen. */
+    private fun currentChapterText(): String? =
+        loadedChapters.firstOrNull { it.idx == currentChapterIdx }?.let { chapterTextAt(it.start) }
 
     /* Which language profile a screen is about: the one being spoken if
        there is one, otherwise whatever is on screen. Only for SHOWING and
@@ -850,7 +851,7 @@ class ReaderActivity : AppCompatActivity() {
        arrived cannot latch. English is the last resort of a reader with no
        text at all, and the next open asks again. */
     private fun profileLang(): String =
-        curTtsLang.ifEmpty { visibleSample()?.let { Voices.detect(it) } ?: "en" }
+        curTtsLang.ifEmpty { currentChapterText()?.let { Voices.detect(it) } ?: "en" }
 
     /* The locale a language profile speaks in. One definition, because the
        voice filter, the note that explains an empty filter and the fallback
@@ -968,7 +969,7 @@ class ReaderActivity : AppCompatActivity() {
            said "TTS — English" over a Vietnamese chapter for the rest of the
            session. With nothing to judge there is nothing to restore yet, so
            come back when there is; the retry below is already here. */
-        val lang = curTtsLang.ifEmpty { visibleSample()?.let { Voices.detect(it) } ?: "" }
+        val lang = curTtsLang.ifEmpty { currentChapterText()?.let { Voices.detect(it) } ?: "" }
         if (lang.isEmpty()) {
             if (voiceRestoreTicks < 15) {
                 voiceRestoreTicks++
@@ -1295,7 +1296,13 @@ class ReaderActivity : AppCompatActivity() {
         resumeCursor = s0
         speakCursor = s1
         val sentence = body.substring(s0, s1)
-        val lang = detectLang(sentence)
+        /* The chapter this sentence is in, not the sentence. Judging each
+           sentence on its own is what let one borrowed word — `d'état` — swap
+           the voice to Vietnamese half way down an English novel and leave it
+           there. A chapter is written in one language; ask about that.
+           Unjudgeable (still loading, or barely any text) keeps the profile
+           already in use rather than forcing one. */
+        val lang = chapterTextAt(s0)?.let { Voices.detect(it) } ?: curTtsLang.ifEmpty { "en" }
         if (lang != curTtsLang) applyTtsConfig(lang)
         setHighlight(s0, s1)
         scrollToSpoken(s0)
