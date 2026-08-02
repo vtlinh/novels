@@ -212,11 +212,11 @@ class VoicesTest {
        falls between. These four pin both the rule and that margin, so moving
        the constant has to be a decision rather than a slip. */
     @Test
-    fun `above four fifths unaccented is English and below it is not`() {
+    fun `above nine tenths unaccented is English and below it is not`() {
         fun mix(plain: Int, marked: Int) = "a".repeat(plain) + "ố".repeat(marked)
 
-        assertEquals("just over four fifths", "en", Voices.detect(mix(81, 19)))
-        assertEquals("exactly four fifths is not over it", "vi", Voices.detect(mix(80, 20)))
+        assertEquals("just over nine tenths", "en", Voices.detect(mix(91, 9)))
+        assertEquals("exactly nine tenths is not over it", "vi", Voices.detect(mix(90, 10)))
 
         assertEquals("the most ascii any captured Vietnamese chapter was",
             "vi", Voices.detect(mix(74, 26)))

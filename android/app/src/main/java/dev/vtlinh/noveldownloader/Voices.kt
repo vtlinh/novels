@@ -66,9 +66,16 @@ object Voices {
     /* Above this share of unaccented letters a chapter is English. Measured,
        not picked: over the 150 real chapter pages captured under the sites'
        test/resources, the unaccented share is 99.3–100% on the three English
-       sites and 69.2–74.2% on the two Vietnamese ones. Nothing lands between
-       74 and 99, and this sits in the middle of that gap. */
-    private const val ENGLISH_PCT = 80
+       sites and 69.2–74.2% on the two Vietnamese ones. Nothing at all lands
+       between 74 and 99, so anywhere in that gap reads the whole corpus
+       correctly; this sits high in it, ~16 points clear of the most ASCII
+       Vietnamese chapter and ~9 below the least ASCII English one.
+
+       Higher is the safer direction to be wrong in. Over the line means an
+       English voice, and English is what the reader gets anyway when there is
+       nothing to judge; a Vietnamese chapter misread would be read aloud in a
+       voice that cannot pronounce it, which is the louder failure. */
+    private const val ENGLISH_PCT = 90
 
     /* And below this there is not enough text to be asking. About two
        sentences; a chapter is thousands of letters. */
