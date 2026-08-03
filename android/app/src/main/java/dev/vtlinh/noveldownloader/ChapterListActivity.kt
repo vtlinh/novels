@@ -220,6 +220,26 @@ class ChapterListActivity : AppCompatActivity() {
         }
     }
 
+    /* The reader leaves by bringing a chapter list forward with
+       REORDER_TO_FRONT, and the instance that comes forward is whichever one
+       is in the stack — which can be another NOVEL's, left there by earlier
+       navigation. Reordering delivers the new intent here rather than
+       recreating, and without adopting it the screen showed the old novel's
+       chapters under the old title, with the ⚙ opening the old novel's
+       settings. onResume follows this and reloads. */
+    override fun onNewIntent(newIntent: Intent) {
+        super.onNewIntent(newIntent)
+        val changed = newIntent.getStringExtra("dir") != intent.getStringExtra("dir") ||
+            newIntent.getStringExtra("slug") != intent.getStringExtra("slug")
+        setIntent(newIntent)
+        if (changed) {
+            /* a different novel: forget the old list rather than briefly
+               showing it — and recreate so onCreate rewires the ⚙ button,
+               whose click listener captured the OLD novel's slug */
+            recreate()
+        }
+    }
+
     /* (re)load on every return to this screen — onResume also follows
        onCreate, so the first load happens here too — keeping the
        current-chapter highlight in sync with what was just read */

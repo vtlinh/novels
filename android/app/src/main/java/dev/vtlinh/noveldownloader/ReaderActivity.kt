@@ -1684,21 +1684,29 @@ class ReaderActivity : AppCompatActivity() {
         return layout.getLineStart(layout.getLineForVertical(y))
     }
 
-    /* Back / ← : while TTS is playing, keep this instance ALIVE (playback
-       continues) and just bring the chapter list forward; otherwise finish
-       normally. */
+    /* Back / ← : always to this novel's CHAPTER LIST. Two of the reader's
+       entry points skip that screen — the Library's straight-to-reader
+       shortcut for a novel being listened to, and the home screen's
+       resume-reading jump — and a plain finish() from those landed on the
+       Library or home instead, so where back took you depended on how you
+       happened to arrive. Route through the chapter list instead: an
+       instance already beneath is brought forward (same end state as
+       finishing onto it), and one that was skipped is created.
+
+       While TTS is playing this instance stays ALIVE beneath it (playback
+       continues); otherwise it finishes. */
     private fun leaveReader() {
-        if (speaking) {
+        val dir = intent.getStringExtra("dir")
+        if (dir != null) {
             startActivity(
                 android.content.Intent(this, ChapterListActivity::class.java)
-                    .putExtra("dir", intent.getStringExtra("dir"))
+                    .putExtra("dir", dir)
                     .putExtra("title", intent.getStringExtra("title"))
                     .putExtra("slug", intent.getStringExtra("slug"))
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
-        } else {
-            finish()
         }
+        if (!speaking) finish()
     }
 
     override fun onBackPressed() {
