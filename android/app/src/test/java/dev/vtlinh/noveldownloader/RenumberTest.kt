@@ -224,4 +224,34 @@ class RenumberTest {
             occupied.add(to)
         }
     }
+
+    /* ---- the heading number (Renumber.headingNumbers) ---- */
+
+    /* readnovel names chapters after their titles — no chapter-N in the URL,
+       nothing parseable in the link text — so EVERY entry arrives unnumbered.
+       The engine used to substitute a literal 0, and every file in the book
+       opened "Chapter 0: …". Position is the site's real answer. */
+    @Test
+    fun `a fully unnumbered listing takes positions, not zeros`() {
+        assertEquals(listOf(1, 2, 3, 4), Renumber.headingNumbers(listOf(null, null, null, null)))
+    }
+
+    /* a prologue ahead of chapter 1: the leading entry has no number before
+       it to inherit, so it takes its position rather than 0 */
+    @Test
+    fun `a leading unnumbered entry takes its position`() {
+        assertEquals(listOf(1, 1, 2), Renumber.headingNumbers(listOf(null, 1, 2)))
+    }
+
+    /* an interlude between numbered chapters keeps the number before it —
+       that is where the page puts it, and the behaviour that already shipped */
+    @Test
+    fun `an unnumbered entry after a numbered one keeps the prior number`() {
+        assertEquals(listOf(40, 40, 41), Renumber.headingNumbers(listOf(40, null, 41)))
+    }
+
+    @Test
+    fun `numbered entries keep the site's own numbers`() {
+        assertEquals(listOf(7, 9, 12), Renumber.headingNumbers(listOf(7, 9, 12)))
+    }
 }

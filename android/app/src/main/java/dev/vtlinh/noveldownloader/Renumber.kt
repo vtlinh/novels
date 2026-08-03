@@ -364,6 +364,25 @@ object Ownership {
 
 object Renumber {
 
+    /* The number each chapter's HEADING carries — the line written inside
+       the file, shown by the reader and read aloud — given the numbers the
+       site printed (null where it printed none).
+
+       An unnumbered entry after a numbered one takes the number before it:
+       that is where the page puts an interlude or an author's note. A
+       LEADING unnumbered entry has nothing before it, and the engine used
+       to substitute a literal 0 — so a novel whose links carry no
+       chapter-N slug at all (readnovel names chapters after their titles)
+       had "Chapter 0:" written into every file in the book, and a prologue
+       opened every novelfull novel as "Chapter 0". Position is the site's
+       real answer everywhere else in this app; it is the answer here too. */
+    fun headingNumbers(siteNums: List<Int?>): List<Int> {
+        var last: Int? = null
+        return siteNums.mapIndexed { i, n ->
+            if (n != null) { last = n; n } else last ?: (i + 1)
+        }
+    }
+
     /* One entry in the site's listing: the page it came from, and the name
        its POSITION gives it. `want` is null for an entry with no usable name. */
     data class Slot(val url: String, val want: String?)

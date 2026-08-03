@@ -57,6 +57,11 @@ class DownloadService : Service() {
            by then a newer run may have taken over. */
         private val runSeq = java.util.concurrent.atomic.AtomicLong(0)
 
+        /* Held around every transition of the run-ownership flags — the
+           start path's take-over and the teardown's release — so neither can
+           interleave with the other's half-applied writes. */
+        private val runFlags = Any()
+
         private fun prefs(ctx: android.content.Context) =
             ctx.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
 
@@ -190,7 +195,13 @@ class DownloadService : Service() {
         val slug = Sites.forUrl(url)?.normalize(url)?.second
         if (slug == null) appWide
         else DownloadStore(applicationContext).translateFor(tree, slug, appWide)
-    } catch (e: Exception) { appWide }
+    } catch (e: Exception) {
+        /* The fallback direction is the expensive one when the switch is on —
+           a stored "never" missed here spends money — so a failure to read it
+           at least says so. */
+        appendLog("Could not read this novel's translate setting — using the app-wide switch (${e.message})")
+        appWide
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -208,33 +219,44 @@ class DownloadService : Service() {
         val apiKey = intent?.getStringExtra("apiKey") ?: ""
         if (url == null || tree == null) return START_NOT_STICKY
 
-        /* a download is already running → line this novel up next */
-        if (runningFlow.value) {
-            if (enqueue(this, url, translate, forceTranslate)) {
-                appendLog("Queued next: $url")
-                maybeNotify(statusFlow.value, 0, 0)   // refresh the "+N queued" hint
-            }
-            return START_NOT_STICKY
-        }
+        /* A download is already running → line this novel up next.
 
-        createChannel()
-        startForeground(NOTIF_ID, buildNotification("Starting…", 0, 0))
-        runningFlow.value = true
-        logFlow.value = emptyList()
+           Decided and acted on under `runFlags`, the same lock the teardown
+           holds. The old shape read `runningFlow` here and took over with a
+           `startForeground` a few lines later, while the teardown's guard was
+           a bare `runSeq.get() == myRun` check followed by seven writes — so
+           a start landing in the microseconds after the teardown's first
+           write (`runningFlow = false`) could pass this test, start its
+           foreground, and then have the STILL-RUNNING teardown remove that
+           notification and null its engine: a live download with no Stop
+           button and no foreground protection, the exact failure the guard
+           was written to prevent. The lock makes take-over atomic: whichever
+           side enters first, the other sees a consistent world. */
+        val myRun = synchronized(runFlags) {
+            if (runningFlow.value) {
+                if (enqueue(this, url, translate, forceTranslate)) {
+                    appendLog("Queued next: $url")
+                    maybeNotify(statusFlow.value, 0, 0)   // refresh the "+N queued" hint
+                }
+                return START_NOT_STICKY
+            }
+            createChannel()
+            startForeground(NOTIF_ID, buildNotification("Starting…", 0, 0))
+            runningFlow.value = true
+            logFlow.value = emptyList()
+            /* Which run this is. The flags below are static, and a cancelled
+               run does not stop instantly — the engine can be parked in a
+               socket read for up to the 30s timeout. By the time it unwinds,
+               a NEW service instance may have started the next novel, and
+               clearing the flags then would strand that one. Only the newest
+               run may clear them. */
+            runSeq.incrementAndGet()
+        }
 
         /* non-null copies for the coroutine — the null-check smart cast on
            url/tree doesn't carry into the lambda */
         val firstUrl: String = url
         val treePath: String = tree
-        /* Which run this is. The flags below are static, and a cancelled run
-           does not stop instantly — the engine can be parked in a socket read
-           for up to the 30s timeout. By the time it unwinds, a NEW service
-           instance may have started the next novel, and clearing the flags
-           then would strand that one: the Library stops showing it as
-           downloading, Stop hits a null engine so it cannot be cancelled, and
-           the next start runs a second engine over the same folder instead of
-           queueing. Only the newest run may clear them. */
-        val myRun = runSeq.incrementAndGet()
         scope.launch {
             var curUrl = firstUrl
             var curTranslate = translate
@@ -254,8 +276,16 @@ class DownloadService : Service() {
                     progress = { done, total -> maybeNotify(statusFlow.value, done, total) },
                 )
                 engine = eng
+                /* The per-novel override yields to `force`: that flag only
+                   exists on the "already in English — translate anyway?"
+                   dialog, which is the user answering THIS download in the
+                   moment. The stored setting is the older instruction, and
+                   letting it win made the dialog's answer silently do
+                   nothing. */
+                val doTranslate =
+                    if (curForce) curTranslate else translateFor(treePath, curUrl, curTranslate)
                 try {
-                    eng.run(curUrl, Uri.parse(treePath), translateFor(treePath, curUrl, curTranslate), curKey, curForce)
+                    eng.run(curUrl, Uri.parse(treePath), doTranslate, curKey, curForce)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     /* The service is going away. Cancellation is an Exception,
                        so the catch below would swallow it and the loop would
@@ -291,27 +321,39 @@ class DownloadService : Service() {
 
                    ...but only if we are still the current run. A cancelled
                    run can take until the socket timeout to unwind, by which
-                   point a newer one may own these. */
-                if (runSeq.get() == myRun) {
-                    currentUrl = null
-                    activeSlugFlow.value = null
-                    runningFlow.value = false
-                    engine = null
-                    /* Drop OUR foreground state here, before handing off.
-                       Doing it after resumeQueueIfNeeded meant the next run
-                       could already have called startForeground — and this
-                       then removed ITS notification and dropped the service
-                       out of the foreground, leaving a live download running
-                       unprotected with no Stop action, which stopSelfResult
-                       does not undo. */
-                    stopForeground(STOP_FOREGROUND_REMOVE)
+                   point a newer one may own these. Checked and acted on under
+                   `runFlags`, the lock the start path holds too — the bare
+                   check-then-act let a start slip in after our first write
+                   and then had us remove ITS foreground state. */
+                val stillOurs = synchronized(runFlags) {
+                    if (runSeq.get() == myRun) {
+                        currentUrl = null
+                        activeSlugFlow.value = null
+                        runningFlow.value = false
+                        engine = null
+                        /* Drop OUR foreground state here, before handing off.
+                           Doing it after resumeQueueIfNeeded meant the next
+                           run could already have called startForeground — and
+                           this then removed ITS notification and dropped the
+                           service out of the foreground, leaving a live
+                           download running unprotected with no Stop action,
+                           which stopSelfResult does not undo. */
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (stillOurs) {
                     /* Anything queued while we were winding down was accepted
                        on the strength of runningFlow, which stays true from
                        the moment Stop is pressed until the engine unwinds —
                        but a stopped run refuses to pop the queue, so that
                        novel sat there with nothing running: its button stuck
                        on "Queued", no Stop button, and only backgrounding the
-                       app would ever drain it. Kick it off ourselves. */
+                       app would ever drain it. Kick it off ourselves. Outside
+                       the lock: it start()s a service, and holding `runFlags`
+                       across that invites a deadlock with the start path. */
                     try { resumeQueueIfNeeded(applicationContext) } catch (e: Exception) {}
                 }
             }

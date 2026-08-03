@@ -267,4 +267,63 @@ class ResumeTest {
     fun `an unindexed novel has no recorded listing`() {
         assertEquals(emptyList<String>(), Resume.recordedListing(emptyMap(), emptyMap()))
     }
+
+    /* ---- tailComplete ---- */
+
+    /* THE HOLE THIS RULE CLOSED. A throttle page answers 200 with no chapter
+       list; the first version of the resumed check accepted any number of
+       those as long as they trailed the last page with links — so the tail
+       came back short, the splice still lined up, and the site's new
+       chapters read as "up to date". With the finished flag in the same
+       answer, the novel latched complete at the short count and dropped out
+       of every future sweep. A blank page is never forgivable: only a
+       genuine 404 can be the pagination over-reading. */
+    @Test
+    fun `a trailing 200-blank page is not a readable tail`() {
+        assertFalse(
+            Resume.tailComplete(
+                missed = setOf(6), gone = emptySet(), loaded = setOf(5), last = 6,
+            ),
+        )
+    }
+
+    /* the one shape a pagination over-read takes: a single trailing page
+       that answered a real 404 — the full read forgives exactly this, and
+       the resumed read must not be stricter or every over-reading novel
+       loses its shortcut for good */
+    @Test
+    fun `a single trailing 404 is the over-read and is forgiven`() {
+        assertTrue(
+            Resume.tailComplete(
+                missed = setOf(6), gone = setOf(6), loaded = setOf(5), last = 6,
+            ),
+        )
+    }
+
+    @Test
+    fun `two trailing 404s are a gap, not a miscount`() {
+        assertFalse(
+            Resume.tailComplete(
+                missed = setOf(6, 7), gone = setOf(6, 7), loaded = setOf(5), last = 7,
+            ),
+        )
+    }
+
+    @Test
+    fun `a hole before the last real page is never forgiven`() {
+        assertFalse(
+            Resume.tailComplete(
+                missed = setOf(5), gone = setOf(5), loaded = setOf(4, 6), last = 6,
+            ),
+        )
+    }
+
+    @Test
+    fun `a fully read tail passes`() {
+        assertTrue(
+            Resume.tailComplete(
+                missed = emptySet(), gone = emptySet(), loaded = setOf(5, 6), last = 6,
+            ),
+        )
+    }
 }

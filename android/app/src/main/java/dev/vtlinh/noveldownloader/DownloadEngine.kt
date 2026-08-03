@@ -197,15 +197,12 @@ class DownloadEngine(
     }
 
     /* The site's own number for a chapter, used for the heading written
-       inside the file. A link the site doesn't number — its own typo, or an
-       unnumbered extra like an interlude — takes the number of the last
-       numbered chapter ahead of it, which is where the page puts it.
+       inside the file. The rule lives in Renumber.headingNumbers (and says
+       why a leading unnumbered chapter takes its position rather than 0).
        Nothing about the FILE depends on this any more. */
     private fun numberByPosition(inSiteOrder: List<Chapter>) {
-        var last: Int? = null
-        for (ch in inSiteOrder) {
-            if (ch.num != null) last = ch.num else ch.num = last
-        }
+        val nums = Renumber.headingNumbers(inSiteOrder.map { it.num })
+        for ((i, ch) in inSiteOrder.withIndex()) ch.num = nums[i]
     }
 
     /* Bring the files into the page's order: the chapter at listing position
@@ -622,8 +619,7 @@ class DownloadEngine(
                        "translated/Chapter 900.txt" matched nothing here and
                        left the translation orphaned — a file the reader hides,
                        the sweeps ignore, and the next chapter to take that
-                       name inherits. purgeUnreferenced already keys on the
-                       base; this is the same rule.
+                       name inherits.
 
                        Anything handOver moved is already gone from this name,
                        so this only reaches what it left behind. */
@@ -690,21 +686,30 @@ class DownloadEngine(
             log("! the site's list is missing $unlisted of the $identified chapters we have on record")
             log("! that is too much to be chapters the site removed — keeping them all until it reads correctly")
         }
+        /* which extras carry a translation — those are the ones whose
+           deletion destroys something money bought and nothing can rebuild */
+        val translatedBases: Set<String> = translatedId?.let { tid ->
+            Saf.children(cr, treeUri, tid).filter { !it.isDir }
+                .mapTo(HashSet()) { it.name.removeSuffix(".gz") }
+        } ?: emptySet()
         var dropped = 0
         var suspect = 0
         for (x in extras) {
             /* a page from another host tells us nothing about this listing —
                fall through to the content check rather than the identity one */
             val from = fileUrl[x.base]?.takeIf { comparable(it) }
-            if (from != null && from !in listedUrls) {
+            val delisted = from != null && from !in listedUrls
+            if (delisted && !trustDrops) { suspect++; continue }
+            if (delisted && x.base !in translatedBases) {
                 /* We know exactly which chapter this is, and the site no
                    longer lists it. Not a mystery and not a duplicate — a
                    chapter that has been removed, so its file goes with it.
-                   No content check: identity already answered the question. */
-                if (!trustDrops) { suspect++; continue }
-                if (remove(x)) { dropped++; continue }
+                   No content check: identity already answered the question,
+                   and being wrong costs one re-download, nothing more. */
+                if (remove(x)) dropped++ else kept++
+                continue
             }
-            if (from != null) {
+            if (!delisted && from != null) {
                 /* Its chapter IS listed, so the file is live — the rename
                    pass just couldn't place it (a name still held, most
                    likely). Leave it; next run it moves. */
@@ -712,10 +717,26 @@ class DownloadEngine(
                 log("  kept, still listed but not yet in place: ${x.name}")
                 continue
             }
+            /* Reached with no recorded page — or de-listed but TRANSLATED.
+               For the second kind identity is not enough: a site that
+               re-slugs a chapter in place looks exactly like a removal, and
+               the English filed under this name is paid for and cannot be
+               rebuilt. Only a text match may remove it, because that is also
+               what hands the translation to the chapter that owns it; a
+               translated file matching nothing stays, and the next download
+               settles it — the re-slugged chapter arrives under its listed
+               name, the twin match fires, and the handover happens then. */
             val candidates = nearBySize(x.size)
             val xh = if (candidates.isEmpty()) null else bodyHash(x)
             val twin = if (xh == null) null else candidates.firstOrNull { bodyHash(it) == xh }
-            if (twin == null) { kept++; log("  extra kept (text found nowhere else): ${x.name}"); continue }
+            if (twin == null) {
+                kept++
+                log(
+                    if (delisted) "  kept, no longer listed but translated — leaving it for a download to settle: ${x.name}"
+                    else "  extra kept (text found nowhere else): ${x.name}",
+                )
+                continue
+            }
             /* same bytes as a chapter we're keeping — drop the copy, after
                giving that chapter this one's translation */
             if (remove(x, twin.base)) removed++
@@ -725,56 +746,6 @@ class DownloadEngine(
         if (suspect > 0) log("$suspect file(s) the list didn't mention were kept — the list looks wrong, not the files")
         if (kept > 0) log("$kept file(s) left alone — see above for why")
         return kept + suspect
-    }
-
-    /* After a forced full re-download every listed chapter is on disk under
-       its assigned name, verified by the download itself. At that point a
-       chapter file nothing points at isn't a maybe-duplicate — it is simply
-       not part of the novel any more, and can go without inspecting its
-       text. This is the only place that deletes on "unreferenced" alone,
-       and it is only reachable once the fetch has proved the alternative. */
-    private fun purgeUnreferenced(
-        treeUri: Uri,
-        dir: DocumentFile,
-        store: DownloadStore,
-        folderKey: String,
-        slug: String,
-        assigned: Set<String>,
-    ): Int {
-        val cr = context.contentResolver
-        val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return 0 }
-        val re = ChapterListActivity.CHAPTER_RE
-        var translatedId: String? = null
-        val doomed = ArrayList<Pair<String, String>>()      // name -> docId
-        for (e in Saf.children(cr, treeUri, dirId)) {
-            if (e.isDir) { if (e.name == "translated") translatedId = e.docId; continue }
-            val base = e.name.removeSuffix(".gz")
-            if (re.matches(base) && base !in assigned) doomed.add(Pair(base, e.docId))
-        }
-        if (doomed.isEmpty()) return 0
-        val translated = HashMap<String, String>()
-        translatedId?.let { id ->
-            for (e in Saf.children(cr, treeUri, id)) if (!e.isDir) translated[e.name.removeSuffix(".gz")] = e.docId
-        }
-        var gone = 0
-        for ((base, docId) in doomed) {
-            val ok = try {
-                DocumentsContract.deleteDocument(
-                    cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
-                )
-            } catch (e: Exception) { false }
-            if (!ok) continue
-            translated[base]?.let { tid ->
-                try {
-                    DocumentsContract.deleteDocument(
-                        cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, tid),
-                    )
-                } catch (e: Exception) {}
-            }
-            store.removeChapter(folderKey, slug, base)
-            gone++
-        }
-        return gone
     }
 
     /* Is the chapter already at this name the SAME CHAPTER we just fetched?
@@ -1204,21 +1175,28 @@ class DownloadEngine(
         val tail = LinkedHashMap<String, String>()
         var lastChapterPage = point.page
         var chaptersBeforePage = point.before
-        /* Pages in the tail that answered but held no chapters. A page can
-           fail without failing — 200 carrying a "not found" body, a WAF
-           interstitial, a layout the selectors no longer match — and past the
-           end of the pagination that is the ordinary shape of an over-read.
-           Which of the two it is only becomes clear once the whole tail has
-           been read: see the check below the loop. */
-        val blank = ArrayList<Int>()
+        /* The tail is judged by the FULL read's rule — Resume.tailComplete,
+           which is Listing.forgivableTailPages verbatim: a page that did not
+           yield chapters is a hole unless it is a single trailing genuine
+           404, the one shape a pagination over-read takes. This pass had a
+           private, weaker rule at first — any run of blank pages accepted as
+           long as it trailed the last page with links — and a throttle page
+           served as 200-with-nothing is exactly what lands there: the tail
+           came back short, the splice still lined up, and the site's new
+           chapters read as "up to date" (or worse, the novel latched
+           complete at the short count and left every future sweep). */
+        val missed = LinkedHashSet<Int>()
+        val gone = HashSet<Int>()
+        val loaded = HashSet<Int>()
         fun take(p: Int, d: org.jsoup.nodes.Document): Boolean {
             val found = Listing.collect(d, site, slug)
             if (found.fellBack) return false
             val before = tail.size
             for ((href, text) in found.links) if (!tail.containsKey(href)) tail[href] = text
             if (found.links.isEmpty()) {
-                blank.add(p)
+                missed.add(p)
             } else {
+                loaded.add(p)
                 lastChapterPage = p
                 chaptersBeforePage = point.before + before
             }
@@ -1235,36 +1213,40 @@ class DownloadEngine(
         while (fetched < last) {
             val batch = ((fetched + 1)..last).toList()
             val htmls = arrayOfNulls<String>(batch.size)
+            val codes = IntArray(batch.size)
             coroutineScope {
                 val sem = Semaphore(10)
                 for ((i, p) in batch.withIndex()) {
-                    launch { sem.withPermit { htmls[i] = fetch(site.listPageUrl(base, slug, p)).html } }
+                    launch {
+                        sem.withPermit {
+                            val r = fetch(site.listPageUrl(base, slug, p))
+                            htmls[i] = r.html
+                            codes[i] = r.status
+                        }
+                    }
                 }
             }
             for ((i, html) in htmls.withIndex()) {
-                /* A page that would not load leaves a hole, and a hole in the
-                   TAIL is the one place a splice cannot survive: the chapters
-                   after it would be named a page early. `checkStatus` forgives
-                   a single 404 past the end of the pagination because it can
-                   see the whole listing and judge; this cannot, so it hands
-                   the novel over rather than guess. */
-                if (html == null) return@withContext null
+                val p = batch[i]
+                if (html == null) {
+                    /* A hole in the tail is the one place a splice cannot
+                       survive: the chapters after it would be named a page
+                       early. Recorded like the full read records it —
+                       `gone` only on a genuine 404 — and judged whole,
+                       below, once the loop knows whether anything real
+                       followed. */
+                    missed.add(p)
+                    if (codes[i] == 404 || codes[i] == 410) gone.add(p)
+                    continue
+                }
                 val d = Jsoup.parse(html, base)
-                if (!take(batch[i], d)) return@withContext null
+                if (!take(p, d)) return@withContext null
                 last = maxOf(last, site.maxPage(d, slug))
             }
             fetched = batch.last()
         }
-        /* A blank page with a real one AFTER it is a hole in the middle of the
-           tail, not the page count over-reading — and a hole moves every
-           chapter past it up a page. Where those chapters are ones the recorded
-           listing already knows, the splice below catches it; where they are
-           all NEW they sit past the end of the recorded listing, so nothing
-           would compare them against anything and they would be named a page
-           early. A blank page after the last real one is the ordinary
-           over-read and costs nothing. */
-        if (blank.any { it < lastChapterPage }) {
-            log("· $slug: listing page ${blank.first { it < lastChapterPage }} came back with no chapters on it — reading the list in full")
+        if (!Resume.tailComplete(missed, gone, loaded, last)) {
+            log("· $slug: listing page ${missed.first()} would not read — reading the list in full")
             return@withContext null
         }
         val spliced = Resume.splice(recorded, point.before, tail.keys.toList())
@@ -2052,13 +2034,21 @@ class DownloadEngine(
            this run (nothing failed, nothing stopped). */
         val allOnDisk = !stopRequested && failed.isEmpty()
         /* The re-fetch has just written every listed chapter under its own
-           name, so what remains unclaimed is settled: not part of the novel.
-           Only trust that if the fetch actually finished — a stopped or
-           partly-failed run proves nothing, and the guarded pass keeps
-           looking after those files instead. */
+           name, so run the dedupe AGAIN over what remains unclaimed. Before
+           the fetch those files matched nothing because nothing sat at the
+           assigned names to match them against; now their twins are on disk,
+           so a legacy file is recognised by its text and removed with its
+           translation HANDED OVER to the chapter that owns it. This used to
+           be a purge that deleted every unclaimed file — and its translation
+           — without looking: for a library saved under the old naming scheme
+           with no recorded pages, that destroyed the whole novel's paid
+           English and re-bought it in the same run, one step before the
+           translator found translated/ empty. What still matches nothing is
+           now KEPT, not purged — a file we cannot explain is not a file we
+           may destroy. Only when the fetch actually finished: a stopped or
+           partly-failed run proves nothing. */
         if (refetchAll && allOnDisk && listingComplete) {
-            val gone = purgeUnreferenced(treeUri, dir, store, folderKey, slug, assigned)
-            if (gone > 0) log("removed $gone file(s) the novel no longer contains")
+            dedupeExtras(treeUri, dir, store, folderKey, slug, assigned, listedUrls)
         }
         try {
             /* a count taken from a partial listing would mark the novel

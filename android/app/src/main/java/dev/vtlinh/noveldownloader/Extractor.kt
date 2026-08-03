@@ -10,8 +10,22 @@ import java.text.Normalizer
    a lock notice), single-newline output, heading dedup, and quoting the raw
    content when extraction comes up empty. */
 object Extractor {
+    /* Three of these used to be bare everyday phrases — "mở khóa" (unlock),
+       "vui lòng" (please), "please report" — and a line of PROSE containing
+       one was deleted from the saved file: measured over the 150 captured
+       chapter pages, four real sentences died this way ("mở khóa màn hình"
+       unlocking a phone, a bulletin-board post saying "please report to the
+       student council", a consort being pleased). The file on disk is the
+       only copy, so the loss is permanent and invisible — and the paid
+       translation is bought for the mutilated text. Each is now anchored to
+       the furniture shape it was actually catching: unlock-a-CHAPTER, the
+       please-DO-something imperative, and Royal Road's "please report it"
+       watermark. The 46 furniture lines in the same corpus all still match
+       (they carry find-any-errors / report-chapter besides). */
     private val AD_RE = Regex(
-        "(CLICK\\s*ADS|quảng cáo|mở khóa|truyenfull|đọc truyện online|ủng hộ dịch giả|Vui lòng|Mời bạn|novelfull|find any errors|broken links|non-standard content|report chapter|please report)",
+        "(CLICK\\s*ADS|quảng cáo|mở\\s*khóa\\s*(chương|chapter|vip)|truyenfull|đọc truyện online" +
+            "|ủng hộ dịch giả|vui lòng\\s+(đọc|báo|tắt|bật|đăng|truy cập|click|bấm|chọn|ủng hộ|chờ)" +
+            "|Mời bạn|novelfull|find any errors|broken links|non-standard content|report chapter|please report it)",
         RegexOption.IGNORE_CASE,
     )
     private val JUNK_CLASS_RE = Regex("(^|[^a-z])(ads?|banner|notice|lock(ed)?|unlock)([^a-z]|$)", RegexOption.IGNORE_CASE)

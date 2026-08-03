@@ -138,6 +138,27 @@ object Resume {
         )
     }
 
+    /* May a resumed read trust its tail, given how each page answered?
+
+       `missed` is every tail page that did not yield chapters — no answer,
+       a hard 404, or a 200 whose body held no chapter list. `gone` is the
+       subset that answered a real 404/410; `loaded` the pages that yielded
+       chapters; `last` the highest page the pagination names.
+
+       The rule is the FULL read's rule, borrowed whole: only a single
+       trailing page that answered a genuine 404 may be written off as the
+       pagination over-reading (Listing.forgivableTailPages); everything else
+       missing means the tail was not really read. The first version of the
+       resumed check had its own weaker rule — any number of blank pages
+       accepted as long as they trailed the last page with links — and a
+       throttle page served as 200-with-nothing is exactly what lands there:
+       the tail came back short, the splice still lined up, and the site's
+       new chapters were reported as "up to date". With the finished flag in
+       the same answer, the novel was marked complete at the short count and
+       dropped out of every future sweep. */
+    fun tailComplete(missed: Set<Int>, gone: Set<Int>, loaded: Set<Int>, last: Int): Boolean =
+        (missed - Listing.forgivableTailPages(missed, gone, loaded, last).toSet()).isEmpty()
+
     /* The first page is read on every check whatever the resume point — it is
        the novel page, and it carries the finished flag, the author and the
        page count. Its chapter links are then free evidence about the OTHER

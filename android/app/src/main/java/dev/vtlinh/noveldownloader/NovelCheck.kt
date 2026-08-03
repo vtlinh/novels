@@ -15,6 +15,15 @@ import android.content.Intent
    be a second chance to get them wrong. */
 object NovelCheck {
 
+    /* Novels a check is running on RIGHT NOW, keyed like DownloadService's
+       busy set. checkStatus renames files by listing position and deletes
+       what the listing doesn't name; two of those interleaving on one folder
+       renumber it against each other. The engine's own isBusy re-ask guards
+       check-vs-download — this guards check-vs-check, which became reachable
+       the moment the settings screen got its own Check button alongside the
+       Library's sweep. */
+    private val checking = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     /* Chapters of this novel on this device.
 
        The cached resolved listing when there is one — it is a real directory
@@ -62,6 +71,23 @@ object NovelCheck {
        folder-scanned row it is derived from the folder NAME, and these sites
        tell same-titled books apart with a numeric suffix. */
     suspend fun one(
+        engine: DownloadEngine,
+        store: DownloadStore,
+        folder: String,
+        rec: NovelRec,
+        display: String,
+        local: Int,
+    ): Result? {
+        val key = Ownership.normKey(rec.slug)
+        if (!checking.add(key)) return null   // a check is already on it — skip, don't stack
+        try {
+            return oneExclusive(engine, store, folder, rec, display, local)
+        } finally {
+            checking.remove(key)
+        }
+    }
+
+    private suspend fun oneExclusive(
         engine: DownloadEngine,
         store: DownloadStore,
         folder: String,
@@ -144,11 +170,17 @@ object NovelCheck {
 
     /* Queue this novel for download. The service lines it up behind whatever
        is already running, so calling this for several novels in a sweep just
-       fills the queue. */
-    fun startDownload(context: Context, url: String) {
+       fills the queue.
+
+       False when the START ITSELF was refused, which the caller must say
+       rather than reporting success: from API 31 a foreground service cannot
+       be started while the app is in the background, and a check long enough
+       to background the app during is exactly when this fires — the screen
+       then said "downloading" over a download that never began. */
+    fun startDownload(context: Context, url: String): Boolean {
         val p = context.getSharedPreferences("app", Context.MODE_PRIVATE)
-        val tree = p.getString("tree", null) ?: return
-        try {
+        val tree = p.getString("tree", null) ?: return false
+        return try {
             context.startForegroundService(
                 Intent(context, DownloadService::class.java)
                     .putExtra("url", url)
@@ -158,8 +190,10 @@ object NovelCheck {
                     .putExtra("translate", p.getBoolean("translate", false))
                     .putExtra("apiKey", p.getString("apiKey", "") ?: ""),
             )
+            true
         } catch (e: Exception) {
             DownloadService.appendLog("Could not start the download — ${e.message}")
+            false
         }
     }
 }

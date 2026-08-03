@@ -73,6 +73,35 @@ class SitesTest {
     fun `a chapter number is read from the url`() {
         assertEquals(100, truyenfull.chapterNumFromUrl("https://truyenfull.today/tu-tien/chuong-100/"))
     }
+    /* ---- the busy-key (Sites.slugKey) ---- */
+
+    /* The two halves of every "is this novel busy?" test: the service
+       publishes slugKey(url), the guards ask with normKey(slug). They must
+       agree per site, and for truyenfullmoi they did not — the novel URL
+       ends "<slug>.<id>", the heuristic key carried the id, and every guard
+       was dead for that site: Check status renamed files under a live
+       download, and the delete flows would empty a folder the engine was
+       writing into. */
+    @Test
+    fun `the busy key equals the normalized slug for every site`() {
+        val urls = mapOf(
+            "https://truyenfull.today/so-13-pho-mink/" to "so-13-pho-mink",
+            "https://www.truyenfullmoi.com/so-13-pho-mink.1666/" to "so-13-pho-mink",
+            "https://novelfull.com/the-kings-avatar.html" to "the-kings-avatar",
+            "https://readnovel.me/novel3043-gunsoul.html" to "novel3043-gunsoul",
+            "https://freewebnovel.com/novel/the-kings-avatar" to "the-kings-avatar",
+        )
+        for ((url, slug) in urls) {
+            assertEquals(url, Ownership.normKey(slug), Sites.slugKey(url))
+        }
+    }
+
+    /* a URL no site claims still yields a stable key — nothing can download
+       from one, so no guard needs it, but it must not throw */
+    @Test
+    fun `an unclaimed url falls back to the path heuristic`() {
+        assertEquals("somebook", Sites.slugKey("https://example.com/some-book.html"))
+    }
 }
 
 /* The pattern that decides whether a file in the folder is a chapter at all.
@@ -194,4 +223,5 @@ class ChapterNameTest {
         assertFalse(re.matches("cover.jpg"))
         assertFalse(re.matches("notes.txt"))
     }
+
 }
