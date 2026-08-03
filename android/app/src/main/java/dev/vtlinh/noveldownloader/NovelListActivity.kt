@@ -36,11 +36,10 @@ class NovelListActivity : AppCompatActivity() {
            MainActivity checks this before re-downloading such a novel. */
         const val GARBAGE_KEY = "garbageSlugs"
 
-        /* normalized slug key from a novel URL: last path segment, ".html"
-           stripped, letters+digits only — matches normKey(rec.slug) */
-        fun slugKeyFromUrl(url: String): String =
-            url.trimEnd('/').substringAfterLast('/').removeSuffix(".html")
-                .lowercase().filter { it.isLetterOrDigit() }
+        /* the rule lives in Sites.slugKey — which says why it must go through
+           the site's own normalize() — so it can be tested without loading an
+           Activity; kept here because every call site already reads it here */
+        fun slugKeyFromUrl(url: String): String = Sites.slugKey(url)
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -222,6 +221,22 @@ class NovelListActivity : AppCompatActivity() {
                 try { store.setDiskCount(folder, win.slug, lose.diskCount) } catch (e: Exception) {}
             }
             if (lose.url.isEmpty()) {
+                /* The settings travel too. They are the same novel, so the
+                   loser's "never translate" or auto-download answer is the
+                   winner's — set on the folder-scanned row before the site
+                   row appeared, and deleting the row without carrying them
+                   silently reverted the novel to the app-wide switch, which
+                   for translate is a money decision. Only onto a winner that
+                   has no explicit answer of its own: the newest explicit
+                   choice wins. */
+                try {
+                    if (lose.translate != null && win.translate == null) {
+                        store.setTranslate(folder, win.slug, lose.translate)
+                    }
+                    if (lose.autoDownload && !win.autoDownload) {
+                        store.setAutoDownload(folder, win.slug, true)
+                    }
+                } catch (e: Exception) {}
                 /* Hand the folder over before the row goes. They are the same
                    novel, so the loser's directory IS the winner's — but the
                    claim lives in folder_owner keyed on the losing slug, and
@@ -876,9 +891,14 @@ class NovelListActivity : AppCompatActivity() {
                     }
                 }
             }
-            for (u in fetch.toList()) NovelCheck.startDownload(this@NovelListActivity, u)
-            status.text = "Status checked (${targets.size} novel(s))." +
-                if (fetch.isEmpty()) "" else " Downloading ${fetch.size} with new chapters."
+            val started = fetch.toList().count { NovelCheck.startDownload(this@NovelListActivity, it) }
+            status.text = "Status checked (${targets.size} novel(s))." + when {
+                fetch.isEmpty() -> ""
+                started == fetch.size -> " Downloading $started with new chapters."
+                /* from the background the service start is refused — say so
+                   rather than reporting downloads that never began */
+                else -> " $started of ${fetch.size} downloads started — the rest were refused; open the app and check again."
+            }
             btn.isEnabled = true
             render()
         }

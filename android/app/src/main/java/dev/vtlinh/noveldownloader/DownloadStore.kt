@@ -176,6 +176,14 @@ class DownloadStore(context: Context) :
                 "UPDATE novels SET disk_count=? WHERE folder=? AND slug=?",
                 arrayOf(list.ordered.size, folder, slug),
             )
+            /* Ask AGAIN, inside the transaction. The check at the top runs
+               before beginTransaction, so a clear that lands entirely in
+               that gap — bump and DELETE both done before our writes start —
+               was overwritten by this insert, and nothing would invalidate
+               the resurrected listing again. The epoch bump is in-memory and
+               immediate, so a second read here closes the window: a clear
+               that starts after this point deletes our rows itself. */
+            if (seenEpoch >= 0 && seenEpoch != chapterListEpoch(folder, slug)) return
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -403,9 +411,21 @@ class DownloadStore(context: Context) :
         return out
     }
 
-    /* One novel's row, for the screens that hold a slug rather than a list. */
+    /* One novel's row, for the screens that hold a slug rather than a list.
+
+       Matched exactly first, then by normKey. Slugs drift in punctuation —
+       the folder scan derives "library-of-heaven-s-path" from a directory
+       name where the site says "library-of-heavens-path" — and this lookup
+       decides real money: translateFor reads the per-novel translate
+       override through it, so a string-equal miss silently reverted a novel
+       the user marked "never translate" to the app-wide switch. Ownership
+       and the Library's duplicate merge already compare slugs this way; a
+       lookup that doesn't is one of the two halves drifting. */
     fun novel(folder: String, slug: String): NovelRec? =
-        novels(folder).firstOrNull { it.slug == slug }
+        novels(folder).let { all ->
+            all.firstOrNull { it.slug == slug }
+                ?: all.firstOrNull { Ownership.normKey(it.slug) == Ownership.normKey(slug) }
+        }
 
     /* ---- per-novel settings ---- */
 

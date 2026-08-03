@@ -152,14 +152,22 @@ class NovelSettingsActivity : AppCompatActivity() {
 
     /* ---- the two switches ---- */
 
+    /* Both checkbox writes run NonCancellable: lifecycleScope dies with the
+       screen, and a tick followed immediately by Back was cancelled before
+       the write dispatched — the setting silently not saved, showing its old
+       value on the next open. */
+    private fun persist(write: () -> Unit) {
+        lifecycleScope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+            try { write() } catch (e: Exception) {}
+        }
+    }
+
     private fun bindAutoDownload(folder: String, state: State) {
         val box = findViewById<CheckBox>(R.id.autoDownloadCheck)
         box.setOnCheckedChangeListener(null)
         box.isChecked = state.rec?.autoDownload == true
         box.setOnCheckedChangeListener { _, checked ->
-            lifecycleScope.launch(Dispatchers.IO) {
-                try { store.setAutoDownload(folder, slug, checked) } catch (e: Exception) {}
-            }
+            persist { store.setAutoDownload(folder, slug, checked) }
         }
     }
 
@@ -188,21 +196,34 @@ class NovelSettingsActivity : AppCompatActivity() {
             else -> false
         }
         val allTranslated = state.chapters > 0 && state.translated >= state.chapters
-        box.isEnabled = !english && !allTranslated
+        /* Untouchable only when there is genuinely nothing this switch can
+           ever do — an English novel. "Every chapter is translated already"
+           must NOT disable it: the stored ON is what buys every chapter the
+           site adds from here on, and a caught-up novel is exactly the
+           moment a reader decides it costs too much. Greying the box out
+           there locked them into unbounded spend with no way to say stop. */
+        box.isEnabled = !english
         box.alpha = if (box.isEnabled) 1f else 0.5f
         note.text = when {
             english -> "This novel is already in English — there is nothing to translate."
             allTranslated ->
-                "Every chapter is translated already. This turns itself back on " +
-                    "when the site adds chapters that aren't."
+                "Every chapter is translated already — this decides the chapters " +
+                    "the site adds from now on. Chapters go through Claude, billed " +
+                    "to your Anthropic API key."
             else ->
                 "Overrides the app-wide translation switch for this novel. Chapters go " +
                     "through Claude, which is billed to your Anthropic API key."
         }
         box.setOnCheckedChangeListener { _, checked ->
-            lifecycleScope.launch(Dispatchers.IO) {
-                try { store.setTranslate(folder, slug, checked) } catch (e: Exception) {}
+            /* the one translate toggle with no key gate: ticking it with no
+               key saved makes translation silently do nothing — the exact
+               failure the Settings screen's save-on-pause was written to
+               close. Say so; the tick still stores (it is a per-novel answer,
+               not a key). */
+            if (checked && (prefs.getString("apiKey", "") ?: "").isBlank()) {
+                status("Set your Anthropic API key in Settings, or nothing will translate.")
             }
+            persist { store.setTranslate(folder, slug, checked) }
         }
     }
 
@@ -243,8 +264,11 @@ class NovelSettingsActivity : AppCompatActivity() {
             when {
                 res.missing <= 0 -> status("Up to date — ${res.total} chapters$how.")
                 auto -> {
-                    NovelCheck.startDownload(this@NovelSettingsActivity, res.url)
-                    status("${res.missing} new chapter(s)$how — downloading.")
+                    if (NovelCheck.startDownload(this@NovelSettingsActivity, res.url)) {
+                        status("${res.missing} new chapter(s)$how — downloading.")
+                    } else {
+                        status("${res.missing} new chapter(s)$how — the download would not start; try again with the app open.")
+                    }
                 }
                 else -> status("${res.missing} chapter(s) missing$how — turn on auto-download, or use Download in the Library.")
             }
@@ -272,33 +296,72 @@ class NovelSettingsActivity : AppCompatActivity() {
     private fun redownload() {
         val folder = this.folder ?: return
         val rec = this.rec ?: return
+        /* the confirm dialog checks `busy` too, but it can already be on
+           screen when something else sets it — the guard has to sit on the
+           ACTION, or two confirmed dialogs run the wipe twice */
+        if (busy) return
         if (DownloadService.isBusy(Ownership.normKey(slug))) {
             status("This novel is downloading already.")
+            return
+        }
+        if (CompressService.runningFlow.value) {
+            /* the compress pass is rewriting files in this tree; deleting
+               from a snapshot while it converts leaves a fresh .gz the
+               delete never saw, which the re-download then skips as already
+               present — a stale chapter surviving a "delete everything" */
+            status("Novels are being compressed right now — try again when that finishes.")
             return
         }
         setBusy(true)
         status("Deleting chapters…")
         lifecycleScope.launch {
-            val wiped = withContext(Dispatchers.IO) { deleteChapters(folder) }
-            if (!wiped.dir) {
+            /* NonCancellable from the first delete to the last record write.
+               This block destroys files and then repairs the records that
+               describe them; cancelled between the two — Back, a rotation —
+               it left the files gone and the database still claiming the
+               novel complete, so the Library showed "N/N chapters" with no
+               Download button over an empty folder. Once the deleting
+               starts, the bookkeeping must finish. */
+            val outcome = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                /* the recorded directory, re-read at action time — the intent
+                   extra was computed when the chapter list opened, possibly
+                   hours ago, and for a novel whose folder was never recorded
+                   it is a GUESS from the title: for two novels whose titles
+                   sanitise alike, the other novel's folder */
+                val dirNow = try { store.dirNameFor(folder, slug) } catch (e: Exception) { null } ?: dirName
+                val wiped = deleteChapters(folder, dirNow)
+                if (wiped.dir) {
+                    /* This directory demonstrably exists and holds this
+                       novel — record that BEFORE clearing the index, because
+                       the clear destroys the "my chapters are here" evidence
+                       Ownership falls back on when nothing was ever
+                       recorded. Without it the re-download computed a fresh
+                       folder name and built a second directory beside the
+                       emptied one. */
+                    try { store.setDirName(folder, slug, dirNow) } catch (e: Exception) {}
+                    try { store.claimFolderNameIfFree(folder, dirNow, slug) } catch (e: Exception) {}
+                    /* The index describes files that are no longer there,
+                       and the resume point describes a listing we are about
+                       to read again from the start. Both go, so nothing
+                       downstream can act on a record of a novel that has
+                       just been emptied. The folder itself and its ownership
+                       records STAY: they are what send the download back
+                       into this directory rather than beside it. */
+                    try { store.clear(folder, slug) } catch (e: Exception) {}
+                    try { store.setChapterOrder(folder, slug, emptyList()) } catch (e: Exception) {}
+                    try { store.setResumePoint(folder, slug, null) } catch (e: Exception) {}
+                    try { store.setDiskCount(folder, slug, 0) } catch (e: Exception) {}
+                    try { store.updateNovelCheck(folder, slug, -1, false) } catch (e: Exception) {}
+                }
+                wiped
+            }
+            if (!outcome.dir) {
                 setBusy(false)
                 status("Couldn't open this novel's folder — nothing was deleted.")
                 return@launch
             }
-            val gone = wiped.gone
-            withContext(Dispatchers.IO) {
-                /* The index describes files that are no longer there, and the
-                   resume point describes a listing we are about to read again
-                   from the start. Both go, so nothing downstream can act on a
-                   record of a novel that has just been emptied. The folder
-                   itself and its ownership records STAY: they are what send
-                   the download back into this directory rather than beside it. */
-                try { store.clear(folder, slug) } catch (e: Exception) {}
-                try { store.setChapterOrder(folder, slug, emptyList()) } catch (e: Exception) {}
-                try { store.setResumePoint(folder, slug, null) } catch (e: Exception) {}
-                try { store.setDiskCount(folder, slug, 0) } catch (e: Exception) {}
-                try { store.updateNovelCheck(folder, slug, -1, false) } catch (e: Exception) {}
-            }
+            val gone = outcome.gone
+            val wiped = outcome
             status("Deleted $gone file(s). Reading the chapter list…")
             /* A full check, deliberately — there is no resume point left to
                use, and this is the one moment the novel's totals and order are
@@ -361,11 +424,11 @@ class NovelSettingsActivity : AppCompatActivity() {
        then finds sitting at a listed chapter's name, skips as already present,
        and leaves in place — the one chapter of a re-download that did not get
        re-downloaded, with nothing said about it. */
-    private fun deleteChapters(folder: String): Deleted {
+    private fun deleteChapters(folder: String, dirNow: String): Deleted {
         val treeUri = Uri.parse(folder)
         val dir = try {
             Saf.children(contentResolver, treeUri, Saf.rootId(treeUri))
-                .firstOrNull { it.isDir && it.name == dirName }
+                .firstOrNull { it.isDir && it.name == dirNow }
         } catch (e: Exception) { null } ?: return Deleted(false, 0, 0)
         val kids = try {
             Saf.children(contentResolver, treeUri, dir.docId)
