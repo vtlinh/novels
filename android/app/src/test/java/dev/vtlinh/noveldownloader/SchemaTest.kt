@@ -316,6 +316,47 @@ class SchemaTest {
         }
     }
 
+    /* The per-novel settings arrive in v20 and every one of them defaults to
+       "what the app did before": auto-download off, translation following the
+       app-wide switch, and no resume point.
+
+       The middle one is the one worth pinning. `translate` is THREE-state —
+       -1 follow, 0 never, 1 always — and a column that defaulted to 0 would
+       read as "never translate this novel", silently switching translation
+       off for an entire existing library on upgrade. */
+    @Test
+    fun `an existing novel upgrades with its settings unset`() {
+        for (v in 5..19) {
+            open().use { c ->
+                at(v, c)
+                c.createStatement().use {
+                    it.execute(
+                        "INSERT INTO novels(folder,slug,url,title,started) " +
+                            "VALUES('f','than-y','https://site/than-y/','Thần Y',1)",
+                    )
+                }
+                Schema.upgrade(Jdbc(c), v)
+                c.createStatement().use { s ->
+                    s.executeQuery(
+                        "SELECT auto_dl, translate, resume_page, resume_url, resume_before " +
+                            "FROM novels WHERE slug='than-y'",
+                    ).use { r ->
+                        assertTrue("upgrading from v$v lost the novel", r.next())
+                        assertEquals("upgrading from v$v: auto-download", 0, r.getInt(1))
+                        assertEquals(
+                            "upgrading from v$v: translation must FOLLOW the app-wide " +
+                                "switch, not be turned off",
+                            -1, r.getInt(2),
+                        )
+                        assertEquals("upgrading from v$v: resume page", 0, r.getInt(3))
+                        assertEquals("upgrading from v$v: resume url", "", r.getString(4))
+                        assertEquals("upgrading from v$v: resume prefix", 0, r.getInt(5))
+                    }
+                }
+            }
+        }
+    }
+
     /* Anything older than v4 is rebuilt rather than migrated, and that is a
        deliberate data loss — it is all cache and index. It has to actually
        leave a working current schema behind, though. */

@@ -38,6 +38,13 @@ data class NovelRec(
     val diskCount: Int,  // chapters counted on disk at scan time (for unindexed novels)
     val lastDl: Long,    // when it last downloaded (0 = unknown/legacy)
     val lastRead: Long,  // when it was last opened in the reader (0 = never)
+    /* per-novel settings — see NovelSettingsActivity */
+    val autoDownload: Boolean = false,
+    /* translate this novel: null follows the app-wide switch */
+    val translate: Boolean? = null,
+    /* where the last full read of the listing ended, for a check that resumes
+       rather than paging through the whole thing (see Resume) */
+    val resume: Resume.Point? = null,
 )
 
 /* a cached, fully-resolved chapter listing (DownloadStore.chlist): filenames
@@ -365,21 +372,76 @@ class DownloadStore(context: Context) :
         val out = ArrayList<NovelRec>()
         readableDatabase.query(
             "novels",
-            arrayOf("slug", "url", "title", "started", "total", "complete", "author", "disk_count", "last_dl", "last_read"),
+            arrayOf(
+                "slug", "url", "title", "started", "total", "complete", "author", "disk_count",
+                "last_dl", "last_read", "auto_dl", "translate",
+                "resume_page", "resume_url", "resume_before",
+            ),
             "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
             while (c.moveToNext()) {
+                val page = c.getInt(12)
                 out.add(
                     NovelRec(
                         c.getString(0), c.getString(1) ?: "", c.getString(2) ?: "",
                         c.getString(6) ?: "",
                         c.getLong(3), c.getInt(4), c.getInt(5) != 0, c.getInt(7), c.getLong(8),
                         c.getLong(9),
+                        autoDownload = c.getInt(10) != 0,
+                        /* -1 is "follow the app-wide switch", which is not the
+                           same as off — see Schema */
+                        translate = c.getInt(11).let { if (it < 0) null else it != 0 },
+                        resume = if (page > 0) {
+                            Resume.Point(page, c.getString(13) ?: "", c.getInt(14))
+                        } else {
+                            null
+                        },
                     ),
                 )
             }
         }
         return out
+    }
+
+    /* One novel's row, for the screens that hold a slug rather than a list. */
+    fun novel(folder: String, slug: String): NovelRec? =
+        novels(folder).firstOrNull { it.slug == slug }
+
+    /* ---- per-novel settings ---- */
+
+    fun setAutoDownload(folder: String, slug: String, on: Boolean) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET auto_dl=? WHERE folder=? AND slug=?",
+            arrayOf(if (on) 1 else 0, folder, slug),
+        )
+    }
+
+    /* null puts the novel back on the app-wide switch */
+    fun setTranslate(folder: String, slug: String, on: Boolean?) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET translate=? WHERE folder=? AND slug=?",
+            arrayOf(if (on == null) -1 else if (on) 1 else 0, folder, slug),
+        )
+    }
+
+    /* Should this novel be translated, given what the app-wide switch says?
+
+       Asked by the download service, which is handed the switch's value by
+       whichever screen started the download and has no idea whether this
+       particular novel overrides it. */
+    fun translateFor(folder: String, slug: String, appWide: Boolean): Boolean =
+        try { novel(folder, slug)?.translate } catch (e: Exception) { null } ?: appWide
+
+    /* ---- listing resume point (see Resume) ---- */
+
+    fun setResumePoint(folder: String, slug: String, point: Resume.Point?) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET resume_page=?, resume_url=?, resume_before=? WHERE folder=? AND slug=?",
+            arrayOf(
+                point?.page ?: 0, point?.url.orEmpty(), point?.before ?: 0,
+                folder, slug,
+            ),
+        )
     }
 
     fun removeNovel(folder: String, slug: String) {

@@ -170,6 +170,24 @@ class ChapterListActivity : AppCompatActivity() {
         val title = intent.getStringExtra("title") ?: dirName
         findViewById<TextView>(R.id.chapterTitle).text = title
 
+        /* This novel's own settings. Only reachable with a slug — that is what
+           identifies the novel to the store, and a folder-scanned row opened
+           by directory name alone has nothing to key its settings on. */
+        val settingsBtn = findViewById<TextView>(R.id.novelSettingsBtn)
+        val slugForSettings = intent.getStringExtra("slug")
+        if (slugForSettings.isNullOrEmpty()) {
+            settingsBtn.visibility = android.view.View.GONE
+        } else {
+            settingsBtn.setOnClickListener {
+                startActivity(
+                    Intent(this, NovelSettingsActivity::class.java)
+                        .putExtra("slug", slugForSettings)
+                        .putExtra("dir", dirName)
+                        .putExtra("title", title),
+                )
+            }
+        }
+
         /* same navigation drawer as the other list screens */
         val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
         findViewById<TextView>(R.id.menuBtn).setOnClickListener {

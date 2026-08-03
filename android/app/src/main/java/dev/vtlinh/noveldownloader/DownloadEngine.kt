@@ -939,6 +939,13 @@ class DownloadEngine(
             return found.links.size
         }
         addLinks(doc)
+        /* Where this listing ENDS, recorded so the next check can start there
+           instead of paging through the whole thing again — see Resume. The
+           page that held the last chapters, and how many chapters came before
+           it. Page 1 is the novel page and always holds some, so those are
+           the right values for a novel that fits on one page. */
+        var lastChapterPage = 1
+        var chaptersBeforePage = 0
         var last = site.maxPage(doc, slug)
         /* Held by page number and parsed in page order, exactly as the
            download does it: discovery order is the site's order, and the
@@ -1047,7 +1054,12 @@ class DownloadEngine(
            and let them drift apart in the first place. */
         for (p in 2 until Listing.firstGap(missed, last)) {
             val html = pageHtml[p] ?: continue
-            if (addLinks(Jsoup.parse(html, base)) > 0) continue
+            val before = seen.size
+            if (addLinks(Jsoup.parse(html, base)) > 0) {
+                lastChapterPage = p
+                chaptersBeforePage = before
+                continue
+            }
             /* No chapters on it: not read, whatever it answered — and NOT
                added to `gone`, which means "the site said not there" and is
                the only thing that excuses a page as an over-read. See run(). */
@@ -1102,10 +1114,176 @@ class DownloadEngine(
                 siteOrdered.map { it.url }.toSet(),
             )
         }
+        /* Only from a listing read in full, which everything above has just
+           established: a resume point taken from a partial read would name a
+           page in the middle of the novel as its end, and the next check
+           would splice the rest of the book away. */
+        try {
+            store.setResumePoint(
+                folderKey, slug,
+                resumePoint(site, base, slug, lastChapterPage, chaptersBeforePage),
+            )
+        } catch (e: Exception) {}
         SiteStatus(
             siteOrdered.size, site.isCompleted(doc), site.author(doc),
             siteOrdered.mapNotNull { it.filename },
         )
+    }
+
+    /* The resume point for a listing that ended on `page`, with `before`
+       chapters ahead of it. Page 1 is the novel page itself, which is fetched
+       from the base URL and not through the pagination scheme. */
+    private fun resumePoint(site: Site, base: String, slug: String, page: Int, before: Int) =
+        Resume.Point(
+            page,
+            if (page <= 1) base else site.listPageUrl(base, slug, page),
+            before,
+        )
+
+    /* Status probe for a novel we already hold in full: read the listing from
+       where it ended last time rather than from page 1.
+
+       An ongoing novel is checked over and over for the two or three chapters
+       the site has added since. `checkStatus` answers that by fetching every
+       listing page — ninety requests for a ninety-page novel, per novel, per
+       sweep — and each of those requests is another chance for a page to blip
+       and make the check refuse the novel altogether. This reads the novel
+       page (which carries the finished flag, the author and the page count)
+       plus the pages from the recorded end onward, and puts the recorded
+       prefix back in front of what it finds.
+
+       IT NEVER RENAMES AND NEVER DELETES. Those passes compare the whole
+       folder against the whole listing, and this does not have the whole
+       listing — it has a prefix it did not read and a tail it did. Every
+       destructive decision stays behind `checkStatus`, which is also where a
+       novel that is missing chapters is sent (see Resume.mayResume): a novel
+       with holes is exactly the one those passes exist to repair.
+
+       Null means "that didn't work out" — the recorded point no longer
+       describes this site's listing, a page would not load, or the prefix and
+       the tail disagree about where the join is. The caller reads the whole
+       listing instead. Same answer as `checkStatus` gives for a URL that is
+       not a novel page, and the callers handle it the same way. */
+    suspend fun checkStatusFrom(
+        novelUrl: String,
+        folderKey: String,
+        point: Resume.Point,
+        recorded: List<String>,
+    ): SiteStatus? = withContext(Dispatchers.IO) {
+        val site = Sites.forUrl(novelUrl) ?: return@withContext null
+        val (base, slug) = site.normalize(novelUrl)
+        /* The recorded URL has to be the one this site computes for that page
+           TODAY. These sites move between hosts and have changed their
+           pagination scheme before; either way the recorded point describes a
+           listing that no longer exists, and reading "page 47" of a different
+           scheme would splice one novel's tail onto another's prefix. */
+        val pageUrl = if (point.page <= 1) base else site.listPageUrl(base, slug, point.page)
+        if (pageUrl != point.url) {
+            log("· $slug: the listing's pages have moved — reading it in full")
+            return@withContext null
+        }
+        val first = fetch(base)
+        if (first.html == null) return@withContext null
+        val doc = Jsoup.parse(first.html, base)
+        val head = Listing.collect(doc, site, slug)
+        /* No chapter-list container: these are the "latest chapters" widget's
+           links, in the wrong order. Not a listing to splice anything onto. */
+        if (head.fellBack) return@withContext null
+        val headUrls = head.links.map { it.first }
+        /* The splice only ever checks the JOIN. A chapter inserted at the
+           FRONT moves every position by one and the join would still agree
+           with itself, so the front is checked too — the novel page is
+           fetched either way, which makes this free. */
+        if (!Resume.headIntact(recorded, headUrls)) {
+            log("· $slug: the listing has shifted at the front — reading it in full")
+            return@withContext null
+        }
+        var last = maxOf(site.maxPage(doc, slug), point.page)
+        /* Discovery order is the site's order, so the tail is collected in
+           page order exactly as a full read collects the whole listing. */
+        val tail = LinkedHashMap<String, String>()
+        var lastChapterPage = point.page
+        var chaptersBeforePage = point.before
+        /* Pages in the tail that answered but held no chapters. A page can
+           fail without failing — 200 carrying a "not found" body, a WAF
+           interstitial, a layout the selectors no longer match — and past the
+           end of the pagination that is the ordinary shape of an over-read.
+           Which of the two it is only becomes clear once the whole tail has
+           been read: see the check below the loop. */
+        val blank = ArrayList<Int>()
+        fun take(p: Int, d: org.jsoup.nodes.Document): Boolean {
+            val found = Listing.collect(d, site, slug)
+            if (found.fellBack) return false
+            val before = tail.size
+            for ((href, text) in found.links) if (!tail.containsKey(href)) tail[href] = text
+            if (found.links.isEmpty()) {
+                blank.add(p)
+            } else {
+                lastChapterPage = p
+                chaptersBeforePage = point.before + before
+            }
+            return true
+        }
+        /* Page 1 is the novel page, already in hand. Anything later is
+           fetched, starting WITH the resume page itself — that page is where
+           the listing ended, so it is the one most likely to have gained
+           chapters. */
+        if (point.page <= 1) {
+            if (!take(1, doc)) return@withContext null
+        }
+        var fetched = if (point.page <= 1) 1 else point.page - 1
+        while (fetched < last) {
+            val batch = ((fetched + 1)..last).toList()
+            val htmls = arrayOfNulls<String>(batch.size)
+            coroutineScope {
+                val sem = Semaphore(10)
+                for ((i, p) in batch.withIndex()) {
+                    launch { sem.withPermit { htmls[i] = fetch(site.listPageUrl(base, slug, p)).html } }
+                }
+            }
+            for ((i, html) in htmls.withIndex()) {
+                /* A page that would not load leaves a hole, and a hole in the
+                   TAIL is the one place a splice cannot survive: the chapters
+                   after it would be named a page early. `checkStatus` forgives
+                   a single 404 past the end of the pagination because it can
+                   see the whole listing and judge; this cannot, so it hands
+                   the novel over rather than guess. */
+                if (html == null) return@withContext null
+                val d = Jsoup.parse(html, base)
+                if (!take(batch[i], d)) return@withContext null
+                last = maxOf(last, site.maxPage(d, slug))
+            }
+            fetched = batch.last()
+        }
+        /* A blank page with a real one AFTER it is a hole in the middle of the
+           tail, not the page count over-reading — and a hole moves every
+           chapter past it up a page. Where those chapters are ones the recorded
+           listing already knows, the splice below catches it; where they are
+           all NEW they sit past the end of the recorded listing, so nothing
+           would compare them against anything and they would be named a page
+           early. A blank page after the last real one is the ordinary
+           over-read and costs nothing. */
+        if (blank.any { it < lastChapterPage }) {
+            log("· $slug: listing page ${blank.first { it < lastChapterPage }} came back with no chapters on it — reading the list in full")
+            return@withContext null
+        }
+        val spliced = Resume.splice(recorded, point.before, tail.keys.toList())
+        if (spliced == null) {
+            log("· $slug: the listing no longer lines up where it was left — reading it in full")
+            return@withContext null
+        }
+        saveCover(slug, doc)
+        val total = spliced.urls.size
+        /* Positions name files, the same rule the full read uses. */
+        val filenames = (1..total).map { "Chapter $it.txt" }
+        if (spliced.added > 0) log("+ $slug: ${spliced.added} new chapter(s) since the last check")
+        try {
+            DownloadStore(context).setResumePoint(
+                folderKey, slug,
+                resumePoint(site, base, slug, lastChapterPage, chaptersBeforePage),
+            )
+        } catch (e: Exception) {}
+        SiteStatus(total, site.isCompleted(doc), site.author(doc), filenames)
     }
 
     suspend fun run(
@@ -1157,6 +1335,11 @@ class DownloadEngine(
             return found.links.size
         }
         addLinks(doc)
+        /* where the listing ends, for a check that resumes rather than
+           re-reading it — see Resume, and checkStatus, which keeps the same
+           two counters for the same reason */
+        var lastChapterPage = 1
+        var chaptersBeforePage = 0
         var last = site.maxPage(doc, slug)
         /* fetch all remaining listing pages in parallel (Semaphore-capped);
            parse in page order so chapter discovery stays deterministic. A
@@ -1376,7 +1559,12 @@ class DownloadEngine(
         var blank = 0
         for (p in 2 until firstGap) {
             val html = pageHtml[p] ?: continue
-            if (addLinks(Jsoup.parse(html, base)) > 0) continue
+            val before = seen.size
+            if (addLinks(Jsoup.parse(html, base)) > 0) {
+                lastChapterPage = p
+                chaptersBeforePage = before
+                continue
+            }
             pageHtml.remove(p)
             missed.add(p)
             /* NOT `gone`. That set means "the site said this page is not
@@ -1448,6 +1636,17 @@ class DownloadEngine(
            exactly this, so the rest of the novel would fall out of order. */
         if (listingComplete) {
             store.setChapterOrder(folderKey, slug, siteOrdered.mapNotNull { it.filename })
+            /* ...and where that listing ended, so the next status check reads
+               the tail rather than all of it. Behind the same gate as the
+               order it describes: a point taken from a prefix would name a
+               page in the MIDDLE of the novel as its end, and the next check
+               would splice everything past it away. */
+            try {
+                store.setResumePoint(
+                    folderKey, slug,
+                    resumePoint(site, base, slug, lastChapterPage, chaptersBeforePage),
+                )
+            } catch (e: Exception) {}
         }
 
         /* When translating, render the English folder name up front (Sonnet,

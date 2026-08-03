@@ -251,22 +251,17 @@ class NovelListActivity : AppCompatActivity() {
 
         val garbage = garbageSet()
         return byNorm.values.filter { normKey(it.slug) !in garbage }.map { rec ->
-            val dbCount = try { store.chapterCount(folder, rec.slug) } catch (e: Exception) { 0 }
-            /* the cached resolved listing also counts compressed chapters,
-               which the index and the scan both miss */
-            val listCount = try { store.chapterListCount(folder, rec.slug) } catch (e: Exception) { 0 }
             Row(
                 rec,
                 Extractor.stripAuthor(
                     store.getTitle(folder, rec.slug) ?: rec.title.ifEmpty { rec.slug },
                     rec.author,
                 ),
-                /* Take the resolved listing when there is one — it's a real
-                   directory read. maxOf across all three could only ever go
-                   up, so a chapter dedup removed stayed in the count and the
-                   novel read as further along than it was. The other two are
-                   the fallback for a novel that has never been listed. */
-                if (listCount > 0) listCount else maxOf(dbCount, rec.diskCount),
+                /* One definition, in NovelCheck — the per-novel settings
+                   screen has to arrive at the same number, and "how many
+                   chapters are here" is what decides whether a check may
+                   resume rather than read the whole listing. */
+                NovelCheck.localCount(store, folder, rec),
             )
         }.sortedWith(
             /* finished (user-marked) novels sink to the bottom; hot novels
@@ -844,27 +839,18 @@ class NovelListActivity : AppCompatActivity() {
                 return@launch
             }
             val done = java.util.concurrent.atomic.AtomicInteger(0)
+            /* Novels whose own setting says to fetch whatever the check finds.
+               Collected rather than started on the spot: this runs three wide
+               and a download started mid-sweep gets its files renamed and
+               deduped out from under the write by the very sweep that started
+               it. They go to the queue once every novel has been asked. */
+            val fetch = java.util.Collections.synchronizedList(ArrayList<String>())
             withContext(Dispatchers.IO) {
                 coroutineScope {
                     val sem = Semaphore(3)
                     for (row in targets) {
                         launch {
                             sem.withPermit {
-                                /* Recorded URL first, then the other hosts —
-                                   not INSTEAD of them. A novel whose recorded
-                                   host stops serving it (these sites move
-                                   between .today and .live) returned null for
-                                   its one URL and was simply never checked
-                                   again, on this sweep or any future one,
-                                   with nothing said about why. */
-                                val urls = (
-                                    row.rec.url.ifEmpty { null }?.let { listOf(it) }.orEmpty() +
-                                        listOf(
-                                            "https://truyenfull.today/${row.rec.slug}/",
-                                            "https://novelfull.com/${row.rec.slug}.html",
-                                            "https://truyenfull.live/${row.rec.slug}/",
-                                        )
-                                    ).distinct()
                                 /* The busy test at snapshot time is not enough:
                                    this sweep runs three wide for minutes, and
                                    a download started after it began gets its
@@ -875,64 +861,11 @@ class NovelListActivity : AppCompatActivity() {
                                     done.incrementAndGet()
                                     return@withPermit
                                 }
-                                for (u in urls) {
-                                    val res = try {
-                                        /* A guessed URL has to prove it is the
-                                           same novel. The slug is not proof:
-                                           for a folder-scanned row it is
-                                           derived from the folder NAME, and
-                                           the sites tell same-titled books
-                                           apart with a numeric suffix — so
-                                           "the other host serves something at
-                                           this slug" was enough to renumber a
-                                           library against a foreign listing
-                                           and write that book's URL, order and
-                                           totals over ours. */
-                                        engine.checkStatus(
-                                            u, folder,
-                                            expectTitle = if (u == row.rec.url) null else {
-                                                row.rec.title.ifEmpty { row.display }
-                                            },
-                                        )
-                                    } catch (e: DownloadEngine.PartialListing) {
-                                        /* The check refused because the listing
-                                           had a hole in it. Asking the site's
-                                           OTHER host next is the one thing that
-                                           must not happen: its chapter URLs are
-                                           different, so every recorded page
-                                           reads as unlisted against it and the
-                                           deletion this refusal exists to
-                                           prevent happens anyway. Leave this
-                                           novel for a run that can read the
-                                           whole list. */
-                                        break
-                                    } catch (e: Exception) { null } ?: continue
-                                    /* A locked or full database throws, and
-                                       these run off the main thread inside a
-                                       sweep with no handler — one bad write
-                                       took the whole app down mid-check
-                                       instead of costing one novel its
-                                       update. */
-                                    try {
-                                        /* ...and record the URL that answered,
-                                           so the next sweep doesn't start by
-                                           asking the host that no longer has
-                                           it. */
-                                        if (u != row.rec.url) {
-                                            store.recordNovelUrl(folder, row.rec.slug, u, row.display, 0L)
-                                        }
-                                        res.author?.let { store.setAuthor(folder, row.rec.slug, it) }
-                                        /* index the site's chapter order for the reader —
-                                           skipped when already indexed and unchanged */
-                                        if (store.chapterOrderCount(folder, row.rec.slug) != res.orderedFilenames.size) {
-                                            store.setChapterOrder(folder, row.rec.slug, res.orderedFilenames)
-                                        }
-                                        val complete = res.completed && row.local >= res.total
-                                        store.updateNovelCheck(folder, row.rec.slug, res.total, complete)
-                                    } catch (e: Exception) {
-                                        DownloadService.appendLog("Could not save the check for ${row.display} — ${e.message}")
-                                    }
-                                    break
+                                val res = NovelCheck.one(
+                                    engine, store, folder, row.rec, row.display, row.local,
+                                )
+                                if (res != null && res.missing > 0 && row.rec.autoDownload) {
+                                    fetch.add(res.url)
                                 }
                                 val n = done.incrementAndGet()
                                 withContext(Dispatchers.Main) {
@@ -943,7 +876,9 @@ class NovelListActivity : AppCompatActivity() {
                     }
                 }
             }
-            status.text = "Status checked (${targets.size} novel(s))."
+            for (u in fetch.toList()) NovelCheck.startDownload(this@NovelListActivity, u)
+            status.text = "Status checked (${targets.size} novel(s))." +
+                if (fetch.isEmpty()) "" else " Downloading ${fetch.size} with new chapters."
             btn.isEnabled = true
             render()
         }

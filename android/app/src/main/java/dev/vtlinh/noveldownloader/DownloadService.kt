@@ -179,6 +179,19 @@ class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastNotify = 0L
 
+    /* Does THIS novel want translating, whatever the app-wide switch says?
+
+       Resolved here rather than at each screen that starts a download: there
+       are four of them plus the persisted queue, which carries the switch's
+       value from whenever the novel was queued, and a per-novel setting only
+       some of them consulted would be a setting that worked or not depending
+       on where you tapped Download. */
+    private fun translateFor(tree: String, url: String, appWide: Boolean): Boolean = try {
+        val slug = Sites.forUrl(url)?.normalize(url)?.second
+        if (slug == null) appWide
+        else DownloadStore(applicationContext).translateFor(tree, slug, appWide)
+    } catch (e: Exception) { appWide }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -242,7 +255,7 @@ class DownloadService : Service() {
                 )
                 engine = eng
                 try {
-                    eng.run(curUrl, Uri.parse(treePath), curTranslate, curKey, curForce)
+                    eng.run(curUrl, Uri.parse(treePath), translateFor(treePath, curUrl, curTranslate), curKey, curForce)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     /* The service is going away. Cancellation is an Exception,
                        so the catch below would swallow it and the loop would
