@@ -44,8 +44,11 @@ object Resume {
        prefix untouched, so the prefix has to be worth leaving untouched.
          - a resume point that names a page and a URL, or there is nothing to
            resume from;
-         - `before` inside the recorded listing — a prefix longer than the
-           listing it is a prefix of is a record we cannot make sense of;
+         - `before` STRICTLY inside the recorded listing. The resume page is
+           the one that held the listing's last chapters, so the prefix ahead
+           of it is always shorter than the listing; a `before` at or past the
+           end is a record we cannot make sense of, and it would also leave the
+           join with nothing overlapping to check;
          - a recorded listing that is the site's count, so it was read whole;
          - every chapter of it on disk. A novel with holes needs the full
            read's rename and dedupe passes, which are the only thing that
@@ -61,7 +64,7 @@ object Resume {
         complete: Boolean,
     ): Boolean {
         if (point == null || point.page < 1 || point.url.isEmpty()) return false
-        if (point.before < 0 || point.before > recordedSize) return false
+        if (point.before < 0 || point.before >= recordedSize) return false
         if (recordedSize <= 0 || total != recordedSize) return false
         if (onDisk < total) return false
         return !complete
@@ -92,18 +95,43 @@ object Resume {
            listing has shifted under the prefix, so the prefix no longer names
            what it used to.
 
-       Positions with no recorded URL are skipped rather than treated as a
-       mismatch: an empty entry is an absence of evidence, and refusing on it
-       would mean a library that predates recorded pages could never resume. */
+       A position with no recorded URL is skipped rather than counted as a
+       mismatch — an empty entry is an absence of evidence, not a
+       contradiction. But the join has to rest on SOME evidence, so at least
+       one overlapping position must carry a URL to compare. Without that the
+       check passes on nothing at all, which is not the same as passing:
+
+       `fileUrls` only returns chapters whose page was recorded, and a library
+       adopted by the folder scan has none — it is indexed by name, with no
+       page against any row. Its `chapter_order` still gets filled in by one
+       full check, so it reaches this function with a listing of the right
+       LENGTH and not one URL in it. Every comparison below is then skipped,
+       the splice succeeds whatever the site has done, and the chapter order it
+       writes names files by positions nothing verified. The reader sorts by
+       exactly that order, and an auto-download then fetches the "new" chapters
+       into filenames that belong to chapters already on disk.
+
+       Reading the whole listing is the right answer there anyway: that pass
+       renames and dedupes BY IDENTITY, which is what gives such a library its
+       recorded pages in the first place. */
     fun splice(recorded: List<String>, before: Int, tail: List<String>): Spliced? {
         if (before < 0 || before > recorded.size) return null
         if (before + tail.size < recorded.size) return null
+        /* Positions actually compared. Zero of them means the join rests on
+           nothing — either because no overlapping position carries a URL, or
+           because there is no overlap at all (a prefix reaching the end of the
+           recorded listing, which the point and the order coming apart is the
+           only way to produce). */
+        var compared = 0
         for ((i, url) in tail.withIndex()) {
             val pos = before + i
             if (pos >= recorded.size) break
             val was = recorded[pos]
-            if (was.isNotEmpty() && was != url) return null
+            if (was.isEmpty()) continue
+            if (was != url) return null
+            compared++
         }
+        if (compared == 0) return null
         return Spliced(
             recorded.subList(0, before).toList() + tail,
             before + tail.size - recorded.size,

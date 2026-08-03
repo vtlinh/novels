@@ -64,6 +64,21 @@ class ResumeTest {
         assertFalse(Resume.mayResume(null, 200, 200, 200, false))
     }
 
+    /* A finished story gains nothing, so there is nothing for a resumed read
+       to find. The Library's sweep skips such a novel outright; the per-novel
+       Check button does not, and it tells the reader which of the two reads it
+       is about to do — so this has to be the same answer the check itself
+       gives, or the screen promises one thing and does another. */
+    @Test
+    fun `a finished novel is read in full`() {
+        assertFalse(
+            Resume.mayResume(
+                Resume.Point(4, "https://site/novel/trang-4/", 150),
+                recordedSize = 200, total = 200, onDisk = 200, complete = true,
+            ),
+        )
+    }
+
     /* A point that names no page, or a prefix longer than the listing it is a
        prefix of, is a record we cannot make sense of. */
     @Test
@@ -147,6 +162,56 @@ class ResumeTest {
     @Test
     fun `a prefix longer than the recorded listing is refused`() {
         assertNull(Resume.splice(urls(1, 100), before = 101, tail = urls(101, 105)))
+    }
+
+    /* THE ONE WITH NO EVIDENCE AT ALL. `fileUrls` only returns chapters whose
+       page was recorded, and a library adopted by the folder scan has none —
+       it is indexed by name with no page against any row. One full check still
+       fills in its chapter_order, so it arrives here with a listing of the
+       right LENGTH and not one URL in it.
+
+       Every comparison is then skipped and the join succeeds whatever the site
+       has done. The order that gets written names files by positions nothing
+       verified, the reader sorts by exactly that order, and an auto-download
+       fetches the "new" chapters into filenames belonging to chapters already
+       on disk. Reading the whole listing is the right answer there: that pass
+       renames and dedupes by identity, which is what gives such a library its
+       recorded pages in the first place. */
+    @Test
+    fun `a listing with no recorded urls at all cannot verify a join`() {
+        val recorded = List(100) { "" }
+        assertNull(
+            "a join checked against nothing has not been checked",
+            Resume.splice(recorded, before = 90, tail = urls(91, 103)),
+        )
+    }
+
+    /* ...and one URL in the overlap is enough to make the join real. The
+       refusal above must be about the ABSENCE of evidence, not about empty
+       entries being present — a library with a handful of unrecorded chapters
+       is ordinary and must still resume. */
+    @Test
+    fun `one recorded url in the overlap is enough`() {
+        val recorded = List(99) { "" } + urls(100, 100)
+        val got = Resume.splice(recorded, before = 90, tail = urls(91, 103))
+        assertNotNull(got)
+        assertEquals(3, got!!.added)
+    }
+
+    /* A prefix that reaches the end of the recorded listing leaves no
+       overlapping position to compare, so there is no join to check. The
+       resume page is the page that held the listing's LAST chapters, so this
+       cannot arise from a point and an order written together — it means the
+       two have come apart. */
+    @Test
+    fun `a prefix that covers the whole recorded listing is refused`() {
+        assertNull(Resume.splice(urls(1, 100), before = 100, tail = urls(101, 104)))
+        assertFalse(
+            Resume.mayResume(
+                Resume.Point(4, "https://site/novel/trang-4/", 200),
+                recordedSize = 200, total = 200, onDisk = 200, complete = false,
+            ),
+        )
     }
 
     /* ---- headIntact ---- */

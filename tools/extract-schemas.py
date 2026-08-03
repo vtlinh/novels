@@ -123,7 +123,7 @@ VERSIONS = {
     4: "8249426", 5: "20aaad8", 6: "df8faf5", 7: "d8ab597", 8: "35a4279",
     9: "b887619", 10: "2910bf9", 11: "972c442", 12: "9564980", 13: "54517af",
     14: "09e90c3", 15: "7afbafe", 16: "dfd35ce", 17: "8226f29", 18: "749fbfe",
-    19: "6ff6dab", 20: "HEAD",
+    19: "6ff6dab", 20: "c61997c",
 }
 
 OUT = "android/app/src/test/resources/schema"

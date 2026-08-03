@@ -3,12 +3,12 @@ package dev.vtlinh.noveldownloader
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.widget.Button
 import android.widget.CheckBox
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,8 +43,8 @@ class NovelSettingsActivity : AppCompatActivity() {
         folder = prefs.getString("tree", null)
         findViewById<TextView>(R.id.novelTitle).text = title
         findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
-        findViewById<MaterialButton>(R.id.recheckBtn).setOnClickListener { recheck() }
-        findViewById<MaterialButton>(R.id.redownloadBtn).setOnClickListener { confirmRedownload() }
+        findViewById<Button>(R.id.recheckBtn).setOnClickListener { recheck() }
+        findViewById<Button>(R.id.redownloadBtn).setOnClickListener { confirmRedownload() }
     }
 
     /* Reload on every return: a download started from here changes the counts,
@@ -82,8 +82,8 @@ class NovelSettingsActivity : AppCompatActivity() {
                 } else {
                     "Reads the site's whole chapter list."
                 }
-            findViewById<MaterialButton>(R.id.recheckBtn).isEnabled = !busy
-            findViewById<MaterialButton>(R.id.redownloadBtn).isEnabled = !busy
+            findViewById<Button>(R.id.recheckBtn).isEnabled = !busy
+            findViewById<Button>(R.id.redownloadBtn).isEnabled = !busy
         }
     }
 
@@ -235,9 +235,14 @@ class NovelSettingsActivity : AppCompatActivity() {
                 return@launch
             }
             val how = if (res.resumed) "" else " (read in full)"
+            /* the BOX, not the snapshot the screen loaded with: ticking
+               auto-download and then checking, in that order, is the obvious
+               way to use this screen and the write behind the tick is
+               asynchronous */
+            val auto = findViewById<CheckBox>(R.id.autoDownloadCheck).isChecked
             when {
                 res.missing <= 0 -> status("Up to date — ${res.total} chapters$how.")
-                rec.autoDownload -> {
+                auto -> {
                     NovelCheck.startDownload(this@NovelSettingsActivity, res.url)
                     status("${res.missing} new chapter(s)$how — downloading.")
                 }
@@ -274,12 +279,13 @@ class NovelSettingsActivity : AppCompatActivity() {
         setBusy(true)
         status("Deleting chapters…")
         lifecycleScope.launch {
-            val gone = withContext(Dispatchers.IO) { deleteChapters(folder) }
-            if (gone < 0) {
+            val wiped = withContext(Dispatchers.IO) { deleteChapters(folder) }
+            if (!wiped.dir) {
                 setBusy(false)
                 status("Couldn't open this novel's folder — nothing was deleted.")
                 return@launch
             }
+            val gone = wiped.gone
             withContext(Dispatchers.IO) {
                 /* The index describes files that are no longer there, and the
                    resume point describes a listing we are about to read again
@@ -315,14 +321,30 @@ class NovelSettingsActivity : AppCompatActivity() {
                 status("Deleted $gone file(s), but no site would answer for this novel.")
                 return@launch
             }
+            /* The download reads the listing itself, so it can still go ahead
+               on the recorded URL when the check above came back with nothing
+               — say which of the two happened rather than report "0 chapters". */
             NovelCheck.startDownload(this@NovelSettingsActivity, url)
-            status("Deleted $gone file(s) — downloading ${res?.total ?: 0} chapters again.")
+            /* Say so when something survived. The download will find those
+               files at listed chapters' names and skip them as already
+               present, so they are the chapters of a re-download that was not
+               one — silence there is the failure worth naming. */
+            val kept = if (wiped.kept > 0) " ${wiped.kept} file(s) would not delete and were left as they are." else ""
+            status(
+                (
+                    if (res == null) "Deleted $gone file(s) — downloading again."
+                    else "Deleted $gone file(s) — downloading ${res.total} chapters again."
+                    ) + kept,
+            )
             load()
         }
     }
 
-    /* Empty this novel's directory, keeping the directory itself. Returns how
-       many documents went, or -1 if the folder could not be read.
+    /* How a deletion pass went. `dir` is false when the folder could not even
+       be read; `kept` is the files the provider refused to remove. */
+    private class Deleted(val dir: Boolean, val gone: Int, val kept: Int)
+
+    /* Empty this novel's directory, keeping the directory itself.
 
        Contents rather than the folder: the directory is recorded against this
        novel and claimed in its name, and those records are what stop the next
@@ -330,36 +352,46 @@ class NovelSettingsActivity : AppCompatActivity() {
        another novel's. Deleting the folder and letting the download recreate
        it would put the novel wherever its title happens to compute to today,
        which for a novel that has been translated, or pushed off a colliding
-       name, is somewhere else entirely. */
-    private fun deleteChapters(folder: String): Int {
+       name, is somewhere else entirely.
+
+       A refusal is REPORTED, not thrown — DocumentsContract.deleteDocument
+       answers false rather than raising. Counting only the successes and
+       carrying on would be the quiet failure worth avoiding here: the index is
+       cleared straight after this, so a file that survived is one the download
+       then finds sitting at a listed chapter's name, skips as already present,
+       and leaves in place — the one chapter of a re-download that did not get
+       re-downloaded, with nothing said about it. */
+    private fun deleteChapters(folder: String): Deleted {
         val treeUri = Uri.parse(folder)
         val dir = try {
             Saf.children(contentResolver, treeUri, Saf.rootId(treeUri))
                 .firstOrNull { it.isDir && it.name == dirName }
-        } catch (e: Exception) { null } ?: return -1
+        } catch (e: Exception) { null } ?: return Deleted(false, 0, 0)
+        val kids = try {
+            Saf.children(contentResolver, treeUri, dir.docId)
+        } catch (e: Exception) { return Deleted(false, 0, 0) }
         var gone = 0
-        for (kid in try { Saf.children(contentResolver, treeUri, dir.docId) } catch (e: Exception) { return -1 }) {
+        var kept = 0
+        for (kid in kids) {
             /* the chapters, their compressed forms, and translated/ whole —
                a partly-emptied novel is worse than either end of this */
             val isChapter = ChapterName.RE.matches(kid.name.removeSuffix(".gz"))
             if (!isChapter && !(kid.isDir && kid.name == "translated")) continue
-            try {
-                if (DocumentsContract.deleteDocument(
-                        contentResolver,
-                        DocumentsContract.buildDocumentUriUsingTree(treeUri, kid.docId),
-                    )
-                ) {
-                    gone++
-                }
-            } catch (e: Exception) {}
+            val ok = try {
+                DocumentsContract.deleteDocument(
+                    contentResolver,
+                    DocumentsContract.buildDocumentUriUsingTree(treeUri, kid.docId),
+                )
+            } catch (e: Exception) { false }
+            if (ok) gone++ else kept++
         }
-        return gone
+        return Deleted(true, gone, kept)
     }
 
     private fun setBusy(b: Boolean) {
         busy = b
-        findViewById<MaterialButton>(R.id.recheckBtn).isEnabled = !b
-        findViewById<MaterialButton>(R.id.redownloadBtn).isEnabled = !b
+        findViewById<Button>(R.id.recheckBtn).isEnabled = !b
+        findViewById<Button>(R.id.redownloadBtn).isEnabled = !b
         findViewById<CheckBox>(R.id.autoDownloadCheck).isEnabled = !b
     }
 }

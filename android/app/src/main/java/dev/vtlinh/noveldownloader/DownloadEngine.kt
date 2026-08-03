@@ -1204,12 +1204,21 @@ class DownloadEngine(
         val tail = LinkedHashMap<String, String>()
         var lastChapterPage = point.page
         var chaptersBeforePage = point.before
+        /* Pages in the tail that answered but held no chapters. A page can
+           fail without failing — 200 carrying a "not found" body, a WAF
+           interstitial, a layout the selectors no longer match — and past the
+           end of the pagination that is the ordinary shape of an over-read.
+           Which of the two it is only becomes clear once the whole tail has
+           been read: see the check below the loop. */
+        val blank = ArrayList<Int>()
         fun take(p: Int, d: org.jsoup.nodes.Document): Boolean {
             val found = Listing.collect(d, site, slug)
             if (found.fellBack) return false
             val before = tail.size
             for ((href, text) in found.links) if (!tail.containsKey(href)) tail[href] = text
-            if (found.links.isNotEmpty()) {
+            if (found.links.isEmpty()) {
+                blank.add(p)
+            } else {
                 lastChapterPage = p
                 chaptersBeforePage = point.before + before
             }
@@ -1245,6 +1254,18 @@ class DownloadEngine(
                 last = maxOf(last, site.maxPage(d, slug))
             }
             fetched = batch.last()
+        }
+        /* A blank page with a real one AFTER it is a hole in the middle of the
+           tail, not the page count over-reading — and a hole moves every
+           chapter past it up a page. Where those chapters are ones the recorded
+           listing already knows, the splice below catches it; where they are
+           all NEW they sit past the end of the recorded listing, so nothing
+           would compare them against anything and they would be named a page
+           early. A blank page after the last real one is the ordinary
+           over-read and costs nothing. */
+        if (blank.any { it < lastChapterPage }) {
+            log("· $slug: listing page ${blank.first { it < lastChapterPage }} came back with no chapters on it — reading the list in full")
+            return@withContext null
         }
         val spliced = Resume.splice(recorded, point.before, tail.keys.toList())
         if (spliced == null) {
