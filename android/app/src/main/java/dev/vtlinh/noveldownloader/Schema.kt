@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 19
+    const val VERSION = 20
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -41,6 +41,18 @@ object Schema {
             "author TEXT DEFAULT '', disk_count INTEGER DEFAULT 0, " +
             "last_dl INTEGER DEFAULT 0, last_read INTEGER DEFAULT 0, " +
             "dir_name TEXT DEFAULT '', " +
+            /* per-novel settings. `auto_dl` fetches whatever a check finds;
+               `translate` is a THREE-state override of the app-wide switch
+               — -1 follow it, 0 never, 1 always — because a library is
+               mostly one language and the odd novel is the exception. */
+            "auto_dl INTEGER DEFAULT 0, translate INTEGER DEFAULT -1, " +
+            /* Where the last full read of this novel's listing ended: the
+               page that held its final chapters, that page's URL, and how
+               many chapters came before it. A check on a novel that is
+               already fully downloaded picks up from there instead of
+               paging through the whole listing again. 0 = no resume point. */
+            "resume_page INTEGER DEFAULT 0, resume_url TEXT DEFAULT '', " +
+            "resume_before INTEGER DEFAULT 0, " +
             "PRIMARY KEY(folder, slug))"
     /* which novel a folder NAME belongs to, so a second novel that
        sanitises onto the same name is sent elsewhere instead of writing
@@ -195,6 +207,20 @@ object Schema {
                     "WHERE folder_owner.folder = novels.folder AND folder_owner.slug = novels.slug" +
                     "), '') WHERE dir_name = ''",
             )
+        }
+        /* Per-novel settings, and the resume point a check reads.
+           All five default to "as before": auto-download off, translation
+           following the app-wide switch, and no resume point — so every
+           existing novel keeps being checked by reading its whole listing
+           until one full read records where it ends. Nothing to seed: a
+           resume point is a measurement of a listing, and there is no
+           listing here to measure. */
+        if (oldVersion < 20) {
+            db.soft("ALTER TABLE novels ADD COLUMN auto_dl INTEGER DEFAULT 0")
+            db.soft("ALTER TABLE novels ADD COLUMN translate INTEGER DEFAULT -1")
+            db.soft("ALTER TABLE novels ADD COLUMN resume_page INTEGER DEFAULT 0")
+            db.soft("ALTER TABLE novels ADD COLUMN resume_url TEXT DEFAULT ''")
+            db.soft("ALTER TABLE novels ADD COLUMN resume_before INTEGER DEFAULT 0")
         }
     }
 }

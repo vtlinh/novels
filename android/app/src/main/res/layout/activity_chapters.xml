@@ -41,6 +41,21 @@
                 android:maxLines="1"
                 android:ellipsize="end" />
 
+            <!-- this novel's own settings (auto-download, translation, recheck) -->
+            <TextView
+                android:id="@+id/novelSettingsBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚙"
+                android:textSize="21sp"
+                android:textColor="@color/fg"
+                android:paddingStart="12dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:clickable="true"
+                android:focusable="true" />
+
             <!-- flips the chapter order (ascending/descending), per novel -->
             <TextView
                 android:id="@+id/sortBtn"
