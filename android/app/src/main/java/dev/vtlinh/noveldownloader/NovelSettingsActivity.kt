@@ -60,7 +60,11 @@ class NovelSettingsActivity : AppCompatActivity() {
 
     /* ---- loading ---- */
 
-    private fun load() {
+    /* `keepStatus` leaves the caller's outcome message on screen instead of
+       replacing it with the summary — the messages that name a partial
+       failure ("N file(s) would not delete", "the download would not start")
+       were being erased by the reload that followed them. */
+    private fun load(keepStatus: Boolean = false) {
         val folder = this.folder ?: return status("Pick a download folder first.")
         lifecycleScope.launch {
             val state = withContext(Dispatchers.IO) { readState(folder) }
@@ -71,7 +75,7 @@ class NovelSettingsActivity : AppCompatActivity() {
                 status("This novel isn't in the library.")
                 return@launch
             }
-            status(state.summary)
+            if (!keepStatus) status(state.summary)
             bindAutoDownload(folder, state)
             bindTranslate(folder, state)
             val point = got.resume
@@ -252,7 +256,13 @@ class NovelSettingsActivity : AppCompatActivity() {
             }
             setBusy(false)
             if (res == null) {
-                status("Couldn't read the site's chapter list — nothing was changed.")
+                status(
+                    if (NovelCheck.isChecking(slug)) {
+                        "The Library's status check is on this novel right now — it does the same thing."
+                    } else {
+                        "Couldn't read the site's chapter list — nothing was changed."
+                    },
+                )
                 return@launch
             }
             val how = if (res.resumed) "" else " (read in full)"
@@ -272,7 +282,9 @@ class NovelSettingsActivity : AppCompatActivity() {
                 }
                 else -> status("${res.missing} chapter(s) missing$how — turn on auto-download, or use Download in the Library.")
             }
-            load()
+            /* keep the outcome on screen — a reload overwrote exactly the
+               messages that name a partial failure */
+            load(keepStatus = true)
         }
     }
 
@@ -323,83 +335,81 @@ class NovelSettingsActivity : AppCompatActivity() {
                Download button over an empty folder. Once the deleting
                starts, the bookkeeping must finish. */
             val outcome = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
-                /* the recorded directory, re-read at action time — the intent
-                   extra was computed when the chapter list opened, possibly
-                   hours ago, and for a novel whose folder was never recorded
-                   it is a GUESS from the title: for two novels whose titles
-                   sanitise alike, the other novel's folder */
-                val dirNow = try { store.dirNameFor(folder, slug) } catch (e: Exception) { null } ?: dirName
+                /* The RECORDED directory when there is one; the intent extra
+                   only as a fallback. The extra was computed when the chapter
+                   list opened, possibly hours ago, and for a novel whose
+                   folder was never recorded it is a GUESS from the title —
+                   for two novels whose titles sanitise alike, the other
+                   novel's folder. */
+                val recorded = try { store.dirNameFor(folder, slug) } catch (e: Exception) { null }
+                val dirNow = recorded ?: dirName
                 val wiped = deleteChapters(folder, dirNow)
+                var started = false
                 if (wiped.dir) {
-                    /* This directory demonstrably exists and holds this
-                       novel — record that BEFORE clearing the index, because
-                       the clear destroys the "my chapters are here" evidence
-                       Ownership falls back on when nothing was ever
-                       recorded. Without it the re-download computed a fresh
-                       folder name and built a second directory beside the
-                       emptied one. */
-                    try { store.setDirName(folder, slug, dirNow) } catch (e: Exception) {}
-                    try { store.claimFolderNameIfFree(folder, dirNow, slug) } catch (e: Exception) {}
+                    /* Record the directory as this novel's BEFORE clearing
+                       the index — the clear destroys the "my chapters are
+                       here" evidence Ownership falls back on, and without a
+                       record the re-download computed a fresh folder name and
+                       built a second directory beside the emptied one.
+
+                       ...but only on evidence: the name was already on
+                       record, or nobody else claims it. A guessed name
+                       another novel OWNS must not be written — recordedDir is
+                       the first thing Ownership answers from, so recording
+                       the guess would send every future download of this
+                       novel into that novel's folder instead of stepping
+                       aside. */
+                    val owner = try { store.slugOwningName(folder, dirNow) } catch (e: Exception) { null }
+                    if (recorded != null || owner == null ||
+                        Ownership.normKey(owner) == Ownership.normKey(slug)
+                    ) {
+                        try { store.setDirName(folder, slug, dirNow) } catch (e: Exception) {}
+                        try { store.claimFolderNameIfFree(folder, dirNow, slug) } catch (e: Exception) {}
+                    }
                     /* The index describes files that are no longer there,
                        and the resume point describes a listing we are about
                        to read again from the start. Both go, so nothing
                        downstream can act on a record of a novel that has
-                       just been emptied. The folder itself and its ownership
-                       records STAY: they are what send the download back
-                       into this directory rather than beside it. */
+                       just been emptied. */
                     try { store.clear(folder, slug) } catch (e: Exception) {}
                     try { store.setChapterOrder(folder, slug, emptyList()) } catch (e: Exception) {}
                     try { store.setResumePoint(folder, slug, null) } catch (e: Exception) {}
                     try { store.setDiskCount(folder, slug, 0) } catch (e: Exception) {}
                     try { store.updateNovelCheck(folder, slug, -1, false) } catch (e: Exception) {}
+                    /* Start the download HERE, inside the same uncancellable
+                       block. It used to run a full status check first, "for
+                       an honest count" — minutes of network on a continuation
+                       the activity's death silently dropped, leaving the
+                       novel wiped with nothing fetching it back and no way to
+                       tell. The download reads the listing itself; the count
+                       arrives when it does. */
+                    if (rec.url.isNotEmpty()) {
+                        started = NovelCheck.startDownload(applicationContext, rec.url)
+                    }
                 }
-                wiped
+                Pair(wiped, started)
             }
-            if (!outcome.dir) {
-                setBusy(false)
+            val (wiped, started) = outcome
+            setBusy(false)
+            if (!wiped.dir) {
                 status("Couldn't open this novel's folder — nothing was deleted.")
                 return@launch
             }
-            val gone = outcome.gone
-            val wiped = outcome
-            status("Deleted $gone file(s). Reading the chapter list…")
-            /* A full check, deliberately — there is no resume point left to
-               use, and this is the one moment the novel's totals and order are
-               known to be worth rebuilding from scratch. The download that
-               follows reads the listing too; this one is what puts an honest
-               count on the screen while it runs. */
-            val res = withContext(Dispatchers.IO) {
-                val engine = DownloadEngine(
-                    this@NovelSettingsActivity,
-                    { line -> DownloadService.appendLog(line) },
-                    {}, { _, _ -> },
-                )
-                try {
-                    NovelCheck.one(engine, store, folder, rec.copy(resume = null), title, 0)
-                } catch (e: Exception) { null }
-            }
-            setBusy(false)
-            val url = res?.url ?: rec.url
-            if (url.isEmpty()) {
-                status("Deleted $gone file(s), but no site would answer for this novel.")
-                return@launch
-            }
-            /* The download reads the listing itself, so it can still go ahead
-               on the recorded URL when the check above came back with nothing
-               — say which of the two happened rather than report "0 chapters". */
-            NovelCheck.startDownload(this@NovelSettingsActivity, url)
-            /* Say so when something survived. The download will find those
-               files at listed chapters' names and skip them as already
-               present, so they are the chapters of a re-download that was not
-               one — silence there is the failure worth naming. */
+            /* Say so when something survived the delete. The download will
+               find those files at listed chapters' names and skip them as
+               already present — the chapters of a re-download that was not
+               one — and silence there is the failure worth naming. */
             val kept = if (wiped.kept > 0) " ${wiped.kept} file(s) would not delete and were left as they are." else ""
             status(
-                (
-                    if (res == null) "Deleted $gone file(s) — downloading again."
-                    else "Deleted $gone file(s) — downloading ${res.total} chapters again."
-                    ) + kept,
+                when {
+                    started -> "Deleted ${wiped.gone} file(s) — downloading again.$kept"
+                    rec.url.isEmpty() ->
+                        "Deleted ${wiped.gone} file(s) — no site on record for this novel; use Check status in the Library.$kept"
+                    else ->
+                        "Deleted ${wiped.gone} file(s) — the download would not start; use Download in the Library.$kept"
+                },
             )
-            load()
+            load(keepStatus = true)
         }
     }
 

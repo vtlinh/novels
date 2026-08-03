@@ -39,6 +39,35 @@ object Translations {
        loose or gzipped and the pair need not agree. */
     private fun forms(base: String) = listOf(base, "$base.gz")
 
+    /* Which kept chapter a translated leftover's English belongs to, when the
+       BODY match could not answer.
+
+       The body match is the strong evidence, but it has two blind spots the
+       migration case walks straight into: the extractor drifts (the ad
+       filter alone moves bytes in ~3% of chapters), and a refetch with
+       compression on writes gzipped files whose on-disk sizes the candidate
+       prefilter cannot compare against a loose legacy file. Either way the
+       twin is missed, the handover never runs, the English stays filed under
+       the legacy name — and the translator, which keys "already translated"
+       on current filenames, buys the chapter again.
+
+       The heading TITLE is the fallback identity: `title` is the leftover's,
+       `keptTitles` maps each kept chapter's base name to its title, and
+       `translated` is every base that already has English. The answer must
+       be UNIQUE among untranslated keepers — titles repeat ("Interlude"),
+       and handing the English to the wrong twin would serve one chapter's
+       translation as another's for good. No match is a fine answer: the
+       leftover stays, and a later run with more evidence can still act. */
+    fun rescueKeeper(
+        title: String?,
+        keptTitles: Map<String, String>,
+        translated: Set<String>,
+    ): String? {
+        if (title.isNullOrEmpty()) return null
+        val matches = keptTitles.entries.filter { it.value == title && it.key !in translated }
+        return matches.singleOrNull()?.key
+    }
+
     /* `present` is what translated/ holds, named as it is on disk.
 
        Nothing to do when the doomed chapter has no translation, which is the

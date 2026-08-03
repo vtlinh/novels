@@ -549,14 +549,40 @@ class DownloadEngine(
         val keptSorted = chapterFiles.filter { it.base in assigned }.sortedBy { it.size }
         /* a heading swap moves the size by only a handful of bytes */
         fun nearBySize(size: Long): List<OnDisk> {
-            val lo = keptSorted.binarySearch { it.size.compareTo(size - HEADING_SLACK) }
+            /* binarySearch lands on an ARBITRARY element of a run of equal
+               sizes, so starting the scan there skipped earlier equal-sized
+               candidates — a twin missed, a translation not handed over */
+            var lo = keptSorted.binarySearch { it.size.compareTo(size - HEADING_SLACK) }
                 .let { if (it < 0) -it - 1 else it }
+            while (lo > 0 && keptSorted[lo - 1].size >= size - HEADING_SLACK) lo--
             val out = ArrayList<OnDisk>()
             var i = lo
             while (i < keptSorted.size && keptSorted[i].size <= size + HEADING_SLACK) {
                 out.add(keptSorted[i]); i++
             }
             return out
+        }
+
+        /* the first line of a chapter file, for the heading-title fallback */
+        fun firstLine(f: OnDisk): String? = (
+            if (f.name.endsWith(".gz")) Zips.readGz(cr, treeUri, f.docId)
+            else Saf.readText(cr, treeUri, f.docId)
+            )?.lineSequence()?.firstOrNull()?.trim()?.ifEmpty { null }
+
+        /* Each kept chapter's heading TITLE, built once and only if a
+           translated leftover actually needs it: this is the fallback
+           identity for a translation whose body match came up empty — the
+           extractor drifted, or a refetch with compression on wrote gzipped
+           files whose sizes the candidate prefilter cannot compare against a
+           loose legacy file. One first-line read per kept chapter, paid only
+           on the runs that are migrating a legacy library. */
+        val keptTitles: Map<String, String> by lazy {
+            val out = HashMap<String, String>()
+            for (k in chapterFiles.filter { it.base in assigned }) {
+                val t = firstLine(k)?.let { Extractor.parseHeading(it).second }?.ifEmpty { null }
+                if (t != null) out[k.base] = t
+            }
+            out
         }
 
         /* Hand this file's translation to the chapter that is keeping its
@@ -692,6 +718,9 @@ class DownloadEngine(
             Saf.children(cr, treeUri, tid).filter { !it.isDir }
                 .mapTo(HashSet()) { it.name.removeSuffix(".gz") }
         } ?: emptySet()
+        /* ...kept live as handovers land, where the snapshot above stays as
+           it was walked — the rescue below must know a keeper is spoken for */
+        val nowTranslated = HashSet(translatedBases)
         var dropped = 0
         var suspect = 0
         for (x in extras) {
@@ -730,6 +759,28 @@ class DownloadEngine(
             val xh = if (candidates.isEmpty()) null else bodyHash(x)
             val twin = if (xh == null) null else candidates.firstOrNull { bodyHash(it) == xh }
             if (twin == null) {
+                /* No body twin — but if this leftover is TRANSLATED, its
+                   English is still filed under a name the translator will
+                   never look at, and the chapter gets bought again. Try the
+                   heading-title fallback (see Translations.rescueKeeper for
+                   the two ways the body match goes blind and why the match
+                   must be unique): on a hit the translation is handed over
+                   and the FILE stays — deleting still requires the body
+                   match, this only moves the English to the chapter that
+                   owns it. */
+                if (x.base in translatedBases) {
+                    val title = firstLine(x)?.let { Extractor.parseHeading(it).second }
+                    /* nowTranslated, not the snapshot: a keeper that just
+                       received one leftover's English must not be offered a
+                       second — handover onto a translated keeper DELETES the
+                       incoming copy as a duplicate, and with two same-titled
+                       leftovers that would destroy the second one's English */
+                    val keeper = Translations.rescueKeeper(title, keptTitles, nowTranslated)
+                    if (keeper != null && handOver(x, keeper)) {
+                        nowTranslated.add(keeper)
+                        log("  translation of ${x.name} handed to $keeper (same chapter title)")
+                    }
+                }
                 kept++
                 log(
                     if (delisted) "  kept, no longer listed but translated — leaving it for a download to settle: ${x.name}"
@@ -739,7 +790,10 @@ class DownloadEngine(
             }
             /* same bytes as a chapter we're keeping — drop the copy, after
                giving that chapter this one's translation */
-            if (remove(x, twin.base)) removed++
+            if (remove(x, twin.base)) {
+                removed++
+                if (x.base in translatedBases) nowTranslated.add(twin.base)
+            }
         }
         if (removed > 0) log("removed $removed duplicate chapter file(s) — same text as a chapter we kept")
         if (dropped > 0) log("removed $dropped chapter file(s) the site no longer lists")
@@ -775,7 +829,10 @@ class DownloadEngine(
             /* an empty stub says nothing — try the other form before giving up */
             val head = text.lineSequence().firstOrNull()?.trim().orEmpty()
             if (head.isEmpty()) continue
-            return head == want
+            /* by heading IDENTITY, not by exact line — see Extractor.sameHeading
+               for why an exact compare deleted (and re-bought) every "Chapter 0"
+               file's translation the first refetch after the renumbering fix */
+            return Extractor.sameHeading(head, want)
         }
         return false
     }

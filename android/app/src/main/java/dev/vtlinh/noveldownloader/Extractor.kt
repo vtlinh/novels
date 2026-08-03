@@ -75,6 +75,34 @@ object Extractor {
         return Pair(m.groupValues[1].toIntOrNull(), title)
     }
 
+    /* Are two heading lines the SAME CHAPTER's heading?
+
+       This decides whether the translation beside an overwritten chapter
+       survives (DownloadEngine.sameOnDisk), and it used to be exact line
+       equality — which broke the moment anything about the heading FORMAT
+       changed while the text stayed the same chapter. The concrete break:
+       leading unnumbered chapters used to be written as "Chapter 0" and are
+       numbered by position now, so on the first full refetch after that
+       change every such file compared unequal, its translation was deleted
+       as belonging to a different chapter, and the same run bought it again.
+
+       By TITLE, when there is one: the title is the half of the heading that
+       identifies the chapter across renumbering. The NUMBER still gets a
+       vote where both sides carry a real one — two different chapters can
+       share a title ("Interlude"), and after a listing shift the file at a
+       name really can hold a different chapter than the fetch is writing:
+       equal titles with contradicting nonzero numbers are different
+       chapters. A zero is the legacy no-number artifact and contradicts
+       nothing. Headings with no title fall back to the exact compare — a
+       bare "Chương 12" has nothing but its number to identify it. */
+    fun sameHeading(a: String, b: String): Boolean {
+        if (a == b) return true
+        val (na, ta) = parseHeading(a)
+        val (nb, tb) = parseHeading(b)
+        if (ta.isEmpty() || ta != tb) return false
+        return na == nb || na == null || nb == null || na == 0 || nb == 0
+    }
+
     fun singleNewlines(s: String): String =
         s.replace("\r", "").replace(Regex("\n{2,}"), "\n").trim('\n')
 
