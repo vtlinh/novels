@@ -24,6 +24,10 @@ object NovelCheck {
        Library's sweep. */
     private val checking = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /* so a screen can tell "a check refused to stack" apart from "the site
+       would not answer" — the two deserve different messages */
+    fun isChecking(slug: String): Boolean = Ownership.normKey(slug) in checking
+
     /* Chapters of this novel on this device.
 
        The cached resolved listing when there is one — it is a real directory

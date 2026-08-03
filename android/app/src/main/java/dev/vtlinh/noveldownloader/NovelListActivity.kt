@@ -387,7 +387,13 @@ class NovelListActivity : AppCompatActivity() {
         return ""
     }
 
-    private fun render() {
+    /* `finalStatus` is a message the caller wants LEFT on screen once the
+       list is up — the status sweep's outcome line. Setting it before
+       calling render() looked right and was unobservable: render overwrites
+       the status twice in the same main-thread turn, so no frame ever
+       carried the message, and the one it erased was the warning that the
+       auto-downloads a check queued were refused. */
+    private fun render(finalStatus: String? = null) {
         val list = findViewById<LinearLayout>(R.id.novelList)
         val status = findViewById<TextView>(R.id.statusText)
         /* onResume always follows onCreate, so the instruction set there was
@@ -423,7 +429,7 @@ class NovelListActivity : AppCompatActivity() {
                 status.text = "No novels found. ($sourceInfo)"
                 return@launch
             }
-            status.text = "${rs.size} novel(s)"
+            status.text = finalStatus ?: "${rs.size} novel(s)"
             /* the 3 most recently READ novels get their own section on top */
             val recent = rs.filter { it.rec.lastRead > 0 }
                 .sortedByDescending { it.rec.lastRead }.take(3)
@@ -879,7 +885,17 @@ class NovelListActivity : AppCompatActivity() {
                                 val res = NovelCheck.one(
                                     engine, store, folder, row.rec, row.display, row.local,
                                 )
-                                if (res != null && res.missing > 0 && row.rec.autoDownload) {
+                                /* the setting as it is NOW, not as it was when
+                                   the sweep snapshotted its targets — the busy
+                                   test got a re-ask for the same reason, and a
+                                   sweep runs for minutes: un-ticking
+                                   auto-download mid-sweep must stick, because
+                                   with translation pinned on it is money */
+                                if (res != null && res.missing > 0 &&
+                                    try {
+                                        store.novel(folder, row.rec.slug)?.autoDownload == true
+                                    } catch (e: Exception) { false }
+                                ) {
                                     fetch.add(res.url)
                                 }
                                 val n = done.incrementAndGet()
@@ -892,15 +908,18 @@ class NovelListActivity : AppCompatActivity() {
                 }
             }
             val started = fetch.toList().count { NovelCheck.startDownload(this@NovelListActivity, it) }
-            status.text = "Status checked (${targets.size} novel(s))." + when {
-                fetch.isEmpty() -> ""
-                started == fetch.size -> " Downloading $started with new chapters."
-                /* from the background the service start is refused — say so
-                   rather than reporting downloads that never began */
-                else -> " $started of ${fetch.size} downloads started — the rest were refused; open the app and check again."
-            }
             btn.isEnabled = true
-            render()
+            /* through render, not before it — render overwrites the status
+               twice in the same turn, so a message set here was never seen */
+            render(
+                "Status checked (${targets.size} novel(s))." + when {
+                    fetch.isEmpty() -> ""
+                    started == fetch.size -> " Downloading $started with new chapters."
+                    /* from the background the service start is refused — say
+                       so rather than reporting downloads that never began */
+                    else -> " $started of ${fetch.size} downloads started — the rest were refused; open the app and check again."
+                },
+            )
         }
     }
 

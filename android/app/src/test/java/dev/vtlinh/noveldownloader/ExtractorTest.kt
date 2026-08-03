@@ -135,4 +135,45 @@ class ExtractorTest {
         assertFalse("a page with no title is not a match", Extractor.sameNovelTitle("", "Tu Tien"))
         assertFalse(Extractor.sameNovelTitle("Tu Tien Phan 2", "Tu Tien"))
     }
+
+    /* ---- sameHeading: does the translation beside an overwritten chapter
+       survive? (see DownloadEngine.sameOnDisk) ---- */
+
+    /* THE MIGRATION CASE. Leading unnumbered chapters used to be written as
+       "Chapter 0" and are numbered by position now — exact-line equality
+       deleted every such file's translation on the first refetch after the
+       change, and bought it again in the same run. Same title, and a zero
+       contradicts nothing. */
+    @Test
+    fun `a renumbered zero heading is the same chapter`() {
+        assertTrue(Extractor.sameHeading("Chapter 0: The Cold Girl", "Chapter 1: The Cold Girl"))
+        assertTrue(Extractor.sameHeading("Chapter 41: Death's Roulette", "Chapter 0: Death's Roulette"))
+    }
+
+    @Test
+    fun `the same heading is the same chapter`() {
+        assertTrue(Extractor.sameHeading("Chương 12: Thần Y", "Chương 12: Thần Y"))
+    }
+
+    /* Two different chapters can share a title — after a listing shift the
+       file at a name really can hold the neighbouring chapter. Equal titles
+       with contradicting nonzero numbers are different chapters, and calling
+       them the same would keep the WRONG translation under the name. */
+    @Test
+    fun `equal titles with contradicting real numbers are different chapters`() {
+        assertFalse(Extractor.sameHeading("Chapter 12: Interlude", "Chapter 13: Interlude"))
+    }
+
+    @Test
+    fun `different titles are different chapters`() {
+        assertFalse(Extractor.sameHeading("Chapter 5: The Duel", "Chapter 5: The Feast"))
+    }
+
+    /* a bare number has nothing but the number to identify it — the exact
+       compare is all there is */
+    @Test
+    fun `headings with no title fall back to the exact compare`() {
+        assertTrue(Extractor.sameHeading("Chương 12", "Chương 12"))
+        assertFalse(Extractor.sameHeading("Chương 12", "Chương 13"))
+    }
 }

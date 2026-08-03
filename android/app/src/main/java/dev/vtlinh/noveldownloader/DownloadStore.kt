@@ -172,9 +172,25 @@ class DownloadStore(context: Context) :
                raise it: the old `disk_count<?` guard made this a high-water
                mark, so once dedup removed a file the Library went on counting
                it forever and the novel looked more downloaded than it was. */
+            /* Count LISTED chapters, not files, whenever the site's order is
+               known. The folder listing includes every file the chapter
+               pattern matches — kept legacy leftovers, "(unlisted)" parks —
+               and counting those as chapters let a novel with 5 extras and 2
+               HOLES read as fully downloaded: mayResume then sent it down
+               the resumed check, which never runs the rename/dedupe repair
+               it needed, the sweep computed missing = 0 so auto-download
+               never fired, and with the extras equal to the holes it could
+               latch complete and leave every sweep. A novel with no recorded
+               order keeps the raw count — there is nothing to compare
+               against, and undercounting to zero would be worse. */
             db.execSQL(
-                "UPDATE novels SET disk_count=? WHERE folder=? AND slug=?",
-                arrayOf(list.ordered.size, folder, slug),
+                "UPDATE novels SET disk_count = CASE WHEN EXISTS(" +
+                    "SELECT 1 FROM chapter_order WHERE folder=? AND slug=?) " +
+                    "THEN (SELECT COUNT(*) FROM chlist c JOIN chapter_order o " +
+                    "ON o.folder=c.folder AND o.slug=c.slug AND o.filename=c.name " +
+                    "WHERE c.folder=? AND c.slug=? AND c.pos>=0) " +
+                    "ELSE ? END WHERE folder=? AND slug=?",
+                arrayOf(folder, slug, folder, slug, list.ordered.size, folder, slug),
             )
             /* Ask AGAIN, inside the transaction. The check at the top runs
                before beginTransaction, so a clear that lands entirely in

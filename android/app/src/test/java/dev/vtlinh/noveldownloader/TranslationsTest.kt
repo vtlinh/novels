@@ -89,4 +89,69 @@ class TranslationsTest {
     fun `a chapter cannot hand its translation to itself`() {
         assertTrue(Translations.handover(current, current, setOf("$current.gz")).isEmpty())
     }
+
+    /* ---- rescueKeeper: the heading-title fallback for a translation whose
+       body match came up empty ---- */
+
+    @Test
+    fun `a unique untranslated keeper with the same title is the rescue target`() {
+        assertEquals(
+            "Chapter 12.txt",
+            Translations.rescueKeeper(
+                "Doi thanh nguoi khac",
+                mapOf("Chapter 11.txt" to "Khac", "Chapter 12.txt" to "Doi thanh nguoi khac"),
+                emptySet(),
+            ),
+        )
+    }
+
+    /* titles repeat — "Interlude" — and handing the English to the wrong twin
+       serves one chapter's translation as another's for good. Ambiguity is a
+       refusal, not a coin toss. */
+    @Test
+    fun `a repeated title rescues nothing`() {
+        assertEquals(
+            null,
+            Translations.rescueKeeper(
+                "Interlude",
+                mapOf("Chapter 3.txt" to "Interlude", "Chapter 9.txt" to "Interlude"),
+                emptySet(),
+            ),
+        )
+    }
+
+    /* a keeper that already has English is spoken for — offering it another
+       copy DELETES the incoming one as a duplicate (Translations.handover),
+       which for two same-titled leftovers destroys the second one's English */
+    @Test
+    fun `a keeper that is already translated is not offered another copy`() {
+        assertEquals(
+            null,
+            Translations.rescueKeeper(
+                "The Duel",
+                mapOf("Chapter 5.txt" to "The Duel"),
+                setOf("Chapter 5.txt"),
+            ),
+        )
+        /* ...but a translated keeper does not shadow an untranslated one
+           with the same title being the unique remaining answer? No — two
+           same-titled keepers are ambiguous identity however their
+           translations stand, EXCEPT that the translated one is excluded
+           from matching entirely, which is what makes the second leftover
+           resolve to the remaining keeper. */
+        assertEquals(
+            "Chapter 6.txt",
+            Translations.rescueKeeper(
+                "The Duel",
+                mapOf("Chapter 5.txt" to "The Duel", "Chapter 6.txt" to "The Duel"),
+                setOf("Chapter 5.txt"),
+            ),
+        )
+    }
+
+    @Test
+    fun `no title rescues nothing`() {
+        assertEquals(null, Translations.rescueKeeper(null, mapOf("Chapter 1.txt" to "X"), emptySet()))
+        assertEquals(null, Translations.rescueKeeper("", mapOf("Chapter 1.txt" to "X"), emptySet()))
+    }
 }
