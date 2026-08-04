@@ -237,6 +237,33 @@ class NovelListActivity : AppCompatActivity() {
                         store.setAutoDownload(folder, win.slug, true)
                     }
                 } catch (e: Exception) {}
+                /* ...and the reading/read-aloud positions, which live in
+                   prefs under the losing SLUG. They are the same novel, and
+                   deleting the row without carrying these lost the user's
+                   place: resumeChapter(winSlug) found nothing, the chapter
+                   list highlighted nothing, and the spot was gone with no
+                   message. Only onto a winner with no spot of its own — a
+                   position the user made under the winning slug is newer
+                   truth than the orphan. */
+                try {
+                    val all = prefs.all
+                    val e = prefs.edit()
+                    for (k in listOf(
+                        "lastCh:", "lastChAt:", "readPos:", "readParaText:",
+                        "ttsPos:", "ttsPosAt:", "ttsParaText:",
+                    )) {
+                        val v = all[k + lose.slug] ?: continue
+                        if (all[k + win.slug] != null) continue
+                        when (v) {
+                            is String -> e.putString(k + win.slug, v)
+                            is Long -> e.putLong(k + win.slug, v)
+                            is Int -> e.putInt(k + win.slug, v)
+                            is Float -> e.putFloat(k + win.slug, v)
+                            is Boolean -> e.putBoolean(k + win.slug, v)
+                        }
+                    }
+                    e.apply()
+                } catch (e: Exception) {}
                 /* Hand the folder over before the row goes. They are the same
                    novel, so the loser's directory IS the winner's — but the
                    claim lives in folder_owner keyed on the losing slug, and

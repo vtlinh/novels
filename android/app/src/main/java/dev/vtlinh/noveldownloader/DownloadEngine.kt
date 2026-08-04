@@ -454,20 +454,42 @@ class DownloadEngine(
     /* The saved reading spot and read-aloud spot both name their chapter by
        filename, so a rename has to carry them across. Fed only the moves the
        rename pass really made, once it has finished — the marks are a
-       pointer, not a file, and nothing reads them mid-pass. */
+       pointer, not a file, and nothing reads them mid-pass.
+
+       Every SPELLING of the slug, not just the engine's. The reader keys
+       these prefs by whatever slug its screen was opened with, and a novel
+       adopted by the folder scan reads under a punctuation-drifted spelling
+       ("library-of-heaven-s-path") while the engine renames under the
+       site's ("library-of-heavens-path"). The rename-epoch guard was
+       normalized for exactly this drift; remapping only the engine's
+       spelling left the reader's key pointing at a filename that now names
+       a DIFFERENT chapter — reopened, it restored a paragraph index into
+       the wrong chapter, silently. Sweep the prefs for every key that
+       normalizes to this novel. */
     private fun remapSavedSpot(slug: String, moves: Map<String, String>) {
         try {
             val p = context.getSharedPreferences("app", Context.MODE_PRIVATE)
+            val key = Ownership.normKey(slug)
+            val slugs = p.all.keys.mapNotNullTo(HashSet()) { k ->
+                val s = when {
+                    k.startsWith("lastCh:") -> k.removePrefix("lastCh:")
+                    k.startsWith("ttsPos:") -> k.removePrefix("ttsPos:")
+                    else -> null
+                }
+                s?.takeIf { Ownership.normKey(it) == key }
+            }
             val e = p.edit()
             var any = false
-            p.getString("lastCh:$slug", null)?.let { cur ->
-                moves[cur]?.let { e.putString("lastCh:$slug", it); any = true }
-            }
-            p.getString("ttsPos:$slug", null)?.let { cur ->
-                val name = cur.substringBefore('|')
-                moves[name]?.let {
-                    e.putString("ttsPos:$slug", it + "|" + cur.substringAfter('|', ""))
-                    any = true
+            for (s in slugs) {
+                p.getString("lastCh:$s", null)?.let { cur ->
+                    moves[cur]?.let { e.putString("lastCh:$s", it); any = true }
+                }
+                p.getString("ttsPos:$s", null)?.let { cur ->
+                    val name = cur.substringBefore('|')
+                    moves[name]?.let {
+                        e.putString("ttsPos:$s", it + "|" + cur.substringAfter('|', ""))
+                        any = true
+                    }
                 }
             }
             if (any) e.apply()
@@ -484,6 +506,12 @@ class DownloadEngine(
        Hashing costs a read, so it's confined to orphans and the kept files
        that share their exact size, and every hash computed is remembered so
        later passes don't repeat the work. */
+    /* `rescueTitles` allows the heading-title fallback for translated
+       leftovers. Only the DOWNLOAD paths pass it: building the title map
+       reads one first line per kept chapter — a whole-novel sweep of SAF
+       opens — and an unrescuable leftover (repeated title) would re-pay that
+       on every status check of the novel, forever. A download run pays it
+       once, at the moment the twins actually exist to receive the English. */
     private fun dedupeExtras(
         treeUri: Uri,
         dir: DocumentFile,
@@ -492,6 +520,7 @@ class DownloadEngine(
         slug: String,
         assigned: Set<String>,
         listedUrls: Set<String>,
+        rescueTitles: Boolean = false,
     ): Int {
         val cr = context.contentResolver
         val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return 0 }
@@ -721,6 +750,10 @@ class DownloadEngine(
         /* ...kept live as handovers land, where the snapshot above stays as
            it was walked — the rescue below must know a keeper is spoken for */
         val nowTranslated = HashSet(translatedBases)
+        /* translated leftovers whose body matched nothing — candidates for
+           the title rescue, run as a second pass once every body-proven
+           handover has landed */
+        val rescueLater = ArrayList<OnDisk>()
         var dropped = 0
         var suspect = 0
         for (x in extras) {
@@ -761,26 +794,14 @@ class DownloadEngine(
             if (twin == null) {
                 /* No body twin — but if this leftover is TRANSLATED, its
                    English is still filed under a name the translator will
-                   never look at, and the chapter gets bought again. Try the
-                   heading-title fallback (see Translations.rescueKeeper for
-                   the two ways the body match goes blind and why the match
-                   must be unique): on a hit the translation is handed over
-                   and the FILE stays — deleting still requires the body
-                   match, this only moves the English to the chapter that
-                   owns it. */
-                if (x.base in translatedBases) {
-                    val title = firstLine(x)?.let { Extractor.parseHeading(it).second }
-                    /* nowTranslated, not the snapshot: a keeper that just
-                       received one leftover's English must not be offered a
-                       second — handover onto a translated keeper DELETES the
-                       incoming copy as a duplicate, and with two same-titled
-                       leftovers that would destroy the second one's English */
-                    val keeper = Translations.rescueKeeper(title, keptTitles, nowTranslated)
-                    if (keeper != null && handOver(x, keeper)) {
-                        nowTranslated.add(keeper)
-                        log("  translation of ${x.name} handed to $keeper (same chapter title)")
-                    }
-                }
+                   never look at, and the chapter gets bought again. Deferred
+                   to a second pass AFTER every body match has landed: the
+                   title rescue is the weaker evidence, and run inline it
+                   could claim a keeper whose body-proven translation was
+                   still on its way — handover onto a translated keeper
+                   DELETES the incoming copy, so the weak match would have
+                   destroyed the strong one's English. */
+                if (rescueTitles && x.base in translatedBases) rescueLater.add(x)
                 kept++
                 log(
                     if (delisted) "  kept, no longer listed but translated — leaving it for a download to settle: ${x.name}"
@@ -793,6 +814,20 @@ class DownloadEngine(
             if (remove(x, twin.base)) {
                 removed++
                 if (x.base in translatedBases) nowTranslated.add(twin.base)
+            }
+        }
+        /* Second pass: the title rescue, now that every body-proven match
+           has claimed its keeper. See Translations.rescueKeeper for the two
+           ways the body match goes blind and why the title must be the sole
+           bearer among ALL keepers. On a hit the translation is handed over
+           and the FILE stays — deleting still requires the body match; this
+           only moves the English to the chapter that owns it. */
+        for (x in rescueLater) {
+            val title = firstLine(x)?.let { Extractor.parseHeading(it).second }
+            val keeper = Translations.rescueKeeper(title, keptTitles, nowTranslated)
+            if (keeper != null && handOver(x, keeper)) {
+                nowTranslated.add(keeper)
+                log("  translation of ${x.name} handed to $keeper (same chapter title)")
             }
         }
         if (removed > 0) log("removed $removed duplicate chapter file(s) — same text as a chapter we kept")
@@ -815,7 +850,12 @@ class DownloadEngine(
 
        False when nothing is there — then there is no translation to worry
        about either. */
-    private fun sameOnDisk(look: (String) -> DocumentFile?, name: String, body: String): Boolean {
+    private fun sameOnDisk(
+        look: (String) -> DocumentFile?,
+        name: String,
+        body: String,
+        ambiguousTitle: (String) -> Boolean = { false },
+    ): Boolean {
         val want = body.lineSequence().firstOrNull()?.trim() ?: return false
         val cr = context.contentResolver
         for (n in listOf("$name.gz", name)) {
@@ -831,8 +871,12 @@ class DownloadEngine(
             if (head.isEmpty()) continue
             /* by heading IDENTITY, not by exact line — see Extractor.sameHeading
                for why an exact compare deleted (and re-bought) every "Chapter 0"
-               file's translation the first refetch after the renumbering fix */
-            return Extractor.sameHeading(head, want)
+               file's translation the first refetch after the renumbering fix,
+               and why a title repeated in the listing withdraws the tolerance */
+            return Extractor.sameHeading(
+                head, want,
+                ambiguousTitle = ambiguousTitle(Extractor.parseHeading(want).second),
+            )
         }
         return false
     }
@@ -1796,7 +1840,9 @@ class DownloadEngine(
            goes unrecognised in the first place — and rebuilt from the saves. */
         val listedUrls = siteOrdered.map { it.url }.toSet()
         val unexplained =
-            if (listingComplete) dedupeExtras(treeUri, dir, store, folderKey, slug, assigned, listedUrls)
+            if (listingComplete) {
+                dedupeExtras(treeUri, dir, store, folderKey, slug, assigned, listedUrls, rescueTitles = true)
+            }
             else 0
         /* Re-fetching a whole novel is the last resort, not the repair. Every
            file we can identify is settled by its recorded page — kept,
@@ -1938,6 +1984,15 @@ class DownloadEngine(
         val toFetch =
             if (refetchAll) chapters.filter { it.filename != null }
             else chapters.filter { it.filename != null && !settled(it) }
+        /* Titles that repeat in this listing. The heading compare that
+           decides whether a translation survives an overwrite tolerates a
+           legacy zero number — but only on a title that appears ONCE: for a
+           fully unnumbered legacy novel the zero escape is the entire
+           verdict, and on a repeated title it blessed the neighbour's
+           translation after a shift. See Extractor.sameHeading. */
+        val dupTitles: Set<String> = chapters.mapNotNull {
+            Extractor.parseHeading(it.text).second.ifEmpty { null }
+        }.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         if (stale.isNotEmpty()) log("${stale.size} chapter file(s) hold the wrong page — re-fetching those")
         val skipped = chapters.size - toFetch.size
         if (skipped > 0) log("skip $skipped already-downloaded chapter(s)")
@@ -2007,7 +2062,8 @@ class DownloadEngine(
                                    `stale` for none, so a rule keyed on `stale`
                                    fires exactly nowhere on the one path that
                                    overwrites blindly. */
-                                val sameText = replacing && sameOnDisk(look, ch.filename!!, body)
+                                val sameText = replacing &&
+                                    sameOnDisk(look, ch.filename!!, body) { it in dupTitles }
                                 val uri = writeFile(
                                     dir, ch.filename!!, body, compressOn,
                                     replace = replacing, look = look,
@@ -2105,7 +2161,7 @@ class DownloadEngine(
            may destroy. Only when the fetch actually finished: a stopped or
            partly-failed run proves nothing. */
         if (refetchAll && allOnDisk && listingComplete) {
-            dedupeExtras(treeUri, dir, store, folderKey, slug, assigned, listedUrls)
+            dedupeExtras(treeUri, dir, store, folderKey, slug, assigned, listedUrls, rescueTitles = true)
         }
         try {
             /* a count taken from a partial listing would mark the novel

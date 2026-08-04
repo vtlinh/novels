@@ -133,14 +133,17 @@ class TranslationsTest {
                 setOf("Chapter 5.txt"),
             ),
         )
-        /* ...but a translated keeper does not shadow an untranslated one
-           with the same title being the unique remaining answer? No — two
-           same-titled keepers are ambiguous identity however their
-           translations stand, EXCEPT that the translated one is excluded
-           from matching entirely, which is what makes the second leftover
-           resolve to the remaining keeper. */
+    }
+
+    /* THE DIVERSION. The title must be the sole bearer among ALL keepers,
+       not merely among the untranslated ones: a leftover whose TRUE owner is
+       already translated used to resolve onto the same-titled untranslated
+       neighbour, and its English was served as that chapter's for good. A
+       repeated title is ambiguous identity however the translations stand. */
+    @Test
+    fun `a translated true owner blocks the same-titled neighbour, not diverts to it`() {
         assertEquals(
-            "Chapter 6.txt",
+            null,
             Translations.rescueKeeper(
                 "The Duel",
                 mapOf("Chapter 5.txt" to "The Duel", "Chapter 6.txt" to "The Duel"),
