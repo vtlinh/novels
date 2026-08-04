@@ -70,13 +70,20 @@ class TtsService : Service() {
         val token = intent?.getParcelableExtra<MediaSessionCompat.Token>("token")
 
         postNotification(intent?.getStringExtra("title"), speaking, token, intent?.getStringExtra("slug"))
-        /* the CPU only needs to stay awake while actually speaking */
+        /* The CPU only needs to stay awake while actually speaking. RENEWED
+           on every speaking start — the reader calls one per chapter change
+           — not taken once: the timeout is a backstop against a leak, and
+           taken once it became a deadline instead. An overnight listen hit
+           the four-hour mark mid-book, the lock lapsed while `speaking` was
+           still true, and the read stalled with the notification still
+           claiming it was playing. Rolling renewal keeps the backstop (a
+           leaked lock still dies within 4h of the last chapter change)
+           without the deadline. */
         if (speaking) {
-            if (wakeLock == null) {
-                wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
-                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "novels:tts")
-                    .apply { acquire(4 * 60 * 60 * 1000L) }
-            }
+            try { wakeLock?.release() } catch (e: Exception) {}
+            wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "novels:tts")
+                .apply { acquire(4 * 60 * 60 * 1000L) }
         } else {
             try { wakeLock?.release() } catch (e: Exception) {}
             wakeLock = null

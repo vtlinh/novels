@@ -53,19 +53,24 @@ object Translations {
 
        The heading TITLE is the fallback identity: `title` is the leftover's,
        `keptTitles` maps each kept chapter's base name to its title, and
-       `translated` is every base that already has English. The answer must
-       be UNIQUE among untranslated keepers — titles repeat ("Interlude"),
-       and handing the English to the wrong twin would serve one chapter's
-       translation as another's for good. No match is a fine answer: the
-       leftover stays, and a later run with more evidence can still act. */
+       `translated` is every base that already has English. The title must be
+       UNIQUE among ALL keepers — not merely among the untranslated ones.
+       Filtering the translated ones out of the match first read as a
+       convenience and was a trap: a leftover whose TRUE owner is already
+       translated then resolved onto the same-titled untranslated neighbour,
+       and its English was served as that chapter's for good. A repeated
+       title is ambiguous identity however the translations stand; only a
+       sole bearer of the title may receive, and only if it has no English
+       yet. No match is a fine answer: the leftover stays, and a later run
+       with more evidence can still act. */
     fun rescueKeeper(
         title: String?,
         keptTitles: Map<String, String>,
         translated: Set<String>,
     ): String? {
         if (title.isNullOrEmpty()) return null
-        val matches = keptTitles.entries.filter { it.value == title && it.key !in translated }
-        return matches.singleOrNull()?.key
+        val only = keptTitles.entries.filter { it.value == title }.singleOrNull() ?: return null
+        return if (only.key !in translated) only.key else null
     }
 
     /* `present` is what translated/ holds, named as it is on disk.

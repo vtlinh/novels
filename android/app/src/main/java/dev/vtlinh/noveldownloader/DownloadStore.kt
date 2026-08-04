@@ -206,11 +206,27 @@ class DownloadStore(context: Context) :
         }
     }
 
-    /* chapters in the cached resolved listing (counts compressed ones too) */
+    /* Chapters in the cached resolved listing (counts compressed ones too).
+
+       LISTED chapters, when the site's order is known — the same rule the
+       disk_count write in saveChapterList applies, and it has to live in
+       BOTH places or it lives in neither: this count is what
+       NovelCheck.localCount prefers, so a fix applied only to the disk_count
+       column was shadowed by this raw count on every path it was written
+       for. A folder listing includes every file the chapter pattern matches
+       — kept legacy leftovers, "(unlisted)" parks — and counting those as
+       chapters let a novel with extras and HOLES read as fully downloaded:
+       mayResume sent it down the resumed check that never runs the
+       rename/dedupe repair, the sweep computed missing = 0 so auto-download
+       never fired, and with extras equal to holes it latched complete. */
     fun chapterListCount(folder: String, slug: String): Int {
         readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM chlist WHERE folder=? AND slug=? AND pos>=0",
-            arrayOf(folder, slug),
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM chapter_order WHERE folder=? AND slug=?) " +
+                "THEN (SELECT COUNT(*) FROM chlist c JOIN chapter_order o " +
+                "ON o.folder=c.folder AND o.slug=c.slug AND o.filename=c.name " +
+                "WHERE c.folder=? AND c.slug=? AND c.pos>=0) " +
+                "ELSE (SELECT COUNT(*) FROM chlist WHERE folder=? AND slug=? AND pos>=0) END",
+            arrayOf(folder, slug, folder, slug, folder, slug),
         ).use { c -> if (c.moveToNext()) return c.getInt(0) }
         return 0
     }

@@ -93,14 +93,23 @@ object Extractor {
        name really can hold a different chapter than the fetch is writing:
        equal titles with contradicting nonzero numbers are different
        chapters. A zero is the legacy no-number artifact and contradicts
-       nothing. Headings with no title fall back to the exact compare — a
-       bare "Chương 12" has nothing but its number to identify it. */
-    fun sameHeading(a: String, b: String): Boolean {
+       nothing — UNLESS the title is `ambiguous`: for a fully unnumbered
+       legacy novel every file says "Chapter 0", the zero escape is then the
+       whole verdict, and on a repeated title ("Epilogue", "Ngoại truyện" —
+       exactly the chapters sites leave unnumbered) it silently blessed the
+       NEIGHBOUR's translation after a shift, wrong text served for good.
+       The caller says whether the title repeats in the listing; ambiguous
+       falls back to dropping and re-buying, which costs money but never
+       serves the wrong chapter's English. Headings with no title fall back
+       to the exact compare — a bare "Chương 12" has nothing but its number
+       to identify it. */
+    fun sameHeading(a: String, b: String, ambiguousTitle: Boolean = false): Boolean {
         if (a == b) return true
         val (na, ta) = parseHeading(a)
         val (nb, tb) = parseHeading(b)
         if (ta.isEmpty() || ta != tb) return false
-        return na == nb || na == null || nb == null || na == 0 || nb == 0
+        if (na == nb || na == null || nb == null) return true
+        return (na == 0 || nb == 0) && !ambiguousTitle
     }
 
     fun singleNewlines(s: String): String =

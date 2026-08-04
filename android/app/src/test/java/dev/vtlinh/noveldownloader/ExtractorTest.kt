@@ -176,4 +176,25 @@ class ExtractorTest {
         assertTrue(Extractor.sameHeading("Chương 12", "Chương 12"))
         assertFalse(Extractor.sameHeading("Chương 12", "Chương 13"))
     }
+
+    /* For a fully unnumbered legacy novel every file says "Chapter 0" and
+       the zero tolerance is the entire verdict — on a title that repeats in
+       the listing ("Epilogue"), a shift then blessed the NEIGHBOUR's
+       translation: wrong text served for good, never re-bought. A repeated
+       title withdraws the tolerance; dropping and re-buying costs money but
+       never serves the wrong chapter's English. */
+    @Test
+    fun `an ambiguous title withdraws the zero tolerance`() {
+        assertFalse(
+            Extractor.sameHeading("Chapter 0: Epilogue", "Chapter 118: Epilogue", ambiguousTitle = true),
+        )
+        /* the tolerance itself is untouched where the title is unique */
+        assertTrue(
+            Extractor.sameHeading("Chapter 0: Epilogue", "Chapter 118: Epilogue", ambiguousTitle = false),
+        )
+        /* and ambiguity does not weaken the EQUAL-number or exact matches */
+        assertTrue(
+            Extractor.sameHeading("Chapter 5: Epilogue", "Chapter 5: Epilogue", ambiguousTitle = true),
+        )
+    }
 }
