@@ -809,12 +809,17 @@ class DownloadEngine(
                 )
                 continue
             }
-            /* same bytes as a chapter we're keeping — drop the copy, after
-               giving that chapter this one's translation */
-            if (remove(x, twin.base)) {
-                removed++
-                if (x.base in translatedBases) nowTranslated.add(twin.base)
-            }
+            /* Same bytes as a chapter we're keeping — drop the copy, after
+               giving that chapter this one's translation. The keeper is
+               marked spoken-for BEFORE the remove: remove() hands the
+               English over first and returns false if only the file delete
+               is refused, so marking on success left a keeper that really
+               holds English unmarked — and the rescue pass then offered it
+               another copy, which handover answers by DELETING the incoming
+               English. Over-marking (handover itself failed) merely refuses
+               a later rescue; under-marking destroys paid content. */
+            if (x.base in translatedBases) nowTranslated.add(twin.base)
+            if (remove(x, twin.base)) removed++
         }
         /* Second pass: the title rescue, now that every body-proven match
            has claimed its keeper. See Translations.rescueKeeper for the two
@@ -1990,8 +1995,15 @@ class DownloadEngine(
            fully unnumbered legacy novel the zero escape is the entire
            verdict, and on a repeated title it blessed the neighbour's
            translation after a shift. See Extractor.sameHeading. */
+        /* through cleanEncoding, because the WRITTEN heading this set is
+           compared against has been through it: one truyenfull novel carries
+           a zero-width space on every chapter title, so the raw link text
+           held "Epilogue​" while the written title held "Epilogue" —
+           two keys for one title, the duplicate never counted, and the
+           ambiguity guard failed open in the expensive direction (the
+           neighbour's translation blessed) */
         val dupTitles: Set<String> = chapters.mapNotNull {
-            Extractor.parseHeading(it.text).second.ifEmpty { null }
+            Extractor.parseHeading(Extractor.cleanEncoding(it.text)).second.ifEmpty { null }
         }.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         if (stale.isNotEmpty()) log("${stale.size} chapter file(s) hold the wrong page — re-fetching those")
         val skipped = chapters.size - toFetch.size

@@ -183,9 +183,18 @@ class DownloadStore(context: Context) :
                latch complete and leave every sweep. A novel with no recorded
                order keeps the raw count — there is nothing to compare
                against, and undercounting to zero would be worse. */
+            /* ...and a join that matches NOTHING falls back to the raw count.
+               Zero overlap is not an empty library — it is a library whose
+               files predate the position naming entirely (the legacy title
+               suffixes, scan-adopted folders), where the order and the
+               folder describe the same book in two vocabularies. Writing 0
+               there made a 700-chapter novel read "0 chapters" after one
+               status check, and auto-download re-fetched the whole thing. */
             db.execSQL(
-                "UPDATE novels SET disk_count = CASE WHEN EXISTS(" +
-                    "SELECT 1 FROM chapter_order WHERE folder=? AND slug=?) " +
+                "UPDATE novels SET disk_count = CASE WHEN (" +
+                    "SELECT COUNT(*) FROM chlist c JOIN chapter_order o " +
+                    "ON o.folder=c.folder AND o.slug=c.slug AND o.filename=c.name " +
+                    "WHERE c.folder=? AND c.slug=? AND c.pos>=0) > 0 " +
                     "THEN (SELECT COUNT(*) FROM chlist c JOIN chapter_order o " +
                     "ON o.folder=c.folder AND o.slug=c.slug AND o.filename=c.name " +
                     "WHERE c.folder=? AND c.slug=? AND c.pos>=0) " +
@@ -220,8 +229,16 @@ class DownloadStore(context: Context) :
        rename/dedupe repair, the sweep computed missing = 0 so auto-download
        never fired, and with extras equal to holes it latched complete. */
     fun chapterListCount(folder: String, slug: String): Int {
+        /* the listed-only count when it counts ANYTHING; the raw count when
+           the join matches nothing — zero overlap means the order and the
+           folder name the same book in two vocabularies (a scan-adopted
+           legacy library), not that the folder is empty. Answering 0 there
+           had the Library read "0 chapters" over a full novel and
+           auto-download re-fetch all of it. */
         readableDatabase.rawQuery(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM chapter_order WHERE folder=? AND slug=?) " +
+            "SELECT CASE WHEN (SELECT COUNT(*) FROM chlist c JOIN chapter_order o " +
+                "ON o.folder=c.folder AND o.slug=c.slug AND o.filename=c.name " +
+                "WHERE c.folder=? AND c.slug=? AND c.pos>=0) > 0 " +
                 "THEN (SELECT COUNT(*) FROM chlist c JOIN chapter_order o " +
                 "ON o.folder=c.folder AND o.slug=c.slug AND o.filename=c.name " +
                 "WHERE c.folder=? AND c.slug=? AND c.pos>=0) " +
