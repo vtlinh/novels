@@ -2818,12 +2818,22 @@ class ReaderActivity : AppCompatActivity() {
        Returns true when a check was started — the caller's `onDone` then runs
        once it has finished (adopted or not) INSTEAD of the caller concluding
        now. */
-    private var relistedFor: ChapterListActivity.Companion.Chapters? = null
+    /* Time-based, NOT a once-per-listing latch. The latch never re-armed:
+       the one relist typically fires while the downloader is mid-batch, finds
+       nothing new YET, and latches — chapter N+1 lands thirty seconds later
+       and nothing ever asks again, so the listening session was dead for the
+       novel's life and every Play press replayed one sentence into silence.
+       The TTS path cannot storm (it stops on a negative answer), and the
+       scroll path is bounded by this timer: one folder check per interval,
+       only while sitting at the end of the buffer. */
+    private var lastRelistAt = 0L
+    private val RELIST_MS = 30_000L
     private var relisting = false
 
     private fun relistForNewChapters(onDone: () -> Unit): Boolean {
         val old = chapters ?: return false
-        if (relisting || loading || relistedFor === old) return false
+        if (relisting || loading) return false
+        if (android.os.SystemClock.elapsedRealtime() - lastRelistAt < RELIST_MS) return false
         val slug = intent.getStringExtra("slug") ?: return false
         val dir = intent.getStringExtra("dir") ?: return false
         val tree = treeUri ?: return false
@@ -2837,7 +2847,7 @@ class ReaderActivity : AppCompatActivity() {
             return false
         }
         relisting = true
-        relistedFor = old
+        lastRelistAt = android.os.SystemClock.elapsedRealtime()
         lifecycleScope.launch {
             val fresh = withContext(Dispatchers.IO) {
                 val order = try { store.getChapterOrder(folderKey, slug) } catch (e: Exception) { null } ?: emptyMap()
@@ -2850,13 +2860,14 @@ class ReaderActivity : AppCompatActivity() {
                loading, and strictly longer with our whole listing as its
                prefix — otherwise leave everything exactly as it was. */
             if (fresh != null && chapters === old && !loading &&
+                DownloadEngine.renameEpochOf(slug) == chaptersEpoch &&
                 fresh.ordered.size > old.ordered.size &&
                 old.ordered.indices.all { fresh.ordered[it] == old.ordered[it] }
             ) {
                 chapters = fresh
-                /* re-arms the check for the listing just adopted, and drops
-                   the reader's last reference to the one it replaced */
-                relistedFor = null
+                /* adopted: re-arm at once, so a live download is followed
+                   batch after batch without waiting out the interval */
+                lastRelistAt = 0L
                 drawerAdapter?.clear()
                 drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
                 drawerAdapter?.notifyDataSetChanged()
@@ -2939,6 +2950,13 @@ class ReaderActivity : AppCompatActivity() {
        keeping the reader's place (single anchor compensation) */
     private fun prependChapters(n: Int) {
         val ch = chapters ?: return
+        /* same stale-index hazard the append gate blocks: after a rename,
+           firstIdx - 1 names the neighbour's text. Not spoken (prepends are
+           !speaking-only), but wrong text on screen is still wrong text. */
+        if (DownloadEngine.renameEpochOf(intent.getStringExtra("slug") ?: "") != chaptersEpoch) {
+            askResync()
+            return
+        }
         if (loading || firstIdx <= 0) return
         loading = true
         lifecycleScope.launch {
