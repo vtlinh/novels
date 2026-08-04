@@ -2938,9 +2938,32 @@ class ReaderActivity : AppCompatActivity() {
                     text.height in 1 until scroll.height * 3 / 2
                 ) {
                     /* Out of listing on a page too short to scroll: no scroll
-                       event will ever arrive, so maybeLoadMore will never be
-                       the one to ask whether more has been downloaded. */
-                    relistForNewChapters { if (!speaking) appendChapters(n) }
+                       event will EVER arrive — a ScrollView whose content is
+                       smaller than the viewport dispatches nothing — so this
+                       branch is its own event source. A check that finds
+                       nothing re-asks after the window, but only while the
+                       novel is actually downloading: "nothing yet" is the
+                       NORMAL answer seconds after an adoption, and without
+                       the retry the reader silently stopped following the
+                       download it was opened to follow. A finished novel
+                       stops polling the moment the service lets go. */
+                    fun ask() {
+                        if (speaking || loading || isDestroyed) return
+                        val started = relistForNewChapters {
+                            if (!speaking) {
+                                if (nextIdx < (chapters?.ordered?.size ?: 0)) appendChapters(n)
+                                else if (DownloadService.isBusy(Sites.slugKey(intent.getStringExtra("slug") ?: ""))) {
+                                    scroll.postDelayed({ ask() }, RELIST_MS)
+                                }
+                            }
+                        }
+                        if (!started &&
+                            DownloadService.isBusy(Sites.slugKey(intent.getStringExtra("slug") ?: ""))
+                        ) {
+                            scroll.postDelayed({ ask() }, RELIST_MS)
+                        }
+                    }
+                    ask()
                 }
             }
         }
