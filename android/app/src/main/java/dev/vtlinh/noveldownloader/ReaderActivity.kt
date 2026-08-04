@@ -2877,6 +2877,26 @@ class ReaderActivity : AppCompatActivity() {
         return true
     }
 
+    /* The short-page poll chain. Every exit that is not "the reader is
+       gone" or "the download is over" RE-ARMS rather than returns: the
+       first version returned on `speaking` and `loading`, and a single tick
+       landing inside a TTS session or an openAt window killed the chain for
+       good — the reader silently stopped following the download again, one
+       Play press deep. The novel's own busy state is the only terminator;
+       normKey directly, not the slugKey URL fallback, so this matches every
+       other isBusy caller. */
+    private fun armShortPageRelist(n: Int) {
+        if (isDestroyed) return
+        fun busy() = DownloadService.isBusy(Ownership.normKey(intent.getStringExtra("slug") ?: ""))
+        fun rearm() { if (busy()) scroll.postDelayed({ armShortPageRelist(n) }, RELIST_MS) }
+        if (speaking || loading) { rearm(); return }
+        val started = relistForNewChapters {
+            if (!speaking && nextIdx < (chapters?.ordered?.size ?: 0)) appendChapters(n)
+            else rearm()
+        }
+        if (!started) rearm()
+    }
+
     private fun appendChapters(n: Int) {
         val ch = chapters ?: return
         if (loading || nextIdx >= ch.ordered.size) return
@@ -2947,23 +2967,7 @@ class ReaderActivity : AppCompatActivity() {
                        the retry the reader silently stopped following the
                        download it was opened to follow. A finished novel
                        stops polling the moment the service lets go. */
-                    fun ask() {
-                        if (speaking || loading || isDestroyed) return
-                        val started = relistForNewChapters {
-                            if (!speaking) {
-                                if (nextIdx < (chapters?.ordered?.size ?: 0)) appendChapters(n)
-                                else if (DownloadService.isBusy(Sites.slugKey(intent.getStringExtra("slug") ?: ""))) {
-                                    scroll.postDelayed({ ask() }, RELIST_MS)
-                                }
-                            }
-                        }
-                        if (!started &&
-                            DownloadService.isBusy(Sites.slugKey(intent.getStringExtra("slug") ?: ""))
-                        ) {
-                            scroll.postDelayed({ ask() }, RELIST_MS)
-                        }
-                    }
-                    ask()
+                    armShortPageRelist(n)
                 }
             }
         }
