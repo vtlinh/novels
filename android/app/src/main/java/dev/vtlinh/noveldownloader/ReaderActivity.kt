@@ -1326,7 +1326,20 @@ class ReaderActivity : AppCompatActivity() {
                read that has since been replaced would cut the sentence that
                replaced it. */
             val gen = speechGen
-            if (!relistForNewChapters(force = true) { if (speaking && speechGen == gen) speakNext() }) {
+            /* The STOP rides on "the walk adopted nothing", not on "the walk
+               was refused". With force skipping the window the walk is never
+               refused, so a stop keyed on refusal never fired: every session
+               reaching the end of its book looped walk-after-walk forever,
+               holding audio focus, the foreground notification and keep-awake
+               with nothing left to say. One walk per arrival at the end;
+               silence unless it grew. */
+            val n0 = chapters?.ordered?.size ?: 0
+            if (!relistForNewChapters(force = true) {
+                    if (speaking && speechGen == gen) {
+                        if ((chapters?.ordered?.size ?: 0) > n0) speakNext() else stopTts()
+                    }
+                }
+            ) {
                 stopTts()
             }
             return
