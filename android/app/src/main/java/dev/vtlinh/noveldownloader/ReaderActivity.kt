@@ -1326,7 +1326,7 @@ class ReaderActivity : AppCompatActivity() {
                read that has since been replaced would cut the sentence that
                replaced it. */
             val gen = speechGen
-            if (!relistForNewChapters { if (speaking && speechGen == gen) speakNext() }) {
+            if (!relistForNewChapters(force = true) { if (speaking && speechGen == gen) speakNext() }) {
                 stopTts()
             }
             return
@@ -1705,6 +1705,18 @@ class ReaderActivity : AppCompatActivity() {
     override fun onPause() {
         if (isFinishing) prefs.edit().remove("lastReading").apply()
         super.onPause()
+    }
+
+    override fun onStop() {
+        /* park the short-page poll chain — TTS keeps its own path */
+        relistTick?.let { scroll.removeCallbacks(it) }
+        super.onStop()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        /* resume a parked chain; one tick, the chain re-arms itself */
+        relistTick?.let { scroll.removeCallbacks(it); scroll.postDelayed(it, 1_000) }
     }
 
     /* Rotation (and the other config changes declared in the manifest) is
@@ -2830,10 +2842,15 @@ class ReaderActivity : AppCompatActivity() {
     private val RELIST_MS = 30_000L
     private var relisting = false
 
-    private fun relistForNewChapters(onDone: () -> Unit): Boolean {
+    private fun relistForNewChapters(force: Boolean = false, onDone: () -> Unit): Boolean {
         val old = chapters ?: return false
         if (relisting || loading) return false
-        if (android.os.SystemClock.elapsedRealtime() - lastRelistAt < RELIST_MS) return false
+        /* `force` skips the shared window, for the TTS caller only: it treats
+           a refusal as the end of the novel and stops, so the poll chain's
+           30s stamps were reading as "nothing more" on ~9 of 10 Play
+           presses — one sentence, then silence. TTS cannot storm: a negative
+           answer stops it, and `relisting` still serializes the walks. */
+        if (!force && android.os.SystemClock.elapsedRealtime() - lastRelistAt < RELIST_MS) return false
         val slug = intent.getStringExtra("slug") ?: return false
         val dir = intent.getStringExtra("dir") ?: return false
         val tree = treeUri ?: return false
@@ -2885,10 +2902,23 @@ class ReaderActivity : AppCompatActivity() {
        Play press deep. The novel's own busy state is the only terminator;
        normKey directly, not the slugKey URL fallback, so this matches every
        other isBusy caller. */
+    /* One tracked Runnable, not anonymous posts: onStop unhooks it (the
+       chain only ever runs !speaking, so a backgrounded reader with no TTS
+       has no business walking a 7k-file folder every 30s) and onStart puts
+       it back; the single slot also collapses duplicate chains from repeated
+       play/pause cycles into one. */
+    private var relistTick: Runnable? = null
+
     private fun armShortPageRelist(n: Int) {
         if (isDestroyed) return
         fun busy() = DownloadService.isBusy(Ownership.normKey(intent.getStringExtra("slug") ?: ""))
-        fun rearm() { if (busy()) scroll.postDelayed({ armShortPageRelist(n) }, RELIST_MS) }
+        fun rearm() {
+            if (!busy()) { relistTick = null; return }
+            relistTick?.let { scroll.removeCallbacks(it) }
+            val r = Runnable { armShortPageRelist(n) }
+            relistTick = r
+            scroll.postDelayed(r, RELIST_MS)
+        }
         if (speaking || loading) { rearm(); return }
         val started = relistForNewChapters {
             if (!speaking && nextIdx < (chapters?.ordered?.size ?: 0)) appendChapters(n)
