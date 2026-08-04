@@ -251,6 +251,9 @@ class NovelListActivity : AppCompatActivity() {
                     for (k in listOf(
                         "lastCh:", "lastChAt:", "readPos:", "readParaText:",
                         "ttsPos:", "ttsPosAt:", "ttsParaText:",
+                        /* the hot/finished marks are per-slug too — dropping
+                           them re-floated a finished novel up the sort */
+                        "novelHot:", "novelRead:",
                     )) {
                         val v = all[k + lose.slug] ?: continue
                         if (all[k + win.slug] != null) continue

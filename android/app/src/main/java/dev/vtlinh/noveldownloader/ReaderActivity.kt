@@ -205,11 +205,18 @@ class ReaderActivity : AppCompatActivity() {
        reader, and while TTS is playing the reader is deliberately kept alive,
        so the obvious "leave and come back" gesture never happened. An hour of
        listening recorded nothing and resumed at the pre-rename chapter. */
+    private var resyncing = false
+
     private fun resyncIfRenamed() {
         val slug = intent.getStringExtra("slug") ?: return
         val now = DownloadEngine.renameEpochOf(slug)
         if (now == chaptersEpoch) return
-        lifecycleScope.launch {
+        /* One at a time. onResume was the only caller and could hardly
+           overlap itself, but an append refused for a stale listing asks on
+           every scroll event, and every ask is a folder listing. */
+        if (resyncing) return
+        resyncing = true
+        val job = lifecycleScope.launch {
             val dir = intent.getStringExtra("dir") ?: return@launch
             val tree = treeUri ?: return@launch
             val folderKey = prefs.getString("tree", null) ?: return@launch
@@ -244,6 +251,18 @@ class ReaderActivity : AppCompatActivity() {
             if (loading) return@launch
             val loaded = loadedChapters.toList()
             val probes = listOfNotNull(loaded.firstOrNull(), loaded.lastOrNull())
+            /* Nothing loaded to check the new listing against, and the first
+               open has not run yet: onCreate is still walking the folder and
+               will assign ITS listing to `chapters` when it finishes. Adopting
+               here installs a fresh listing that a pre-rename one overwrites
+               moments later — and takes the new epoch with it, so those stale
+               names are then treated as trustworthy and the reading spot is
+               saved under one of them. That is exactly the confusion the epoch
+               exists to prevent, and it would be reached having verified
+               nothing at all. Leave the epoch stale; the next resume (or the
+               next rename) comes back to it over a buffer there is something
+               to measure against. */
+            if (probes.isEmpty() && !openedOnce) return@launch
             var shift: Int? = 0
             if (probes.isNotEmpty()) {
                 shift = null
@@ -287,6 +306,23 @@ class ReaderActivity : AppCompatActivity() {
             loadedChapters.lastOrNull()?.let { nextIdx = it.idx + 1 }
             chaptersEpoch = now
         }
+        job.invokeOnCompletion { resyncing = false }
+    }
+
+    /* Asking for a resync from the LOAD path (an append refused because the
+       listing moved) is not the same as asking on resume: a scroll at the end
+       of the buffer produces the ask dozens of times a second, and the resync
+       cannot always do anything about it — a shift it can't find leaves the
+       epoch stale, so the next event asks again. Each ask is a folder listing;
+       rate-limit them. onResume still asks directly. */
+    private var lastLoadPathResync = 0L
+    private val RESYNC_ASK_MS = 2000L
+
+    private fun askResync() {
+        val at = android.os.SystemClock.elapsedRealtime()
+        if (at - lastLoadPathResync < RESYNC_ASK_MS) return
+        lastLoadPathResync = at
+        resyncIfRenamed()
     }
 
     /* remember the chapter being read, per novel — the chapter list reopens
@@ -303,6 +339,10 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
     @Volatile private var loading = false
+    /* set by the first openAt — until then the buffer is empty because nothing
+       has built it yet, which is a different thing from a buffer that came out
+       empty (see resyncIfRenamed) */
+    private var openedOnce = false
     private var english = true
     private var fontSp = 16f
 
@@ -1272,7 +1312,21 @@ class ReaderActivity : AppCompatActivity() {
             if (nextIdx < (chapters?.ordered?.size ?: 0)) {
                 pendingSpeakContinue = true
                 appendChapters(LOAD_BATCH)
-            } else {
+                return
+            }
+            /* The end of the LISTING is not necessarily the end of the novel —
+               a download may have added to the folder since we read it. Check
+               once, and come back through here when the answer arrives; the
+               stop below then happens on the second pass, or right now if
+               there is nothing left to ask.
+
+               speechGen moves whenever the speech this call belongs to is
+               thrown away (a pause, a stop, an open, a fresh play), and the
+               answer arrives a folder listing later — driving speakNext from a
+               read that has since been replaced would cut the sentence that
+               replaced it. */
+            val gen = speechGen
+            if (!relistForNewChapters { if (speaking && speechGen == gen) speakNext() }) {
                 stopTts()
             }
             return
@@ -2470,6 +2524,11 @@ class ReaderActivity : AppCompatActivity() {
         if (loading || ch.ordered.isEmpty()) { pendingSpeakAfterOpen = false; return }
         stopTts()
         resumeCursor = -1
+        /* From here on `chapters` is the listing this reader was built from —
+           onCreate's walk has finished and assigned it (an open only ever runs
+           after that). resyncIfRenamed reads this to know whether a swap of its
+           own could still be undone by that assignment. */
+        openedOnce = true
         loading = true
         loadReady = false
         prependQueued = false
@@ -2509,6 +2568,13 @@ class ReaderActivity : AppCompatActivity() {
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     }
+                    /* A hole in the buffer is otherwise invisible — the text
+                       simply runs from one chapter into the one after next.
+                       The log is where the download's own troubles are already
+                       reported, and costs nothing to write. */
+                    DownloadService.appendLog(
+                        "could not read ${ch.ordered.getOrNull(i)} — skipped in the reader",
+                    )
                     continue
                 }
                 if (sb.isNotEmpty()) sb.append(SEP)
@@ -2683,6 +2749,15 @@ class ReaderActivity : AppCompatActivity() {
             appendChapters(LOAD_BATCH)
             return
         }
+        /* The end of the buffer IS the end of the listing — but that listing
+           was read when the reader opened, and a download running behind us
+           has been adding to the folder ever since. Ask once before treating
+           this as the end of the novel. Deliberately no `return`: the check is
+           asynchronous and touches nothing here, so the prepend arming below
+           must still run on this event. */
+        if (!speaking && !more && currentChapterIdx >= last.idx) {
+            relistForNewChapters { if (!speaking) appendChapters(LOAD_BATCH) }
+        }
         /* arm once the viewport is past the first loaded chapter */
         if (currentChapterIdx > first.idx) prependArmed = true
         /* SCROLLING UP back into the top loaded chapter (after having read past
@@ -2720,9 +2795,94 @@ class ReaderActivity : AppCompatActivity() {
         text.isFocusable = on
     }
 
+    /* The listing is read when the reader opens and never read again, so
+       chapters that finish downloading WHILE it is open do not exist as far as
+       it is concerned: reading aloud stopped at the last one loaded as though
+       the novel had ended there, and the scroll reader hit a floor — the only
+       way to see the rest was to leave the reader and come back in, which is
+       exactly what nobody does while listening.
+
+       So when the buffer runs out, re-list the folder once and adopt the
+       result only if it EXTENDS the listing we hold: the first ordered.size
+       names identical, in order. Everything in flight — loadedChapters' idx,
+       firstIdx, nextIdx, currentChapterIdx, the drawer's rows — is a POSITION
+       in the old listing, and a pure extension is the one change that leaves
+       every one of them meaning what it meant. Anything else (a rename, a
+       deletion) is resyncIfRenamed's job, and here we do what we did before:
+       nothing.
+
+       Once per listing: the guard only re-arms when a longer listing is
+       actually adopted, so a novel that really has ended costs one folder
+       check, not one per scroll event.
+
+       Returns true when a check was started — the caller's `onDone` then runs
+       once it has finished (adopted or not) INSTEAD of the caller concluding
+       now. */
+    private var relistedFor: ChapterListActivity.Companion.Chapters? = null
+    private var relisting = false
+
+    private fun relistForNewChapters(onDone: () -> Unit): Boolean {
+        val old = chapters ?: return false
+        if (relisting || loading || relistedFor === old) return false
+        val slug = intent.getStringExtra("slug") ?: return false
+        val dir = intent.getStringExtra("dir") ?: return false
+        val tree = treeUri ?: return false
+        val folderKey = prefs.getString("tree", null) ?: return false
+        /* A rename has already moved this listing under us: which chapter any
+           of our indices names is exactly what is in doubt, so growing the
+           buffer from either listing would be a guess. Let the resync put the
+           indices back over their own text first. */
+        if (DownloadEngine.renameEpochOf(slug) != chaptersEpoch) {
+            askResync()
+            return false
+        }
+        relisting = true
+        relistedFor = old
+        lifecycleScope.launch {
+            val fresh = withContext(Dispatchers.IO) {
+                val order = try { store.getChapterOrder(folderKey, slug) } catch (e: Exception) { null } ?: emptyMap()
+                try {
+                    ChapterListActivity.chapterNames(this@ReaderActivity, tree, dir, order, slug)
+                } catch (e: Exception) { null }
+            }
+            relisting = false
+            /* Still the same listing we measured against, still nothing
+               loading, and strictly longer with our whole listing as its
+               prefix — otherwise leave everything exactly as it was. */
+            if (fresh != null && chapters === old && !loading &&
+                fresh.ordered.size > old.ordered.size &&
+                old.ordered.indices.all { fresh.ordered[it] == old.ordered[it] }
+            ) {
+                chapters = fresh
+                /* re-arms the check for the listing just adopted, and drops
+                   the reader's last reference to the one it replaced */
+                relistedFor = null
+                drawerAdapter?.clear()
+                drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
+                drawerAdapter?.notifyDataSetChanged()
+            }
+            onDone()
+        }
+        return true
+    }
+
     private fun appendChapters(n: Int) {
         val ch = chapters ?: return
         if (loading || nextIdx >= ch.ordered.size) return
+        /* A rename has moved the listing since we read it, so nextIdx no
+           longer names the chapter it named: appending would put the WRONG
+           chapter on the end of the buffer, and while reading aloud, speak it.
+           Hand the job to the resync — it carries the buffer across by the
+           headings inside the files — and drop this append. Reading stops the
+           way the end of the book stops it: silence that can be restarted,
+           rather than a chapter nobody asked for. */
+        if (DownloadEngine.renameEpochOf(intent.getStringExtra("slug") ?: "") != chaptersEpoch) {
+            askResync()
+            /* nothing is going to arrive for TTS to continue into */
+            pendingSpeakContinue = false
+            if (speaking) stopTts()
+            return
+        }
         loading = true
         lifecycleScope.launch {
             clearTextSelection()
@@ -2734,6 +2894,12 @@ class ReaderActivity : AppCompatActivity() {
                     val start = if (text.text.isEmpty()) 0 else text.text.length + SEP.length
                     loadedChapters.add(LoadedChapter(idx, start, headingOf(body)))
                     text.append(if (text.text.isEmpty()) body else SEP + body)
+                } else {
+                    /* the buffer runs straight from one chapter into the one
+                       after next with nothing to show for it — say so */
+                    DownloadService.appendLog(
+                        "could not read ${ch.ordered.getOrNull(idx)} — skipped in the reader",
+                    )
                 }
                 nextIdx = idx + 1
                 added++
@@ -2756,6 +2922,14 @@ class ReaderActivity : AppCompatActivity() {
                     text.height in 1 until scroll.height * 3 / 2
                 ) {
                     appendChapters(n)
+                } else if (!speaking && loadReady &&
+                    nextIdx >= (chapters?.ordered?.size ?: 0) &&
+                    text.height in 1 until scroll.height * 3 / 2
+                ) {
+                    /* Out of listing on a page too short to scroll: no scroll
+                       event will ever arrive, so maybeLoadMore will never be
+                       the one to ask whether more has been downloaded. */
+                    relistForNewChapters { if (!speaking) appendChapters(n) }
                 }
             }
         }
@@ -2772,7 +2946,15 @@ class ReaderActivity : AppCompatActivity() {
             val bodies = ArrayList<Pair<Int, String>>()
             var idx = firstIdx - 1
             while (idx >= 0 && bodies.size < n) {
-                val b = readAt(idx) ?: break
+                val b = readAt(idx)
+                if (b == null) {
+                    /* stops the prepend here, leaving a hole above with
+                       nothing on screen to explain it */
+                    DownloadService.appendLog(
+                        "could not read ${ch.ordered.getOrNull(idx)} — skipped in the reader",
+                    )
+                    break
+                }
                 bodies.add(0, Pair(idx, b))
                 idx--
             }
