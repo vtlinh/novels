@@ -1,0 +1,30 @@
+{
+  "name": "tinytube",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "download": "node --env-file-if-exists=.env src/youtubeApi.js",
+    "predev": "test -s public/videos.json || npm run download",
+    "dev": "concurrently -k -n vite,test -c cyan,magenta \"vite --host\" \"vitest --watch\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "prod": "npm run download && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@tanstack/react-table": "^8.21.3",
+    "bootstrap": "^5.3.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-youtube": "^10.1.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "concurrently": "^10.0.4",
+    "jsdom": "^26.1.0",
+    "vite": "^6.3.0",
+    "vitest": "^3.1.0"
+  }
+}
