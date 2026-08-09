@@ -1,5 +1,14 @@
 name: android
 
+# ANDROID IS PAUSED (2026-08, owner's request): the `build` job below carries
+# `if: false`, so no Gradle build, no tests, no APK is made or published —
+# while the job still REPORTS, as skipped, which auto-merge.yml counts as
+# passing. That keeps merges for the rest of the repository (tinytube/, the
+# landing page, the worker) flowing, and pages.yml keeps serving the LAST
+# published APK. The flip side: while paused, a PR touching android/** merges
+# with its code untested — resume (restore build's real `if:`, noted inline)
+# before doing android work again.
+
 on:
   push:
     # main only. Feature-branch pushes built too, and since those runs shared
@@ -141,7 +150,9 @@ jobs:
   # string. Renaming it silently stops the merge gate waiting for Android.
   build:
     needs: changes
-    if: needs.changes.outputs.android == 'true'
+    # PAUSED — see the note at the top of this file. To resume android work,
+    # restore:  if: needs.changes.outputs.android == 'true'
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
