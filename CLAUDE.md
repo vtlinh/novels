@@ -4,6 +4,16 @@
   GitHub Pages landing page (`index.html`) whose only job is the app-download
   button. The old browser-based downloader and its Cloudflare Worker proxy
   were removed — all features live in the app now.
+- `tinytube/` is an **unrelated second app** sharing this repo's Pages site: a
+  copy of [pathikrit/TinyTube](https://github.com/pathikrit/TinyTube), a
+  kid-safe YouTube viewer (Vite + React), published at `/novels/tinytube/`.
+  It is self-contained — its own npm project, tests, and docs
+  (`tinytube/AGENTS.md`, which governs it in place of this file). Nothing in
+  it touches the Android app or the Worker. A repository gets only ONE Pages
+  deployment, so `pages.yml` stages both sites into a single artifact rather
+  than each having its own workflow; `tinytube.yml` tests it on every PR that
+  touches it, so a break there is caught before it can stop `pages` and take
+  the landing page and APK download with it.
 - `worker.js` + `wrangler.toml` are that Worker brought back for DEVELOPMENT
   ONLY — an authenticated, host-restricted fetch proxy so a session with no
   browser can read a real page (capturing the pages under each site's

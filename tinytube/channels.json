@@ -1,0 +1,14 @@
+[
+  { "channel": "msrachel", "min_age": 2, "max_age": 3 },
+  { "channel": "Blippi", "min_age": 2, "max_age": 3 },
+  { "channel": "Numberblocks", "min_age": 3, "max_age": 4 },
+  { "channel": "OfficialAlphablocks", "min_age": 3, "max_age": 4 },
+  { "channel": "vooksstorybooks", "min_age": 3, "max_age": 5 },
+  { "channel": "SciShowKids", "min_age": 4, "max_age": 5 },
+  { "channel": "StorylineOnline", "min_age": 4, "max_age": 6 },
+  { "channel": "MysterySci", "min_age": 4, "max_age": 5 },
+  { "channel": "peekaboo_kidz", "min_age": 4, "max_age": 5 },
+  { "channel": "JackHartmann", "min_age": 4, "max_age": 5 },
+  { "channel": "NumberjacksTV", "min_age": 5, "max_age": 6 },
+  { "channel": "HomeschoolPop", "min_age": 5, "max_age": 6 }
+]

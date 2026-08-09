@@ -4,18 +4,27 @@ name: pages
 # so the download button serves the file straight from the Pages domain instead
 # of bouncing through a github.com release redirect (which some mobile browsers
 # turn into an extra hop, an interstitial, or a failed download).
+#
+# It also publishes the TinyTube SPA under /tinytube/. A repository gets ONE
+# Pages deployment, so the two sites cannot have a workflow each — whichever
+# ran last would replace the other's whole site. They are staged into one
+# artifact here instead.
 on:
   push:
     branches: [ "main" ]
     paths:
       - "index.html"
       - "icon-*.png"
+      - "tinytube/**"
       - ".github/workflows/pages.yml"
   # Re-publish after every APK build so the bundled file is never stale.
   workflow_run:
     workflows: [ "android" ]
     types: [ completed ]
     branches: [ "main" ]
+  # Weekly, to refresh TinyTube's videos.json from the approved channels.
+  schedule:
+    - cron: "0 6 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -60,6 +69,57 @@ jobs:
           gh release download android-latest --repo "$GITHUB_REPOSITORY" \
             --pattern version.json --output site/version.json --clobber \
             || echo "::warning::version.json not available yet"
+
+      # ---- TinyTube (site/tinytube/) -------------------------------------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tinytube/package-lock.json
+
+      - run: npm ci
+        working-directory: tinytube
+
+      # The currently deployed videos.json, used as a per-channel stale
+      # fallback so one broken channel or API hiccup never blanks the gallery.
+      # Derived from $GITHUB_REPOSITORY rather than github.event.repository,
+      # which is not populated the same way across all four triggers above.
+      - name: Seed with the currently deployed video list
+        run: |
+          echo "SITE_PATH=/${GITHUB_REPOSITORY#*/}/tinytube/" >> "$GITHUB_ENV"
+          curl -fsSL "https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}/tinytube/videos.json" \
+            -o /tmp/seed.json || true
+
+      # videos.json is not optional — the SPA shows its error screen when the
+      # fetch 404s. So: build it from the API when the key is there, else fall
+      # back to the deployed copy, else ship an empty curated list so the app
+      # still loads and a parent can add channels with their own key.
+      - name: Refresh videos.json
+        working-directory: tinytube
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          if [ -n "$YOUTUBE_API_KEY" ]; then
+            npm run download -- --seed /tmp/seed.json
+          elif [ -s /tmp/seed.json ]; then
+            echo "::warning::No YOUTUBE_API_KEY secret — reusing the deployed videos.json unchanged."
+            cp /tmp/seed.json public/videos.json
+          else
+            echo "::warning::No YOUTUBE_API_KEY secret and nothing deployed yet — publishing an empty channel list. Add the secret (Settings → Secrets → Actions) to populate the curated gallery."
+            printf '{"schema_version":2,"generated_at":"%s","channels":[]}' "$(date -u +%FT%TZ)" > public/videos.json
+          fi
+
+      - run: npm test
+        working-directory: tinytube
+
+      - name: Build TinyTube
+        working-directory: tinytube
+        env:
+          BASE_PATH: ${{ env.SITE_PATH }}
+        run: npm run build
+
+      - name: Stage TinyTube under /tinytube/
+        run: cp -r tinytube/dist site/tinytube
 
       - uses: actions/configure-pages@v5
         with:

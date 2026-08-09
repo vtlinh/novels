@@ -1,0 +1,304 @@
+html, body, #root {
+  height: 100%;
+  background: #000;
+  touch-action: manipulation; /* no double-tap zoom on kid taps; pull-to-refresh still works */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* ---------- gallery ---------- */
+
+.gallery {
+  min-height: 100%;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.gallery-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(6px);
+}
+
+.video-card {
+  background: #1a1a1a;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.video-card:active {
+  transform: scale(0.97);
+}
+
+.video-card .card-img-top {
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.video-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: #fff;
+}
+
+.card-progress {
+  height: 5px;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.watched-badge {
+  color: #2ecc71;
+  font-size: 1.4rem;
+  text-shadow: 0 0 4px #000;
+}
+
+/* ---------- parent gate & parent mode ---------- */
+
+.math-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #000;
+  color: #fff;
+}
+
+.settings {
+  min-height: 100%;
+  padding-top: calc(1.5rem + env(safe-area-inset-top));
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+}
+
+/* the global kid-proof user-select:none must not apply on grown-up pages —
+   parents need to select/paste (API key, channel URLs) */
+.settings,
+.enroll-gate {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* dual-handle range: two stacked native sliders, only the thumbs take touches */
+.dual-slider {
+  position: relative;
+  height: 2.5rem;
+}
+
+.dual-slider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.dual-slider input[type='range'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  background: none;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.dual-slider input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #e62117;
+  border: 3px solid #fff;
+  cursor: pointer;
+}
+
+.dual-slider input[type='range']::-moz-range-thumb {
+  pointer-events: auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #e62117;
+  border: 3px solid #fff;
+  cursor: pointer;
+}
+
+/* age boundary values rendered on the slider thumbs themselves */
+.dual-slider .thumb-label {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); /* extra contrast on the red thumb */
+}
+
+/* watch-quota slider: time already used, drawn under the thumb on the same 0-4h track */
+.dual-slider .track-fill {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 3px;
+  background: rgba(230, 33, 23, 0.55);
+}
+
+/* the h:mm value needs a bigger thumb than the age slider's 32px to stay
+   readable; min-width makes the inline stats table wrap below on phones */
+.quota-slider {
+  min-width: 260px;
+  height: 3rem;
+}
+
+.quota-slider input[type='range']::-webkit-slider-thumb {
+  width: 44px;
+  height: 44px;
+}
+
+.quota-slider input[type='range']::-moz-range-thumb {
+  width: 44px;
+  height: 44px;
+}
+
+.quota-slider .thumb-label {
+  font-size: 0.8rem;
+}
+
+/* channel rows the kid won't see (outside the age filter, or checkbox off):
+   still editable, visibly inactive — but the enable checkbox in the first
+   cell keeps full strength so the way back stays obvious */
+tr.out-of-range td {
+  opacity: 0.35;
+}
+
+tr.out-of-range td:first-child {
+  opacity: 1;
+}
+
+tr.out-of-range img {
+  filter: grayscale(1);
+}
+
+/* ---------- player ---------- */
+
+.player-view {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  overscroll-behavior: none; /* no accidental pull-to-refresh mid-video */
+}
+
+/* force landscape on phones/tablets held in portrait: rotate the whole
+   player 90° (iOS has no orientation-lock API; Android locks for real and
+   then this media query simply no longer matches) */
+@media (orientation: portrait) and (pointer: coarse) {
+  .player-view {
+    right: auto;
+    bottom: auto;
+    width: 100dvh;
+    height: 100dvw;
+    transform: rotate(90deg) translateY(-100%);
+    transform-origin: top left;
+  }
+}
+
+.player-topbar {
+  height: 56px;
+  flex: none;
+  background: #111;
+  padding-top: env(safe-area-inset-top);
+  box-sizing: content-box;
+}
+
+.btn-ctl-sm {
+  width: 44px;
+  height: 44px;
+  font-size: 1.1rem;
+}
+
+.yt-frame, .yt-iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.touch-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  touch-action: none;
+}
+
+.paused-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  /* opaque black under the thumbnail: even if the image fails to load,
+     YouTube's paused tray / end screen must stay covered */
+  background-color: #000;
+  background-size: cover;
+  background-position: center;
+}
+
+.paused-overlay-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+}
+
+.btn-play-big {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: #e62117;
+  color: #fff;
+  font-size: 2.2rem;
+  border: none;
+}
+
+.btn-play-big:active {
+  transform: scale(0.94);
+}
+
+.controls-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom)) !important;
+}
+
+.btn-ctl {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.4rem;
+  border: none;
+}
+
+.btn-ctl:active {
+  background: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}

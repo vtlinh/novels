@@ -31,6 +31,8 @@
   a.download:hover { transform: translateY(-2px); box-shadow: 0 12px 34px rgba(79, 140, 255, .5); }
   a.download:active { transform: translateY(0); }
   p.note { color: var(--muted); font-size: 13px; margin-top: 22px; }
+  p.note a { color: var(--accent); text-decoration: none; }
+  p.note a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -43,6 +45,9 @@
        bouncing through a github.com release redirect -->
   <a class="download" id="dl" href="novel-downloader.apk" download="novel-downloader.apk">Download for Android</a>
   <p class="note" id="ver">The app checks for updates and upgrades itself.</p>
+  <!-- the other site published from this repo; otherwise unreachable without
+       knowing the URL -->
+  <p class="note"><a href="tinytube/">TinyTube</a> — kid-safe YouTube, parent-approved channels only.</p>
 </main>
 <script>
   /* this page replaced an installable web app — clean up its old service
