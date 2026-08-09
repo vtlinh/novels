@@ -1,26 +1,9 @@
 # Repo notes for Claude
 
-- **Android work is PAUSED** (owner's request, 2026-08): android.yml's `build`
-  job is `if: false`, so no android tests run and no APK is built or
-  published — the job reports `skipped`, which auto-merge counts as passing,
-  so merges for the rest of the repo still flow and the landing page keeps
-  serving the last published APK. Don't do android feature work, and don't
-  expect a PR touching `android/**` to be tested; to resume, restore the
-  `if:` noted inline in android.yml. (There is no iOS app in this repo.)
 - This repo is the **native Android app** (`android/`, Kotlin) plus a static
   GitHub Pages landing page (`index.html`) whose only job is the app-download
   button. The old browser-based downloader and its Cloudflare Worker proxy
   were removed — all features live in the app now.
-- `tinytube/` is an **unrelated second app** sharing this repo's Pages site: a
-  copy of [pathikrit/TinyTube](https://github.com/pathikrit/TinyTube), a
-  kid-safe YouTube viewer (Vite + React), published at `/novels/tinytube/`.
-  It is self-contained — its own npm project, tests, and docs
-  (`tinytube/AGENTS.md`, which governs it in place of this file). Nothing in
-  it touches the Android app or the Worker. A repository gets only ONE Pages
-  deployment, so `pages.yml` stages both sites into a single artifact rather
-  than each having its own workflow; `tinytube.yml` tests it on every PR that
-  touches it, so a break there is caught before it can stop `pages` and take
-  the landing page and APK download with it.
 - `worker.js` + `wrangler.toml` are that Worker brought back for DEVELOPMENT
   ONLY — an authenticated, host-restricted fetch proxy so a session with no
   browser can read a real page (capturing the pages under each site's
