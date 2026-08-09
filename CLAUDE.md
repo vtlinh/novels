@@ -1,5 +1,12 @@
 # Repo notes for Claude
 
+- **Android work is PAUSED** (owner's request, 2026-08): android.yml's `build`
+  job is `if: false`, so no android tests run and no APK is built or
+  published — the job reports `skipped`, which auto-merge counts as passing,
+  so merges for the rest of the repo still flow and the landing page keeps
+  serving the last published APK. Don't do android feature work, and don't
+  expect a PR touching `android/**` to be tested; to resume, restore the
+  `if:` noted inline in android.yml. (There is no iOS app in this repo.)
 - This repo is the **native Android app** (`android/`, Kotlin) plus a static
   GitHub Pages landing page (`index.html`) whose only job is the app-download
   button. The old browser-based downloader and its Cloudflare Worker proxy
