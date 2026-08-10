@@ -580,7 +580,24 @@ class ReaderActivity : AppCompatActivity() {
             val consume = swallowTap
             if (ev.actionMasked == android.view.MotionEvent.ACTION_UP ||
                 ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL
-            ) swallowTap = false
+            ) {
+                /* Center the tapped sentence AGAIN once the finger is off the
+                   glass. speakNext already centered it, but that scroll starts
+                   while the double-tap's second touch is still down — a few
+                   pixels of drift past the touch slop and the ScrollView
+                   intercepts the gesture and kills the animation, and nothing
+                   retries until the NEXT sentence: a long one leaves the page
+                   parked at the tap for its entire reading (reported from
+                   device — highlight and speech moved, the page didn't).
+                   Re-issuing when the gesture ends leaves no touch stream to
+                   interfere. Skipped while a border append is pending:
+                   resumeCursor still names the pre-tap sentence there, and
+                   the append's own speakNext centers the right one. */
+                if (swallowTap && speaking && !pendingSpeakContinue && resumeCursor >= 0) {
+                    scrollToSpoken(resumeCursor)
+                }
+                swallowTap = false
+            }
             consume
         }
 
