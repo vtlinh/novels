@@ -39,9 +39,11 @@ on:
         required: false
         default: ""
 
-# contents: write publishes the release. actions: read is what lets this run
-# download an artifact belonging to a DIFFERENT run — the reuse path below.
-# pull-requests: read is for the `changes` job asking which files a PR touched.
+# contents: write publishes the release. actions: write covers two calls: read
+# access lets this run download an artifact belonging to a DIFFERENT run (the
+# reuse path below), and write is what lets the publish dispatch pages.yml to
+# rebundle the landing page with the fresh APK. pull-requests: read is for the
+# `changes` job asking which files a PR touched.
 #
 # A permissions block REPLACES the defaults rather than adding to them, so
 # every scope any job here touches has to be listed. Leaving one out does not
@@ -49,7 +51,7 @@ on:
 # symptom is that everything builds as if nothing were filtered.
 permissions:
   contents: write
-  actions: read
+  actions: write
   pull-requests: read
 
 # main: only one publish at a time. Two overlapping runs both clobber the fixed
@@ -333,3 +335,21 @@ jobs:
           gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber \
             dist/app-release.apk dist/app-debug.apk
           gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber dist/version.json
+
+      # Rebundle the landing page with the APK that was just published.
+      #
+      # pages.yml carries a workflow_run trigger meant to do exactly this, and
+      # it has not fired since auto-merge took over merging (measured: zero
+      # workflow_run pages runs since 2026-08-01, while publishes completed on
+      # the 4th, 9th and 10th). The publish runs auto-merge creates are
+      # GITHUB_TOKEN dispatches, and their completion does not cascade into
+      # workflow_run events the way a push-triggered run's does. A dispatch
+      # from in here is the same mechanism auto-merge uses on this workflow,
+      # which is known to work. If the workflow_run trigger ever fires again
+      # the two runs share pages.yml's concurrency group and the loser is
+      # cancelled, so this is never a double deploy.
+      - name: Redeploy the landing page with this APK
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main

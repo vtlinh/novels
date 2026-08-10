@@ -12,6 +12,15 @@ on:
       - "icon-*.png"
       - ".github/workflows/pages.yml"
   # Re-publish after every APK build so the bundled file is never stale.
+  #
+  # DEAD in practice since auto-merge took over merging (measured 2026-08-10:
+  # zero workflow_run runs here after 2026-08-01, across publishes on the 4th,
+  # 9th and 10th). The publish runs auto-merge creates are GITHUB_TOKEN
+  # dispatches, and their completion does not cascade into workflow_run
+  # events. Kept for the day a push-triggered android run happens again; the
+  # working path is the explicit dispatch at the end of android.yml's publish,
+  # plus one from auto-merge for merges that publish nothing. Both share this
+  # workflow's concurrency group with any run this trigger produces.
   workflow_run:
     workflows: [ "android" ]
     types: [ completed ]

@@ -181,4 +181,17 @@ jobs:
             gh workflow run android.yml --repo "$REPO" --ref main -f reuse_run_id="$RUN_ID"
           else
             echo "PR #$PR touched nothing under android/ — not publishing a build."
+            # Redeploy the Pages site anyway. While the repository's Pages
+            # source is "Deploy from a branch", GitHub's legacy build deploys
+            # the RAW REPO TREE on every push to main — including this merge —
+            # clobbering the artifact site (no bundled APK, worker.js served to
+            # the world). pages.yml's own push trigger cannot catch that: a
+            # GITHUB_TOKEN merge triggers no push workflows. So re-land the
+            # artifact here. Android merges get theirs from the publish run,
+            # which dispatches pages.yml after uploading the fresh APK.
+            # Redundant once the Pages source is flipped to "GitHub Actions"
+            # in the repo settings — but a 20-second deploy is cheap insurance
+            # against the setting ever flipping back.
+            echo "Redeploying the landing page over the legacy branch build"
+            gh workflow run pages.yml --repo "$REPO" --ref main
           fi

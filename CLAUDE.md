@@ -16,6 +16,18 @@
   those are unavailable to the app too. A challenge is reported as a 409 rather
   than returned as if it were the page; `worker-render.js` (Browser Rendering,
   paid plan) is the fallback if a whole site ever starts refusing.
+- **Pages has two rival deploy paths.** The repo's Pages SOURCE setting has
+  been "Deploy from a branch" since July: GitHub's legacy build deploys the
+  raw repo tree on every push to main (399 runs and counting), clobbering
+  pages.yml's artifact — no bundled APK, worker.js served to the world. It
+  went unseen for weeks because the artifact always re-landed on top via
+  pages.yml's workflow_run trigger — until auto-merge's arrival (2026-08-01)
+  killed that trigger: GITHUB_TOKEN-dispatched publish runs don't cascade
+  workflow_run events (measured — zero firings since). The workflows now
+  re-land the artifact by explicit dispatch (android.yml after each publish,
+  auto-merge for publish-less merges), but the real fix only the owner can
+  make: **Settings → Pages → Source = "GitHub Actions"**, which stops the
+  legacy builds altogether. No API the workflows can reach can flip it.
 - The app fetches novel sites directly (no proxy/CORS). The
   `.github/workflows/android.yml` action builds a signed release APK on every
   push touching `android/` and, on `main`, publishes it (plus `version.json`)
