@@ -198,9 +198,8 @@
                 android:indeterminateTint="@color/fg"
                 android:visibility="gone" />
 
-            <!-- ♪: monochrome, universally rendered, and reads as "audio" —
-                 the voice/rate/pitch sheet lives behind it -->
-            <TextView
+            <!-- microphone: the voice/rate/pitch sheet lives behind it -->
+            <ImageView
                 android:id="@+id/ttsSettingsBtn"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -209,9 +208,8 @@
                 android:paddingEnd="16dp"
                 android:paddingTop="8dp"
                 android:paddingBottom="8dp"
-                android:text="&#x266A;"
-                android:textSize="26sp"
-                android:textColor="@color/fg"
+                android:src="@drawable/ic_mic"
+                android:contentDescription="Voice settings"
                 android:clickable="true"
                 android:focusable="true" />
         </FrameLayout>

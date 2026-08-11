@@ -604,7 +604,7 @@ class ReaderActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
         findViewById<TextView>(R.id.ttsPrevBtn).setOnClickListener { skipParagraph(forward = false) }
         findViewById<TextView>(R.id.ttsNextBtn).setOnClickListener { skipParagraph(forward = true) }
-        findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
+        findViewById<android.view.View>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
         /* the not-ready spinner doubles as a retry button once a bind gave up */
         findViewById<android.widget.ProgressBar>(R.id.ttsSpinner).setOnClickListener {
             if (!ttsReady && !ttsConnecting) initTts()
