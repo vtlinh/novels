@@ -602,6 +602,8 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
+        findViewById<TextView>(R.id.ttsPrevBtn).setOnClickListener { skipParagraph(forward = false) }
+        findViewById<TextView>(R.id.ttsNextBtn).setOnClickListener { skipParagraph(forward = true) }
         findViewById<TextView>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
         /* the not-ready spinner doubles as a retry button once a bind gave up */
         findViewById<android.widget.ProgressBar>(R.id.ttsSpinner).setOnClickListener {
@@ -682,6 +684,14 @@ class ReaderActivity : AppCompatActivity() {
                 }
                 override fun onStop() {
                     runOnUiThread { applyMediaAction(MediaKeys.Want.PAUSE) }
+                }
+                /* AVRCP's skip commands (a headset's double/triple tap often
+                   arrives as these rather than as key events) */
+                override fun onSkipToNext() {
+                    runOnUiThread { applyMediaAction(MediaKeys.Want.NEXT) }
+                }
+                override fun onSkipToPrevious() {
+                    runOnUiThread { applyMediaAction(MediaKeys.Want.PREV) }
                 }
             })
             isActive = true
@@ -1182,7 +1192,9 @@ class ReaderActivity : AppCompatActivity() {
                 .setActions(
                     android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY or
                         android.support.v4.media.session.PlaybackStateCompat.ACTION_PAUSE or
-                        android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY_PAUSE,
+                        android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                        android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                        android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS,
                 )
                 .setState(state, pos, 0f)
                 .build(),
@@ -1200,6 +1212,8 @@ class ReaderActivity : AppCompatActivity() {
         when (MediaKeys.act(want, speaking)) {
             MediaKeys.Act.START -> playButtonAction()
             MediaKeys.Act.PAUSE -> pauseTts()
+            MediaKeys.Act.NEXT_PARA -> skipParagraph(forward = true)
+            MediaKeys.Act.PREV_PARA -> skipParagraph(forward = false)
             MediaKeys.Act.NOTHING -> {
                 /* A pause with nothing to pause still cancels a play that is
                    waiting on the engine to come back — otherwise the read
@@ -1316,6 +1330,62 @@ class ReaderActivity : AppCompatActivity() {
         updateKeepAwake()
         updatePlayBtn()
         speakNext()
+    }
+
+    /* The ❮/❯ footer buttons and a headset's skip keys: move the reading
+       spot a paragraph at a time. ❯ goes to the next paragraph; ❮ back to
+       the start of the one being read when it is mid-paragraph, and to the
+       previous paragraph when it is already at a start — so tapping it
+       repeatedly walks backwards, the way every player's ⏮ behaves.
+
+       While speaking, reading continues from the new spot through the same
+       startTtsFrom path the double-tap uses. Paused, the resume point moves
+       and is highlighted and scrolled to, so the next play — tonight's or
+       next week's — picks it up: the move is saved like a spoken sentence. */
+    private fun skipParagraph(forward: Boolean) {
+        val body = text.text.toString()
+        if (body.isEmpty()) return
+        /* the sentence being/last spoken; before any reading, the top of the
+           viewport — the same place the play button would start from */
+        val anchor = if (resumeCursor >= 0) {
+            resumeCursor
+        } else {
+            val layout = text.layout ?: return
+            layout.getLineStart(
+                layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
+            )
+        }
+        /* blank lines and the ⁂ chapter separator are not paragraphs — skips
+           step over them, landing on a chapter heading like any other line */
+        fun isBreak(c: Char) = c == '\n' || c == ' ' || c == '⁂'
+        val target: Int
+        if (forward) {
+            var i = body.indexOf('\n', anchor)
+            if (i == -1) return   // last loaded paragraph — nowhere to go yet
+            while (i < body.length && isBreak(body[i])) i++
+            if (i >= body.length) return
+            target = i
+        } else {
+            val pStart = paraStartOf(anchor)
+            val firstSent = nextSentence(body, pStart)?.first ?: pStart
+            if (anchor > firstSent) {
+                target = firstSent   // mid-paragraph → its start
+            } else {
+                var i = pStart - 1
+                while (i >= 0 && isBreak(body[i])) i--
+                if (i < 0) return   // top of the buffer
+                target = paraStartOf(i)
+            }
+        }
+        if (speaking) {
+            startTtsFrom(target)
+            return
+        }
+        resumeCursor = sentStartOf(target)
+        nextSentence(body, resumeCursor)?.let { setHighlight(it.first, it.second) }
+        scroll.smoothScrollTo(0, navScrollY(resumeCursor, fifth = true))
+        saveTtsPos(resumeCursor)
+        updateMediaSessionState()
     }
 
     /* speak the next sentence: auto-detect its language (switching the whole
@@ -2423,7 +2493,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun adjustFont(delta: Float) {
-        fontSp = (fontSp + delta).coerceIn(12f, 26f)
+        fontSp = (fontSp + delta).coerceIn(12f, 50f)
         prefs.edit().putFloat("readerFontSize", fontSp).apply()
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
     }

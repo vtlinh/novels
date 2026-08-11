@@ -53,12 +53,26 @@ class MediaKeysTest {
         assertEquals(MediaKeys.Want.TOGGLE, press(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
         /* the single button on a one-button headset */
         assertEquals(MediaKeys.Want.TOGGLE, press(KeyEvent.KEYCODE_HEADSETHOOK))
+        /* the double/triple tap on a one-button headset */
+        assertEquals(MediaKeys.Want.NEXT, press(KeyEvent.KEYCODE_MEDIA_NEXT))
+        assertEquals(MediaKeys.Want.PREV, press(KeyEvent.KEYCODE_MEDIA_PREVIOUS))
+    }
+
+    /* A skip moves the reading spot whether or not it is being read out —
+       paused, it moves where the next play resumes, so it must never be
+       swallowed by the not-speaking state the way a dedicated pause is. */
+    @Test
+    fun `a skip works speaking or paused`() {
+        assertEquals(MediaKeys.Act.NEXT_PARA, MediaKeys.act(MediaKeys.Want.NEXT, speaking = true))
+        assertEquals(MediaKeys.Act.NEXT_PARA, MediaKeys.act(MediaKeys.Want.NEXT, speaking = false))
+        assertEquals(MediaKeys.Act.PREV_PARA, MediaKeys.act(MediaKeys.Want.PREV, speaking = true))
+        assertEquals(MediaKeys.Act.PREV_PARA, MediaKeys.act(MediaKeys.Want.PREV, speaking = false))
     }
 
     @Test
     fun `keys that are not ours are left alone`() {
         assertNull(press(KeyEvent.KEYCODE_VOLUME_UP))
-        assertNull(press(KeyEvent.KEYCODE_MEDIA_NEXT))
+        assertNull(press(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD))
     }
 
     /* One dispatch per press. The UP half is the same press ending, and a
