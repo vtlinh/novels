@@ -167,7 +167,7 @@
                     android:background="@drawable/bg_play_circle"
                     android:text="&#x25B6;&#xFE0E;"
                     android:textSize="26sp"
-                    android:textColor="@color/bg"
+                    android:textColor="@color/fg"
                     android:clickable="true"
                     android:focusable="true" />
 

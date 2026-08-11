@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- the TTS footer's big round play/pause button -->
+<!-- the TTS footer's big round play/pause button: neutral, not accent —
+     a colored fill was tried and asked off -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="@color/accent" />
+    <solid android:color="@color/btn_secondary" />
 </shape>
