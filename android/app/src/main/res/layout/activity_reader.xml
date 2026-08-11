@@ -124,9 +124,10 @@
         </FrameLayout>
 
         <!-- TTS footer: prev-paragraph / play / next-paragraph centered,
-             voice settings on the right. The skip glyphs are Dingbats
-             (like the pause bars) so they render in the text style and
-             color everywhere instead of falling back to the emoji font. -->
+             voice settings on the right. The skip icons are doubled
+             ◀/▶ triangles with the text-presentation selector (the same
+             glyph the play button uses) — the ⏪/⏩ code points fall back
+             to the emoji font on many devices, these don't. -->
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -147,8 +148,9 @@
                     android:paddingEnd="24dp"
                     android:paddingTop="12dp"
                     android:paddingBottom="12dp"
-                    android:text="&#x276E;"
-                    android:textSize="30sp"
+                    android:text="&#x25C0;&#xFE0E;&#x25C0;&#xFE0E;"
+                    android:textSize="22sp"
+                    android:letterSpacing="-0.12"
                     android:textColor="@color/fg"
                     android:clickable="true"
                     android:focusable="true" />
@@ -177,8 +179,9 @@
                     android:paddingEnd="24dp"
                     android:paddingTop="12dp"
                     android:paddingBottom="12dp"
-                    android:text="&#x276F;"
-                    android:textSize="30sp"
+                    android:text="&#x25B6;&#xFE0E;&#x25B6;&#xFE0E;"
+                    android:textSize="22sp"
+                    android:letterSpacing="-0.12"
                     android:textColor="@color/fg"
                     android:clickable="true"
                     android:focusable="true" />
