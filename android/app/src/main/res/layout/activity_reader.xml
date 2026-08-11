@@ -123,26 +123,64 @@
                 android:visibility="gone" />
         </FrameLayout>
 
-        <!-- TTS footer: play/pause centered, voice settings on the right -->
+        <!-- TTS footer: prev-paragraph / play / next-paragraph centered,
+             voice settings on the right. The skip glyphs are Dingbats
+             (like the pause bars) so they render in the text style and
+             color everywhere instead of falling back to the emoji font. -->
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@color/card">
 
-            <TextView
-                android:id="@+id/ttsPlayBtn"
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
-                android:paddingStart="24dp"
-                android:paddingEnd="24dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:text="&#x25B6;&#xFE0E;"
-                android:textSize="22sp"
-                android:textColor="@color/fg"
-                android:clickable="true"
-                android:focusable="true" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/ttsPrevBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:text="&#x276E;"
+                    android:textSize="18sp"
+                    android:textColor="@color/fg"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <TextView
+                    android:id="@+id/ttsPlayBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="24dp"
+                    android:paddingEnd="24dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:text="&#x25B6;&#xFE0E;"
+                    android:textSize="22sp"
+                    android:textColor="@color/fg"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <TextView
+                    android:id="@+id/ttsNextBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:text="&#x276F;"
+                    android:textSize="18sp"
+                    android:textColor="@color/fg"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
 
             <!-- shown in place of the play button while the TTS engine is
                  still binding (tap = retry a given-up bind) -->
