@@ -138,4 +138,12 @@
                 android:dividerHeight="1dp" />
         </LinearLayout>
     </FrameLayout>
+
+    <include
+        layout="@layout/console_footer"
+        android:layout_width="match_parent"
+        android:layout_height="54dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginBottom="8dp" />
 </LinearLayout>

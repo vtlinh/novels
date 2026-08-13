@@ -75,6 +75,8 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
         </ScrollView>
+
+        <include layout="@layout/console_footer" />
     </LinearLayout>
 
     <include layout="@layout/drawer_menu" />

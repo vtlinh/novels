@@ -412,7 +412,8 @@ class DownloadService : Service() {
         )
         val openIntent = PendingIntent.getActivity(
             this, 1,
-            Intent(this, MainActivity::class.java),
+            Intent(this, NovelListActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             PendingIntent.FLAG_IMMUTABLE,
         )
         val queued = queueSize(this)

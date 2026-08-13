@@ -8,17 +8,6 @@
     android:paddingTop="28dp">
 
     <TextView
-        android:id="@+id/navHome"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Home"
-        android:textSize="16sp"
-        android:textColor="@color/fg"
-        android:padding="16dp"
-        android:clickable="true"
-        android:focusable="true" />
-
-    <TextView
         android:id="@+id/navBrowser"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

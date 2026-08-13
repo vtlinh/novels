@@ -10,8 +10,8 @@ import kotlinx.coroutines.SupervisorJob
 
 /* Watches the whole app's foreground lifecycle so the self-update check runs
    from ANY screen — the reader, chapter list, etc. Previously it only ran on
-   the Home screen's onResume, which the "resume into the reader" flow skips,
-   so auto-updates never fired. */
+   the old Home screen's onResume, which the "resume into the reader" flow
+   skips, so auto-updates never fired. */
 class App : Application() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
