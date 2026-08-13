@@ -193,21 +193,19 @@ class ChapterListActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.menuBtn).setOnClickListener {
             drawer.openDrawer(androidx.core.view.GravityCompat.START)
         }
-        findViewById<TextView>(R.id.navHome).setOnClickListener {
-            /* REORDER_TO_FRONT, not CLEAR_TOP: clearing would destroy the
-               activities above home — including a reader that's reading
-               aloud. Reordering brings home forward and leaves TTS alive. */
-            startActivity(
-                Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-            )
-            finish()
-        }
         findViewById<TextView>(R.id.navBrowser).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, BrowserActivity::class.java))
         }
         findViewById<TextView>(R.id.navNovels).setOnClickListener {
-            startActivity(Intent(this, NovelListActivity::class.java))
+            /* REORDER_TO_FRONT, not CLEAR_TOP: clearing would destroy the
+               activities above the library — including a reader that's
+               reading aloud. Reordering brings the library forward and
+               leaves TTS alive. */
+            startActivity(
+                Intent(this, NovelListActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
             finish()
         }
         findViewById<TextView>(R.id.navSettings).setOnClickListener {
@@ -218,6 +216,8 @@ class ChapterListActivity : AppCompatActivity() {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, AboutActivity::class.java))
         }
+
+        ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
     }
 
     /* The reader leaves by bringing a chapter list forward with

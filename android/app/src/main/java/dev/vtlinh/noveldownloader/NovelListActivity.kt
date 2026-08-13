@@ -3,6 +3,7 @@ package dev.vtlinh.noveldownloader
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.view.View
@@ -10,6 +11,7 @@ import android.widget.Button
 import android.widget.Toast
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
@@ -22,19 +24,25 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
-/* List Novels: every novel in the saved download folder, resumable with one
-   tap — no URLs to remember. Rows come from three sources, deduped by slug:
+/* Library (launcher): every novel in the saved download folder, resumable with
+   one tap — no URLs to remember. Rows come from three sources, deduped by slug:
    the novels registry, the chapter index, and a scan of the root folder's
    subdirectories (novels downloaded before the registry existed, or copied
    in from elsewhere). "Check status" asks each site for its chapter count,
    finished flag, and author; a finished novel with everything on disk shows
-   a Complete tag instead of a Download button and sinks to the bottom. */
+   a Complete tag instead of a Download button and sinks to the bottom.
+
+   Cold start: resume a live reading session when one exists; otherwise open
+   the Browser when this list is empty. Console output (formerly the Home
+   screen log) lives in the swipe-away footer. */
 class NovelListActivity : AppCompatActivity() {
 
     companion object {
         /* slugs (normalized: letters+digits only) the user marked as garbage.
-           MainActivity checks this before re-downloading such a novel. */
+           Share / browser download paths check this before re-downloading. */
         const val GARBAGE_KEY = "garbageSlugs"
+
+        const val EXTRA_SHARE_URL = "shareUrl"
 
         /* the rule lives in Sites.slugKey — which says why it must go through
            the site's own normalize() — so it can be tested without loading an
@@ -45,6 +53,30 @@ class NovelListActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
     private val store by lazy { DownloadStore(this) }
     private var folderKey: String? = null
+
+    /* Novel URL waiting on a download folder being picked (share path). */
+    private var pendingShareUrl: String?
+        get() = prefs.getString("pendingShareUrl", null)
+        set(v) {
+            prefs.edit().apply {
+                if (v == null) remove("pendingShareUrl") else putString("pendingShareUrl", v)
+            }.apply()
+        }
+
+    private val pickFolder =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+            val pending = pendingShareUrl
+            pendingShareUrl = null
+            if (uri != null) {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+                prefs.edit().putString("tree", uri.toString()).apply()
+                folderKey = uri.toString()
+                pending?.let { startShareDownload(it) }
+            }
+        }
 
     /* ---- per-novel user marks (hot / finished / garbage) ---- */
     private fun isHot(slug: String) = prefs.getBoolean("novelHot:$slug", false)
@@ -72,12 +104,17 @@ class NovelListActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.checkBtn).setOnClickListener { checkStatuses() }
 
-        /* navigation drawer: Home returns to the main screen */
+        /* Cold start from the launcher: resume reading if a session is live,
+           otherwise open the Browser when the library has nothing to show. */
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN) {
+            if (!resumeReadingIfNeeded()) maybeOpenBrowserIfEmpty()
+        }
+
+        /* navigation drawer */
         val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
         findViewById<TextView>(R.id.menuBtn).setOnClickListener {
             drawer.openDrawer(androidx.core.view.GravityCompat.START)
         }
-        findViewById<TextView>(R.id.navHome).setOnClickListener { finish() }
         findViewById<TextView>(R.id.navBrowser).setOnClickListener {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, BrowserActivity::class.java))
@@ -93,6 +130,11 @@ class NovelListActivity : AppCompatActivity() {
             drawer.closeDrawer(androidx.core.view.GravityCompat.START)
             startActivity(Intent(this, AboutActivity::class.java))
         }
+
+        ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
+
+        /* share target (and trampoline from the old Home activity name) */
+        if (savedInstanceState == null) handleIncomingShare(intent)
 
         /* inline download feedback: live status while a download runs, and a
            re-render when it finishes so the chapter counts refresh */
@@ -125,6 +167,121 @@ class NovelListActivity : AppCompatActivity() {
                 if (firstQueued) firstQueued = false else render()
             }
         }
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingShare(intent)
+    }
+
+    /* app opened from the launcher while a reading session was live →
+       resume straight into the reader at the saved spot (the marker is
+       cleared when the user backs out of reading mode) */
+    private fun resumeReadingIfNeeded(): Boolean {
+        val saved = prefs.getString("lastReading", null) ?: return false
+        return try {
+            val o = org.json.JSONObject(saved)
+            val slug = o.getString("slug")
+            val startCh = ReaderActivity.resumeChapter(this, slug) ?: return false
+            startActivity(
+                Intent(this, ReaderActivity::class.java)
+                    .putExtra("dir", o.getString("dir"))
+                    .putExtra("title", o.getString("title"))
+                    .putExtra("slug", slug)
+                    .putExtra("start", startCh),
+            )
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /* No novels (and no folder yet) → Browser is the useful first screen. */
+    private fun maybeOpenBrowserIfEmpty() {
+        lifecycleScope.launch {
+            val empty = withContext(Dispatchers.IO) {
+                if (folderKey == null) true
+                else try { rows().isEmpty() } catch (e: Exception) { true }
+            }
+            if (empty && !isFinishing) {
+                startActivity(Intent(this@NovelListActivity, BrowserActivity::class.java))
+            }
+        }
+    }
+
+    private fun handleIncomingShare(intent: Intent?) {
+        val fromExtra = intent?.getStringExtra(EXTRA_SHARE_URL)
+        val fromSend = if (intent?.action == Intent.ACTION_SEND) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+            Regex("https?://\\S+").find(text)?.value
+        } else null
+        val typed = fromExtra ?: fromSend ?: return
+        startShareDownload(typed)
+    }
+
+    /* Share / deep-link download: same gates as the browser (folder, garbage,
+       API key). Stays on Library so the console footer shows progress. */
+    private fun startShareDownload(typed: String) {
+        val site = Sites.forUrl(typed)
+        if (site == null) {
+            findViewById<TextView>(R.id.statusText).text =
+                "Enter a novel URL from " + Sites.all.flatMap { it.hosts }.joinToString(", ")
+            return
+        }
+        val url = try {
+            val (base, slug) = site.normalize(typed)
+            if (base.isEmpty() || slug.isEmpty()) {
+                findViewById<TextView>(R.id.statusText).text =
+                    "That link doesn't name a novel — open the novel's own page and share that."
+                return
+            }
+            base
+        } catch (e: Exception) { typed }
+        prefs.edit().putString("url", url).apply()
+        val slugKey = slugKeyFromUrl(url)
+        val garbage = garbageSet()
+        if (slugKey.isNotEmpty() && slugKey in garbage) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Marked as garbage")
+                .setMessage(
+                    "You previously marked this novel as garbage. " +
+                        "Remove that status and download it again?",
+                )
+                .setPositiveButton("Re-download") { _, _ ->
+                    prefs.edit().putStringSet(GARBAGE_KEY, garbage - slugKey).apply()
+                    startShareDownload(url)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        val tree = prefs.getString("tree", null)
+        if (tree == null) {
+            pendingShareUrl = url
+            pickFolder.launch(null)
+            return
+        }
+        folderKey = tree
+        val translate = prefs.getBoolean("translate", false)
+        val apiKey = (prefs.getString("apiKey", "") ?: "").trim()
+        if (translate && apiKey.isEmpty()) {
+            findViewById<TextView>(R.id.statusText).text =
+                "Set your Anthropic API key in Settings to translate."
+            return
+        }
+        startForegroundService(
+            Intent(this, DownloadService::class.java)
+                .putExtra("url", url).putExtra("tree", tree)
+                .putExtra("translate", translate)
+                .putExtra("forceTranslate", false)
+                .putExtra("apiKey", apiKey),
+        )
+        findViewById<TextView>(R.id.statusText).text = "Download started…"
     }
 
     /* re-render on every return so the RECENTLY READ section reflects the
@@ -682,7 +839,7 @@ class NovelListActivity : AppCompatActivity() {
     }
 
     /* garbage: confirm, then remember the slug, delete the novel's folder and
-       every trace of it — re-downloading later warns first (MainActivity) */
+       every trace of it — re-downloading later warns first */
     private fun confirmGarbage(row: Row) {
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Mark as garbage")
@@ -842,7 +999,7 @@ class NovelListActivity : AppCompatActivity() {
         btn.isEnabled = false
         /* Check status discarded everything the engine had to say. Its notes
            — which listed links carry no chapter number, and so can never be
-           downloaded — go to the same log the home screen prints, otherwise
+           downloaded — go to the same log the console footer prints, otherwise
            the only way to see them is to run a full download. */
         val engine = DownloadEngine(
             this,

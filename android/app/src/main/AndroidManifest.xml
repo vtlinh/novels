@@ -30,7 +30,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".NovelListActivity"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>
@@ -47,10 +47,6 @@
 
         <activity
             android:name=".BrowserActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".NovelListActivity"
             android:exported="false" />
 
         <activity

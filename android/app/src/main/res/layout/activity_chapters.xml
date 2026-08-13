@@ -90,6 +90,8 @@
             android:dividerHeight="1dp"
             android:fastScrollEnabled="true"
             android:fastScrollAlwaysVisible="true" />
+
+        <include layout="@layout/console_footer" />
     </LinearLayout>
 
     <include layout="@layout/drawer_menu" />

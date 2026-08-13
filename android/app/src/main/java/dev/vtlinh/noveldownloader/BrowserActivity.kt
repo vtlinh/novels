@@ -31,7 +31,8 @@ import java.io.ByteArrayInputStream
 /* In-app site browser. Native WebView loads the novel sites directly — no
    proxy or CORS to work around — and a sticky header keeps a Download button
    on top. Download normalizes whatever page is open (novel, chapter, or
-   listing) to its novel URL, hands it back to MainActivity, and finishes. */
+   listing) to its novel URL and starts the download in place; console
+   progress shows in the swipe-away footer. */
 class BrowserActivity : AppCompatActivity() {
 
     companion object {
@@ -153,6 +154,8 @@ class BrowserActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_browser)
+
+        ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
 
         val web = findViewById<WebView>(R.id.webview)
         val urlEdit = findViewById<EditText>(R.id.browseUrl)

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compact download/console strip: 3 lines. Tap expands; swipe down discards. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/consoleFooter"
+    android:layout_width="match_parent"
+    android:layout_height="54dp"
+    android:layout_marginTop="8dp"
+    android:background="@drawable/bg_log"
+    android:clickable="true"
+    android:focusable="true"
+    android:visibility="gone">
+
+    <TextView
+        android:id="@+id/consoleFooterText"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:fontFamily="monospace"
+        android:textSize="11sp"
+        android:textColor="@color/fg"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:gravity="bottom" />
+</FrameLayout>
