@@ -203,10 +203,13 @@ class NovelListActivity : AppCompatActivity() {
 
     /* No novels (and no folder yet) → Browser is the useful first screen. */
     private fun maybeOpenBrowserIfEmpty() {
+        if (folderKey == null) {
+            startActivity(Intent(this, BrowserActivity::class.java))
+            return
+        }
         lifecycleScope.launch {
             val empty = withContext(Dispatchers.IO) {
-                if (folderKey == null) true
-                else try { rows().isEmpty() } catch (e: Exception) { true }
+                try { rows().isEmpty() } catch (e: Exception) { true }
             }
             if (empty && !isFinishing) {
                 startActivity(Intent(this@NovelListActivity, BrowserActivity::class.java))
