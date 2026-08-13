@@ -26,6 +26,14 @@ class ChapterListActivity : AppCompatActivity() {
         /* how many places in a cached listing to spot-check before trusting it */
         private const val CACHE_PROBES = 5
 
+        /* List window: open with this many chapters on each side of the
+           current one, then grow by the same amount when the user scrolls
+           within EXPAND_NEAR of either edge. A 7k-chapter novel otherwise
+           builds a 7k-row adapter and jumps to a five-digit index. */
+        private const val WINDOW_RADIUS = 50
+        private const val EXPAND_BY = 50
+        private const val EXPAND_NEAR = 10
+
         class Chapters(
             val ordered: List<String>,               // chapter filenames in order
             val source: Map<String, String>,         // name -> docId or gz ref
@@ -258,10 +266,19 @@ class ChapterListActivity : AppCompatActivity() {
     private var loadedOnce = false
     private var loading = false
 
-    /* how many rows the last render put up, so a live refresh can tell how
+    /* how many rows the last FULL listing had, so a live refresh can tell how
        many chapters arrived and which way they shifted the indices */
     private var renderedCount = 0
     private var liveJob: kotlinx.coroutines.Job? = null
+
+    /* Full chapter order for this novel (display order already applied). The
+       ListView only holds [winStart, winEnd); scroll near an edge widens it. */
+    private var allOrdered: List<String> = emptyList()
+    private var winStart = 0
+    private var winEnd = 0
+    private var currentPos = -1
+    private var expanding = false
+    private var listAdapter: ArrayAdapter<String>? = null
 
     /* While this novel is downloading, fold newly saved chapters in as they
        land. Every saved chapter invalidates the listing cache, so a refresh
@@ -279,6 +296,139 @@ class ChapterListActivity : AppCompatActivity() {
                 if (busy || wasBusy) load(preserveScroll = true)
                 wasBusy = busy
             }
+        }
+    }
+
+    private fun labelOf(name: String) = name.removeSuffix(".txt")
+
+    private fun windowLabels(): ArrayList<String> {
+        val out = ArrayList<String>(winEnd - winStart)
+        for (i in winStart until winEnd) out.add(labelOf(allOrdered[i]))
+        return out
+    }
+
+    /* Center the first window on the current chapter (± WINDOW_RADIUS).
+       No current chapter → start of the list. */
+    private fun resetWindow(center: Int) {
+        val n = allOrdered.size
+        if (n == 0) {
+            winStart = 0
+            winEnd = 0
+            return
+        }
+        if (center < 0) {
+            winStart = 0
+            winEnd = minOf(n, WINDOW_RADIUS * 2)
+        } else {
+            winStart = maxOf(0, center - WINDOW_RADIUS)
+            winEnd = minOf(n, center + WINDOW_RADIUS + 1)
+        }
+    }
+
+    private fun bindWindow(
+        listView: ListView,
+        preserveScroll: Boolean,
+        scrollToCurrent: Boolean,
+        keepPos: Int = 0,
+        keepTop: Int = 0,
+    ) {
+        val labels = windowLabels()
+        val relativeCurrent =
+            if (currentPos in winStart until winEnd) currentPos - winStart else -1
+        val adapter = object : ArrayAdapter<String>(
+            this, android.R.layout.simple_list_item_1, labels,
+        ) {
+            override fun getView(
+                position: Int,
+                convertView: android.view.View?,
+                parent: android.view.ViewGroup,
+            ): android.view.View {
+                val v = super.getView(position, convertView, parent) as TextView
+                if (position == relativeCurrent) {
+                    v.setTextColor(getColor(R.color.accent))
+                    v.setTypeface(null, android.graphics.Typeface.BOLD)
+                } else {
+                    v.setTextColor(getColor(R.color.fg))
+                    v.setTypeface(null, android.graphics.Typeface.NORMAL)
+                }
+                return v
+            }
+        }
+        listAdapter = adapter
+        listView.adapter = adapter
+
+        if (preserveScroll) {
+            listView.setSelectionFromTop(keepPos, keepTop)
+        } else if (scrollToCurrent && relativeCurrent >= 0) {
+            listView.post {
+                listView.setSelectionFromTop(relativeCurrent, (listView.height * 0.2f).toInt())
+            }
+        }
+
+        listView.setOnScrollListener(object : android.widget.AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(
+                view: android.widget.AbsListView?,
+                scrollState: Int,
+            ) {}
+
+            override fun onScroll(
+                view: android.widget.AbsListView?,
+                firstVisible: Int,
+                visibleCount: Int,
+                totalCount: Int,
+            ) {
+                if (expanding || allOrdered.isEmpty() || totalCount == 0) return
+                if (firstVisible <= EXPAND_NEAR && winStart > 0) {
+                    expandUp(listView)
+                } else if (
+                    firstVisible + visibleCount >= totalCount - EXPAND_NEAR &&
+                    winEnd < allOrdered.size
+                ) {
+                    expandDown(listView)
+                }
+            }
+        })
+    }
+
+    private fun expandUp(listView: ListView) {
+        if (expanding || winStart <= 0) return
+        val adapter = listAdapter ?: return
+        expanding = true
+        try {
+            val keepPos = listView.firstVisiblePosition
+            val keepTop = listView.getChildAt(0)?.top ?: 0
+            val newStart = maxOf(0, winStart - EXPAND_BY)
+            val added = winStart - newStart
+            if (added <= 0) return
+            /* prepend without rebuilding: insert highest-index-first so
+               positions stay correct as the list grows at 0 */
+            adapter.setNotifyOnChange(false)
+            for (i in (winStart - 1) downTo newStart) {
+                adapter.insert(labelOf(allOrdered[i]), 0)
+            }
+            adapter.notifyDataSetChanged()
+            winStart = newStart
+            listView.setSelectionFromTop(keepPos + added, keepTop)
+        } finally {
+            expanding = false
+        }
+    }
+
+    private fun expandDown(listView: ListView) {
+        if (expanding || winEnd >= allOrdered.size) return
+        expanding = true
+        try {
+            val newEnd = minOf(allOrdered.size, winEnd + EXPAND_BY)
+            if (newEnd <= winEnd) return
+            val adapter = listAdapter ?: return
+            val toAdd = ArrayList<String>(newEnd - winEnd)
+            for (i in winEnd until newEnd) toAdd.add(labelOf(allOrdered[i]))
+            winEnd = newEnd
+            adapter.setNotifyOnChange(false)
+            adapter.addAll(toAdd)
+            adapter.notifyDataSetChanged()
+        } finally {
+            expanding = false
         }
     }
 
@@ -324,57 +474,51 @@ class ChapterListActivity : AppCompatActivity() {
             }
             if (ordered.isEmpty()) {
                 status.text = "No chapters found in \"$dirName\"."
+                allOrdered = emptyList()
                 return@launch
             }
             status.text = "${ordered.size} chapter(s)"
             val lastRenderedCount = renderedCount
             renderedCount = ordered.size
-            val labels = ordered.map { it.removeSuffix(".txt") }
             /* the chapter currently being read: highlighted and scrolled into
                view (at ~20% of the list height) */
             val lastName = slug?.let {
                 ReaderActivity.resumeChapter(this@ChapterListActivity, it)
             }
-            val currentPos = lastName?.let { ordered.indexOf(it) } ?: -1
+            val newCurrent = lastName?.let { ordered.indexOf(it) } ?: -1
             /* swapping the adapter drops the scroll position; note where the
                list is sitting so a live refresh can put it back */
             val keepPos = listView.firstVisiblePosition
             val keepTop = listView.getChildAt(0)?.top ?: 0
-            listView.adapter = object : ArrayAdapter<String>(
-                this@ChapterListActivity, android.R.layout.simple_list_item_1, labels,
-            ) {
-                override fun getView(
-                    position: Int,
-                    convertView: android.view.View?,
-                    parent: android.view.ViewGroup,
-                ): android.view.View {
-                    val v = super.getView(position, convertView, parent) as TextView
-                    if (position == currentPos) {
-                        v.setTextColor(getColor(R.color.accent))
-                        v.setTypeface(null, android.graphics.Typeface.BOLD)
-                    } else {
-                        v.setTextColor(getColor(R.color.fg))
-                        v.setTypeface(null, android.graphics.Typeface.NORMAL)
-                    }
-                    return v
-                }
+            /* Chapters arriving underneath shouldn't move the reader's
+               place in the list. Ascending, they land at the end and every
+               index keeps its meaning — but newest-first PREPENDS them, so
+               restoring the same index walked the list backwards by the
+               number that arrived, visibly jumping every few seconds for
+               the length of a download. Shift by how many appeared. */
+            val grew = ordered.size - lastRenderedCount
+            val shift = if (grew > 0 && prefs.getBoolean(descKey, false)) grew else 0
+
+            allOrdered = ordered
+            currentPos = newCurrent
+            /* keepPos is relative to the visible window. When newest-first
+               prepends, slide the window by the same shift so the relative
+               position still points at the same rows. */
+            val keptWindow = if (preserveScroll && listAdapter != null && winEnd > winStart) {
+                winStart = (winStart + shift).coerceIn(0, ordered.size)
+                winEnd = (winEnd + shift).coerceIn(winStart, ordered.size)
+                if (winEnd == winStart && ordered.isNotEmpty()) {
+                    resetWindow(newCurrent)
+                    false
+                } else true
+            } else {
+                resetWindow(newCurrent)
+                false
             }
-            if (preserveScroll) {
-                /* Chapters arriving underneath shouldn't move the reader's
-                   place in the list. Ascending, they land at the end and every
-                   index keeps its meaning — but newest-first PREPENDS them, so
-                   restoring the same index walked the list backwards by the
-                   number that arrived, visibly jumping every few seconds for
-                   the length of a download. Shift by how many appeared. */
-                val grew = ordered.size - lastRenderedCount
-                val shift = if (grew > 0 && prefs.getBoolean(descKey, false)) grew else 0
-                listView.setSelectionFromTop(keepPos + shift, keepTop)
-            } else if (currentPos >= 0) {
-                listView.post {
-                    listView.setSelectionFromTop(currentPos, (listView.height * 0.2f).toInt())
-                }
-            }
+
             listView.setOnItemClickListener { _, _, pos, _ ->
+                val abs = winStart + pos
+                if (abs !in allOrdered.indices) return@setOnItemClickListener
                 /* REORDER_TO_FRONT: if the reader for this novel is still
                    alive behind us (e.g. reading aloud), bring THAT instance
                    forward (it gets onNewIntent and jumps to the chapter)
@@ -384,10 +528,17 @@ class ChapterListActivity : AppCompatActivity() {
                         .putExtra("dir", dirName)
                         .putExtra("title", title)
                         .putExtra("slug", intent.getStringExtra("slug"))
-                        .putExtra("start", ordered[pos])
+                        .putExtra("start", allOrdered[abs])
                         .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
                 )
             }
+            bindWindow(
+                listView,
+                preserveScroll = preserveScroll && keptWindow,
+                scrollToCurrent = !preserveScroll || !keptWindow,
+                keepPos = keepPos,
+                keepTop = keepTop,
+            )
           } finally {
             loading = false
           }
