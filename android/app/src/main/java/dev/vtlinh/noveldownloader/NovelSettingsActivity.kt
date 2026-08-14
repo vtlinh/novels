@@ -36,15 +36,15 @@ class NovelSettingsActivity : AppCompatActivity() {
     private var busy = false
 
     /* Help text behind each help icon. Some change with novel state (finished,
-       already English, resumable check); bindHelp shows whatever is current. */
+       already English); bindHelp shows whatever is current. */
     private var autoDownloadHelp =
-        "When a status check finds chapters this novel doesn't have yet, fetch them without asking."
+        "Automatically download new chapters of this novel when they come out."
     private var translateHelp =
-        "Overrides the app-wide translation switch for this novel. Chapters go " +
-            "through Claude, which is billed to your Anthropic API key."
-    private var recheckHelp = "Reads the site's whole chapter list."
+        "Translate this novel into English. This costs money, charged to your Anthropic account."
+    private val recheckHelp =
+        "Looks on the website to see if this novel has any new chapters."
     private val redownloadHelp =
-        "Deletes every chapter of this novel from the download folder, reads the site's chapter list from the beginning, and downloads the lot again."
+        "Replaces this novel on your phone with a fresh download from the website. Any translations are lost, and would cost money to make again."
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,13 +104,6 @@ class NovelSettingsActivity : AppCompatActivity() {
             if (!keepStatus) status(state.summary)
             bindAutoDownload(folder, state)
             bindTranslate(folder, state)
-            val point = got.resume
-            recheckHelp = if (state.resumable && point != null) {
-                "Reads the site's chapter list from page ${point.page}, where it " +
-                    "ended last time, rather than from the beginning."
-            } else {
-                "Reads the site's whole chapter list."
-            }
             findViewById<Button>(R.id.recheckBtn).isEnabled = !busy
             findViewById<Button>(R.id.redownloadBtn).isEnabled = !busy
         }
@@ -125,13 +118,11 @@ class NovelSettingsActivity : AppCompatActivity() {
         val translated: Int,
         /* null when there was no chapter long enough to judge */
         val language: String?,
-        /* would a check resume, or read the whole listing? */
-        val resumable: Boolean,
     )
 
     private fun readState(folder: String): State {
         val rec = try { store.novel(folder, slug) } catch (e: Exception) { null }
-            ?: return State(null, 0, "", 0, 0, null, false)
+            ?: return State(null, 0, "", 0, 0, null)
         val local = NovelCheck.localCount(store, folder, rec)
         val order = try { store.getChapterOrder(folder, slug) } catch (e: Exception) { emptyMap() }
         val ch = try {
@@ -145,9 +136,6 @@ class NovelSettingsActivity : AppCompatActivity() {
         }
         return State(
             rec, local, summary, ordered.size, translated, sampleLanguage(folder, ch),
-            /* the same test the check itself applies, so what the button
-               promises and what it does cannot drift apart */
-            Resume.mayResume(rec.resume, order.size, rec.total, local, rec.complete),
         )
     }
 
@@ -205,9 +193,9 @@ class NovelSettingsActivity : AppCompatActivity() {
         box.isEnabled = !finished && !busy
         box.alpha = if (finished) 0.5f else 1f
         autoDownloadHelp = if (finished) {
-            "The site has finished this novel — there are no new chapters to download."
+            "This novel is finished, so there are no new chapters to download."
         } else {
-            "When a status check finds chapters this novel doesn't have yet, fetch them without asking."
+            "Automatically download new chapters of this novel when they come out."
         }
         box.setOnCheckedChangeListener { _, checked ->
             persist { store.setAutoDownload(folder, slug, checked) }
@@ -247,14 +235,12 @@ class NovelSettingsActivity : AppCompatActivity() {
         box.isEnabled = !english
         box.alpha = if (box.isEnabled) 1f else 0.5f
         translateHelp = when {
-            english -> "This novel is already in English — there is nothing to translate."
+            english -> "This novel is already in English, so there is nothing to translate."
             allTranslated ->
-                "Every chapter is translated already — this decides the chapters " +
-                    "the site adds from now on. Chapters go through Claude, billed " +
-                    "to your Anthropic API key."
+                "Every chapter is already translated. New chapters will be translated " +
+                    "too while this is on. This costs money, charged to your Anthropic account."
             else ->
-                "Overrides the app-wide translation switch for this novel. Chapters go " +
-                    "through Claude, which is billed to your Anthropic API key."
+                "Translate this novel into English. This costs money, charged to your Anthropic account."
         }
         box.setOnCheckedChangeListener { _, checked ->
             /* the one translate toggle with no key gate: ticking it with no

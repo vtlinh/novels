@@ -73,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
         updateFolderLabel()
         bindHelp(
             R.id.storageUsedHelp, "Used",
-            "Space taken by downloaded chapters in the folder above, including compressed copies and translations. Remembered per novel until a download, translation, compress, or a file change.",
+            "How much space your downloaded novels take up, including any translations.",
         )
 
         /* single "Compress my novels" switch: on → compress every novel and
@@ -126,19 +126,19 @@ class SettingsActivity : AppCompatActivity() {
 
         bindHelp(
             R.id.compressHelp, "Compress my novels",
-            "Stores chapters as per-chapter gzip (~70% smaller). New downloads follow this setting; existing novels are converted in the background. Reading works either way.",
+            "Makes your downloaded novels smaller so they take up less space. You can still read them as usual.",
         )
         bindHelp(
             R.id.apiKeyHelp, "Anthropic API key",
-            "Used for chapter translation, which costs money — each translation is billed to your Anthropic account balance. Stored only on this device.",
+            "Lets the app translate chapters into English. Translation costs money, charged to your Anthropic account.",
         )
         bindHelp(
             R.id.statusCheckHelp, "Automatic status check",
-            "When you open the app, check novels for new chapters if at least this many days have passed since the last automatic check. 0 = never. Same check as the Library's Check button.",
+            "How often the app looks for new chapters in your novels.",
         )
         bindHelp(
             R.id.keepAwakeHelp, "Keep screen awake",
-            "Stops the screen from dimming off on the reader while text-to-speech is playing.",
+            "Keeps the screen on while the app is reading aloud.",
         )
     }
 
