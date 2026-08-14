@@ -12,8 +12,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/* Reading mode, screen 2: the chapters of one novel, in order. Tapping a
-   chapter opens the reader there. */
+/* Reading mode, screen 2: one novel. Info tab holds the synopsis (always
+   fully expanded) and a sticky Continue above the tab bar; Chapters tab
+   is the ordered list. Tapping a chapter opens the reader there. */
 class ChapterListActivity : AppCompatActivity() {
 
     companion object {
@@ -33,6 +34,9 @@ class ChapterListActivity : AppCompatActivity() {
         private const val WINDOW_RADIUS = 50
         private const val EXPAND_BY = 50
         private const val EXPAND_NEAR = 10
+
+        private const val STATE_ON_INFO_TAB = "onInfoTab"
+        private const val STATE_TAB_SLUG = "tabSlug"
 
         class Chapters(
             val ordered: List<String>,               // chapter filenames in order
@@ -226,10 +230,60 @@ class ChapterListActivity : AppCompatActivity() {
         }
 
         ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
+        onInfoTab = savedInstanceState?.let { state ->
+            if (state.getString(STATE_TAB_SLUG) == intent.getStringExtra("slug")) {
+                state.getBoolean(STATE_ON_INFO_TAB, true)
+            } else true
+        } ?: true
+        findViewById<android.view.View>(R.id.tabInfo).setOnClickListener { showTab(true) }
+        findViewById<android.view.View>(R.id.tabChapters).setOnClickListener { showTab(false) }
+        showTab(onInfoTab)
         bindNovelInfo()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_ON_INFO_TAB, onInfoTab)
+        outState.putString(STATE_TAB_SLUG, intent.getStringExtra("slug"))
+    }
+
+    /* Info tab first: that's where the synopsis and the sticky Continue
+       live. Chapters is a tap away. Sort only applies to the list, so it
+       hides with that tab. Inactive tab is INVISIBLE so the ListView still
+       lays out and scroll-to-current has a real height. */
+    private fun showTab(info: Boolean) {
+        onInfoTab = info
+        findViewById<android.view.View>(R.id.infoTab).visibility =
+            if (info) android.view.View.VISIBLE else android.view.View.INVISIBLE
+        findViewById<android.view.View>(R.id.chaptersTab).visibility =
+            if (info) android.view.View.INVISIBLE else android.view.View.VISIBLE
+        findViewById<android.view.View>(R.id.sortBtn).visibility =
+            if (info) android.view.View.GONE else android.view.View.VISIBLE
+        findViewById<android.view.View>(R.id.tabInfo).isSelected = info
+        findViewById<android.view.View>(R.id.tabChapters).isSelected = !info
+        findViewById<android.view.View>(R.id.tabInfoIndicator).setBackgroundColor(
+            if (info) getColor(R.color.accent) else android.graphics.Color.TRANSPARENT,
+        )
+        findViewById<android.view.View>(R.id.tabChaptersIndicator).setBackgroundColor(
+            if (info) android.graphics.Color.TRANSPARENT else getColor(R.color.accent),
+        )
+        val infoLabel = findViewById<TextView>(R.id.tabInfoLabel)
+        val chaptersLabel = findViewById<TextView>(R.id.tabChaptersLabel)
+        infoLabel.setTextColor(getColor(if (info) R.color.accent else R.color.muted))
+        infoLabel.setTypeface(null, if (info) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        chaptersLabel.setTextColor(getColor(if (info) R.color.muted else R.color.accent))
+        chaptersLabel.setTypeface(null, if (info) android.graphics.Typeface.NORMAL else android.graphics.Typeface.BOLD)
+    }
+
+    /* which tab is showing; Info is the default so Continue is on screen */
+    private var onInfoTab = true
+
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
+
+    private fun showContinue(show: Boolean) {
+        findViewById<android.view.View>(R.id.continueBar).visibility =
+            if (show) android.view.View.VISIBLE else android.view.View.GONE
+    }
 
     private fun openChapter(name: String) {
         val dirName = intent.getStringExtra("dir") ?: return
@@ -244,10 +298,9 @@ class ChapterListActivity : AppCompatActivity() {
         )
     }
 
-    /* Novel-page info + personal ranking, fixed above the chapter list so
-       flipping ascending/descending never moves it. Fills from the store
-       first; if description (or everything) is still blank, fetches the
-       novel page once to fill in. */
+    /* Novel-page info on the Info tab: cover, ranking, full synopsis.
+       Fills from the store first; if description (or everything) is still
+       blank, fetches the novel page once to fill in. */
     private fun bindNovelInfo() {
         val card = findViewById<android.widget.LinearLayout>(R.id.novelCard)
         val panel = findViewById<android.widget.LinearLayout>(R.id.novelInfo)
@@ -441,44 +494,15 @@ class ChapterListActivity : AppCompatActivity() {
         panel.addView(starsRow)
 
         if (desc.isNotEmpty()) {
-            val collapsedLines = 3
-            val descView = TextView(this).apply {
-                text = desc
-                textSize = 14f
-                setTextColor(getColor(R.color.fg))
-                setLineSpacing(0f, 1.4f)
-                setPadding(0, dp(8), 0, 0)
-                maxLines = collapsedLines
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            }
-            panel.addView(descView)
-            val more = TextView(this).apply {
-                text = "See more"
-                textSize = 13f
-                setTextColor(getColor(R.color.accent))
-                gravity = android.view.Gravity.END
-                setPadding(0, dp(6), 0, dp(2))
-                setOnClickListener {
-                    val expanded = descView.maxLines == Int.MAX_VALUE
-                    if (expanded) {
-                        descView.maxLines = collapsedLines
-                        text = "See more"
-                    } else {
-                        descView.maxLines = Int.MAX_VALUE
-                        text = "See less"
-                    }
-                }
-            }
-            panel.addView(more)
-            /* Hide "See more" when the text already fits in the collapsed height. */
-            descView.post {
-                val layout = descView.layout ?: return@post
-                if (layout.lineCount <= collapsedLines &&
-                    !(layout.lineCount == collapsedLines && layout.getEllipsisCount(collapsedLines - 1) > 0)
-                ) {
-                    more.visibility = android.view.View.GONE
-                }
-            }
+            panel.addView(
+                TextView(this).apply {
+                    text = desc
+                    textSize = 14f
+                    setTextColor(getColor(R.color.fg))
+                    setLineSpacing(0f, 1.4f)
+                    setPadding(0, dp(8), 0, 0)
+                },
+            )
         }
     }
 
@@ -733,8 +757,7 @@ class ChapterListActivity : AppCompatActivity() {
                 } catch (e: Exception) { null }
             } ?: run {
                 status.text = "Could not read"
-                findViewById<android.view.View>(R.id.continueBtn).visibility =
-                    android.view.View.GONE
+                showContinue(false)
                 return@launch
             }
             val ordered = chapters.ordered.let {
@@ -742,8 +765,7 @@ class ChapterListActivity : AppCompatActivity() {
             }
             if (ordered.isEmpty()) {
                 status.text = "None found"
-                findViewById<android.view.View>(R.id.continueBtn).visibility =
-                    android.view.View.GONE
+                showContinue(false)
                 allOrdered = emptyList()
                 return@launch
             }
@@ -759,13 +781,13 @@ class ChapterListActivity : AppCompatActivity() {
             val continueBtn = findViewById<android.widget.Button>(R.id.continueBtn)
             val startName = if (newCurrent >= 0) lastName else chapters.ordered.firstOrNull()
             if (!slug.isNullOrEmpty() && startName != null) {
-                continueBtn.visibility = android.view.View.VISIBLE
                 val label = labelOf(startName)
                 continueBtn.text =
                     if (newCurrent >= 0) "Continue · $label" else "Start reading · $label"
                 continueBtn.setOnClickListener { openChapter(startName) }
+                showContinue(true)
             } else {
-                continueBtn.visibility = android.view.View.GONE
+                showContinue(false)
             }
             /* swapping the adapter drops the scroll position; note where the
                list is sitting so a live refresh can put it back */

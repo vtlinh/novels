@@ -61,7 +61,8 @@
                 android:focusable="true"
                 android:contentDescription="Novel settings" />
 
-            <!-- flips the chapter order (ascending/descending), per novel -->
+            <!-- flips the chapter order (ascending/descending), per novel.
+                 Hidden on the info tab — it only applies to the chapter list. -->
             <TextView
                 android:id="@+id/sortBtn"
                 android:layout_width="40dp"
@@ -73,166 +74,290 @@
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
                 android:focusable="true"
+                android:visibility="gone"
                 android:contentDescription="Reverse chapter order" />
         </LinearLayout>
 
-        <!-- Cover, chips, ranking, synopsis, continue. Stays above the
-             chapter list regardless of ascending/descending sort. -->
-        <LinearLayout
-            android:id="@+id/novelCard"
+        <!-- Info / Chapters share this slot. The inactive tab is INVISIBLE
+             rather than GONE so the chapter ListView still lays out and
+             scroll-to-current has a real height to aim at. -->
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:layout_marginEnd="12dp"
-            android:orientation="vertical"
-            android:background="@drawable/bg_settings_card"
-            android:padding="14dp"
-            android:visibility="gone">
+            android:layout_height="0dp"
+            android:layout_weight="1">
 
+            <!-- Novel information: cover, ranking, full synopsis. Continue
+                 is sticky at the bottom of this tab, above the tab bar. -->
             <LinearLayout
+                android:id="@+id/infoTab"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="top">
+                android:layout_height="match_parent"
+                android:orientation="vertical">
 
-                <FrameLayout
-                    android:id="@+id/coverWrap"
-                    android:layout_width="72dp"
-                    android:layout_height="96dp"
-                    android:background="@drawable/bg_cover"
-                    android:clipToOutline="true">
-
-                    <TextView
-                        android:id="@+id/coverLetter"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:gravity="center"
-                        android:textSize="28sp"
-                        android:textStyle="bold"
-                        android:textColor="@color/muted" />
-
-                    <ImageView
-                        android:id="@+id/coverImage"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:scaleType="centerCrop"
-                        android:visibility="gone"
-                        android:contentDescription="Cover" />
-                </FrameLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                <ScrollView
+                    android:id="@+id/infoScroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:layout_marginStart="14dp"
-                    android:orientation="vertical">
+                    android:fillViewport="true"
+                    android:clipToPadding="false"
+                    android:paddingBottom="8dp">
 
-                    <TextView
-                        android:id="@+id/heroAuthor"
+                    <LinearLayout
+                        android:id="@+id/novelCard"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:textSize="15sp"
-                        android:textColor="@color/fg"
-                        android:maxLines="2"
-                        android:ellipsize="end"
-                        android:visibility="gone" />
-
-                    <TextView
-                        android:id="@+id/heroGenres"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textSize="13sp"
-                        android:textColor="@color/muted"
-                        android:maxLines="2"
-                        android:ellipsize="end"
-                        android:visibility="gone" />
-
-                    <HorizontalScrollView
-                        android:id="@+id/chipsScroll"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:scrollbars="none"
+                        android:layout_marginStart="12dp"
+                        android:layout_marginEnd="12dp"
+                        android:layout_marginBottom="4dp"
+                        android:orientation="vertical"
+                        android:background="@drawable/bg_settings_card"
+                        android:padding="14dp"
                         android:visibility="gone">
 
                         <LinearLayout
-                            android:id="@+id/chipsRow"
-                            android:layout_width="wrap_content"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="horizontal"
-                            android:gravity="center_vertical" />
-                    </HorizontalScrollView>
+                            android:gravity="top">
+
+                            <FrameLayout
+                                android:id="@+id/coverWrap"
+                                android:layout_width="72dp"
+                                android:layout_height="96dp"
+                                android:background="@drawable/bg_cover"
+                                android:clipToOutline="true">
+
+                                <TextView
+                                    android:id="@+id/coverLetter"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:gravity="center"
+                                    android:textSize="28sp"
+                                    android:textStyle="bold"
+                                    android:textColor="@color/muted" />
+
+                                <ImageView
+                                    android:id="@+id/coverImage"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="centerCrop"
+                                    android:visibility="gone"
+                                    android:contentDescription="Cover" />
+                            </FrameLayout>
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginStart="14dp"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/heroAuthor"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:textSize="15sp"
+                                    android:textColor="@color/fg"
+                                    android:maxLines="2"
+                                    android:ellipsize="end"
+                                    android:visibility="gone" />
+
+                                <TextView
+                                    android:id="@+id/heroGenres"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:textSize="13sp"
+                                    android:textColor="@color/muted"
+                                    android:maxLines="2"
+                                    android:ellipsize="end"
+                                    android:visibility="gone" />
+
+                                <HorizontalScrollView
+                                    android:id="@+id/chipsScroll"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:scrollbars="none"
+                                    android:visibility="gone">
+
+                                    <LinearLayout
+                                        android:id="@+id/chipsRow"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:orientation="horizontal"
+                                        android:gravity="center_vertical" />
+                                </HorizontalScrollView>
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/novelInfo"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:orientation="vertical" />
+                    </LinearLayout>
+                </ScrollView>
+
+                <!-- Sticky continue: sits at the bottom of the info tab,
+                     above the Info / Chapters tab bar. Hidden with the tab. -->
+                <LinearLayout
+                    android:id="@+id/continueBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@color/bg"
+                    android:visibility="gone">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/input_stroke" />
+
+                    <Button
+                        android:id="@+id/continueBtn"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_marginEnd="12dp"
+                        android:layout_marginTop="8dp"
+                        android:layout_marginBottom="8dp"
+                        android:text="Continue reading"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:textColor="#ffffff"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        app:backgroundTint="@color/accent"
+                        app:cornerRadius="8dp" />
                 </LinearLayout>
             </LinearLayout>
 
             <LinearLayout
-                android:id="@+id/novelInfo"
+                android:id="@+id/chaptersTab"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:orientation="vertical" />
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:visibility="invisible">
 
-            <Button
-                android:id="@+id/continueBtn"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="Continue reading"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#ffffff"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:visibility="gone"
-                app:backgroundTint="@color/accent"
-                app:cornerRadius="8dp" />
-        </LinearLayout>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_marginEnd="16dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="2dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="CHAPTERS"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/muted"
+                        android:letterSpacing="0.08" />
+
+                    <TextView
+                        android:id="@+id/statusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:textSize="13sp"
+                        android:textColor="@color/muted"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+                </LinearLayout>
+
+                <ListView
+                    android:id="@+id/chapterListView"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingBottom="8dp"
+                    android:clipToPadding="false"
+                    android:divider="@android:color/transparent"
+                    android:dividerHeight="0dp"
+                    android:fastScrollEnabled="true"
+                    android:fastScrollAlwaysVisible="false" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/input_stroke" />
 
         <LinearLayout
+            android:id="@+id/tabBar"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:layout_marginTop="14dp"
-            android:layout_marginBottom="2dp"
+            android:layout_height="48dp"
             android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:background="@color/card">
 
-            <TextView
+            <LinearLayout
+                android:id="@+id/tabInfo"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:text="CHAPTERS"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:textColor="@color/muted"
-                android:letterSpacing="0.08" />
+                android:orientation="vertical"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Novel info">
 
-            <TextView
-                android:id="@+id/statusText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:textSize="13sp"
-                android:textColor="@color/muted"
-                android:maxLines="1"
-                android:ellipsize="end" />
+                <View
+                    android:id="@+id/tabInfoIndicator"
+                    android:layout_width="match_parent"
+                    android:layout_height="2dp"
+                    android:background="@color/accent" />
+
+                <TextView
+                    android:id="@+id/tabInfoLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="Info"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabChapters"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Chapter list">
+
+                <View
+                    android:id="@+id/tabChaptersIndicator"
+                    android:layout_width="match_parent"
+                    android:layout_height="2dp"
+                    android:background="@android:color/transparent" />
+
+                <TextView
+                    android:id="@+id/tabChaptersLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="Chapters"
+                    android:textSize="14sp"
+                    android:textColor="@color/muted" />
+            </LinearLayout>
         </LinearLayout>
-
-        <ListView
-            android:id="@+id/chapterListView"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingBottom="8dp"
-            android:clipToPadding="false"
-            android:divider="@android:color/transparent"
-            android:dividerHeight="0dp"
-            android:fastScrollEnabled="true"
-            android:fastScrollAlwaysVisible="false" />
 
         <include
             layout="@layout/console_footer"
