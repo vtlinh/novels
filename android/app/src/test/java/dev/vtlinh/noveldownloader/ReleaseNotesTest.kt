@@ -96,7 +96,11 @@ class ReleaseNotesTest {
         assertTrue("backfill is missing", entries.size > 100)
         assertTrue(
             "this PR's summary must be unreleased so package-time concat picks it up",
-            entries.any { it.version == null && it.summary.contains("lost download folder") },
+            entries.any { it.version == null && it.summary.contains("staying on") },
+        )
+        assertTrue(
+            "1.33.26 shipped the lost-folder Settings line",
+            entries.any { it.version == "1.33.26" && it.summary.contains("lost download folder") },
         )
         assertTrue(
             "1.33.25 shipped total novel storage on Settings",

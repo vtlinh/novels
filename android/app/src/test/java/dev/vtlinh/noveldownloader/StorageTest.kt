@@ -127,6 +127,18 @@ class StorageTest {
     }
 
     @Test
+    fun `a directory's reported size is not counted`() {
+        val t = Storage.of(
+            listOf(
+                Folder.Item("translated", "tr", isDir = true, size = 9_000_000L),
+                f("Chapter 1.txt", 100L),
+            ),
+        )
+        assertEquals(100L, t.bytes)
+        assertEquals(1, t.files)
+    }
+
+    @Test
     fun `legacy titled names still count`() {
         assertTrue(Storage.isCounted("Chapter 70 - Hoan chinh van.txt"))
         assertTrue(Storage.isCounted("Chapter 70 - Hoan chinh van.txt.gz"))

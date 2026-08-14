@@ -36,7 +36,8 @@ class SettingsActivity : AppCompatActivity() {
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
-                prefs.edit().putString("tree", uri.toString()).apply()
+                prefs.edit().putString("tree", uri.toString())
+                    .remove("storageUsedShown").remove("storageUsedTree").apply()
                 updateFolderLabel()
                 refreshStorage()
             }
@@ -169,34 +170,56 @@ class SettingsActivity : AppCompatActivity() {
             else folderDisplayName(tree)
     }
 
-    /* One ContentResolver query per directory — the same walk the library
-       scan uses. Off the main thread: a library of a hundred novels is a
-       hundred queries, and the first listing of a large folder is slow. */
+    /* Off the main thread: a library of a hundred novels is a hundred
+       listings, and a large folder is slow. The last successful total stays
+       on screen until a new one lands — wiping it to "…" on every open made
+       a slow walk look like the size was never calculated. */
     private fun refreshStorage() {
         val gen = ++storageGen
         val label = findViewById<TextView>(R.id.storageUsedLabel)
         val tree = prefs.getString("tree", null)
         if (tree == null) {
+            prefs.edit().remove("storageUsedShown").remove("storageUsedTree").apply()
             label.text = "—"
             return
         }
-        label.text = "…"
+        val cached = if (prefs.getString("storageUsedTree", null) == tree) {
+            prefs.getString("storageUsedShown", null)
+        } else null
+        if (label.text.isNullOrBlank() || label.text == "—" || label.text == "…") {
+            label.text = cached ?: "…"
+        }
         lifecycleScope.launch {
-            val text = withContext(Dispatchers.IO) {
-                try { measure(tree) } catch (e: Exception) { "—" }
+            val text = try {
+                withContext(Dispatchers.IO) {
+                    measure(tree, gen) { partial ->
+                        val shown = Storage.label(partial)
+                        runOnUiThread {
+                            if (gen == storageGen && !isDestroyed) label.text = shown
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                return@launch
+            } catch (e: Exception) {
+                cached ?: "—"
             }
-            if (gen != storageGen) return@launch
+            if (text == null || gen != storageGen) return@launch
             label.text = text
+            if (text != "—") {
+                prefs.edit().putString("storageUsedShown", text).putString("storageUsedTree", tree).apply()
+            }
         }
     }
 
-    private fun measure(tree: String): String {
+    private fun measure(tree: String, gen: Int, onPartial: (Storage.Total) -> Unit): String? {
         val treeUri = Uri.parse(tree)
-        /* A novel folder that cannot be listed is skipped; failing to list
-           the tree itself must not look like an empty library. */
-        val root = Saf.children(contentResolver, treeUri, Saf.rootId(treeUri)).map {
-            Folder.Item(it.name, it.docId, it.isDir, it.size)
-        }
+        /* Names only at the root — asking for COLUMN_SIZE of each novel
+           directory can make the provider recursively sum the whole library
+           before this query returns. */
+        val root = Saf.children(
+            contentResolver, treeUri, Saf.rootId(treeUri), includeSize = false,
+        ).map { Folder.Item(it.name, it.docId, it.isDir, it.size) }
         fun kids(docId: String) = try {
             Saf.children(contentResolver, treeUri, docId).map {
                 Folder.Item(it.name, it.docId, it.isDir, it.size)
@@ -204,7 +227,17 @@ class SettingsActivity : AppCompatActivity() {
         } catch (e: Exception) {
             emptyList()
         }
-        return Storage.label(Storage.total(root, ::kids))
+        var acc = Storage.Total(0L, 0, 0)
+        for (dir in root) {
+            if (gen != storageGen || isDestroyed) return null
+            if (!dir.isDir) continue
+            val listing = kids(dir.ref)
+            acc += Storage.of(listing)
+            val translated = listing.firstOrNull { it.isDir && it.name == "translated" }
+            if (translated != null) acc += Storage.of(kids(translated.ref))
+            onPartial(acc)
+        }
+        return Storage.label(acc)
     }
 
     /* "primary:Documents/Novels" -> "Novels" */
