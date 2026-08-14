@@ -8,9 +8,11 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
-import android.view.View
 import android.widget.Button
+import android.widget.ScrollView
 import android.widget.TextView
+import android.view.View
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -18,8 +20,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/* About: app description, author, source, release notes, and the update
-   control. Nothing here installs on its own — the button downloads a newer
+/* About: app description, author, source, and the update control. Version
+   opens the release notes in a dialog — the notes themselves are not
+   inline. Nothing here installs on its own — the button downloads a newer
    build and then turns into "Install", which is the only thing that
    commits it. That mirrors the notification the background check posts. */
 class AboutActivity : AppCompatActivity() {
@@ -36,8 +39,8 @@ class AboutActivity : AppCompatActivity() {
         val versionName = try {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
         } catch (e: Exception) { "?" }
-        findViewById<TextView>(R.id.aboutVersion).text = "Version $versionName"
-        showReleaseNotes(versionName)
+        findViewById<TextView>(R.id.aboutVersion).text = versionName
+        bindReleaseNotes(versionName)
 
         findViewById<TextView>(R.id.aboutRepo).setOnClickListener {
             try {
@@ -121,10 +124,9 @@ class AboutActivity : AppCompatActivity() {
         }
     }
 
-    /* Blank-version rows are concatenated under this APK's versionName at
-       package time (generateReleaseNotes). Reading the filled TSV still
-       groups them here so a build that skipped the task shows the same. */
-    private fun showReleaseNotes(versionName: String) {
+    /* Version is the tap target. The notes live in a dialog so the About
+       page stays a short card; every version still has its own header. */
+    private fun bindReleaseNotes(versionName: String) {
         val tsv = try {
             assets.open("changelog.tsv").bufferedReader().use { it.readText() }
         } catch (e: Exception) {
@@ -132,25 +134,41 @@ class AboutActivity : AppCompatActivity() {
         }
         val sections = ReleaseNotes.sections(tsv, versionName)
         if (sections.isEmpty()) return
-        findViewById<TextView>(R.id.releaseNotesHeading).visibility = View.VISIBLE
-        val body = findViewById<TextView>(R.id.releaseNotes)
-        body.visibility = View.VISIBLE
-        body.text = formatReleaseNotes(sections)
+        val notes = formatReleaseNotes(sections)
+        val open = View.OnClickListener {
+            val pad = (20 * resources.displayMetrics.density).toInt()
+            val body = TextView(this).apply {
+                text = notes
+                textSize = 14f
+                setLineSpacing(0f, 1.25f)
+                setPadding(pad, pad / 2, pad, pad / 2)
+            }
+            val scroll = ScrollView(this).apply { addView(body) }
+            AlertDialog.Builder(this)
+                .setTitle("Release Notes")
+                .setView(scroll)
+                .setPositiveButton("OK", null)
+                .show()
+        }
+        findViewById<TextView>(R.id.aboutVersionLabel).setOnClickListener(open)
+        findViewById<TextView>(R.id.aboutVersion).setOnClickListener(open)
     }
 
     private fun formatReleaseNotes(sections: List<ReleaseNotes.Section>): CharSequence {
         val fg = ContextCompat.getColor(this, R.color.fg)
         val muted = ContextCompat.getColor(this, R.color.muted)
         val sb = SpannableStringBuilder()
-        for (sec in sections) {
-            if (sb.isNotEmpty()) sb.append("\n\n")
+        for ((i, sec) in sections.withIndex()) {
+            if (i > 0) sb.append("\n\n")
             val start = sb.length
             sb.append(sec.version)
             sb.setSpan(StyleSpan(Typeface.BOLD), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             sb.setSpan(ForegroundColorSpan(fg), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            for (line in sec.summaries) {
+            sb.append('\n')
+            for ((j, line) in sec.summaries.withIndex()) {
+                if (j > 0) sb.append('\n')
                 val bulletAt = sb.length
-                sb.append("\n• ").append(line)
+                sb.append("• ").append(line)
                 sb.setSpan(
                     ForegroundColorSpan(muted),
                     bulletAt,

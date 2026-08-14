@@ -57,12 +57,25 @@
                 android:textColor="@color/fg" />
 
             <TextView
+                android:id="@+id/aboutVersionLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="Version"
+                android:textSize="12sp"
+                android:textColor="@color/muted"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
                 android:id="@+id/aboutVersion"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:textSize="13sp"
-                android:textColor="@color/muted" />
+                android:textSize="16sp"
+                android:textColor="@color/accent"
+                android:clickable="true"
+                android:focusable="true" />
 
             <TextView
                 android:layout_width="match_parent"
@@ -107,26 +120,6 @@
                 android:textColor="@color/accent"
                 android:clickable="true"
                 android:focusable="true" />
-
-            <TextView
-                android:id="@+id/releaseNotesHeading"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="22dp"
-                android:text="Release Notes"
-                android:textSize="12sp"
-                android:textColor="@color/muted"
-                android:visibility="gone" />
-
-            <TextView
-                android:id="@+id/releaseNotes"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:textSize="14sp"
-                android:lineSpacingMultiplier="1.25"
-                android:textColor="@color/fg"
-                android:visibility="gone" />
         </LinearLayout>
     </ScrollView>
 
