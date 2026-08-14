@@ -18,10 +18,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/* About: app description, author, source, release notes, and the update
-   control. Nothing here installs on its own — the button downloads a newer
-   build and then turns into "Install", which is the only thing that
-   commits it. That mirrors the notification the background check posts. */
+/* About: app description, author, source, and the update control. Release
+   notes hang off the Version heading — this build's changes under the
+   number, older versions below that. Nothing here installs on its own —
+   the button downloads a newer build and then turns into "Install", which
+   is the only thing that commits it. That mirrors the notification the
+   background check posts. */
 class AboutActivity : AppCompatActivity() {
 
     private val btn by lazy { findViewById<Button>(R.id.checkUpdateBtn) }
@@ -36,7 +38,7 @@ class AboutActivity : AppCompatActivity() {
         val versionName = try {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
         } catch (e: Exception) { "?" }
-        findViewById<TextView>(R.id.aboutVersion).text = "Version $versionName"
+        findViewById<TextView>(R.id.aboutVersion).text = versionName
         showReleaseNotes(versionName)
 
         findViewById<TextView>(R.id.aboutRepo).setOnClickListener {
@@ -121,9 +123,9 @@ class AboutActivity : AppCompatActivity() {
         }
     }
 
-    /* Blank-version rows are concatenated under this APK's versionName at
-       package time (generateReleaseNotes). Reading the filled TSV still
-       groups them here so a build that skipped the task shows the same. */
+    /* Notes sit under the Version heading. This build's bullets hang off
+       the version number already on screen; older versions keep their own
+       headers so the list still reads as a history. */
     private fun showReleaseNotes(versionName: String) {
         val tsv = try {
             assets.open("changelog.tsv").bufferedReader().use { it.readText() }
@@ -132,25 +134,31 @@ class AboutActivity : AppCompatActivity() {
         }
         val sections = ReleaseNotes.sections(tsv, versionName)
         if (sections.isEmpty()) return
-        findViewById<TextView>(R.id.releaseNotesHeading).visibility = View.VISIBLE
         val body = findViewById<TextView>(R.id.releaseNotes)
         body.visibility = View.VISIBLE
-        body.text = formatReleaseNotes(sections)
+        body.text = formatReleaseNotes(sections, versionName)
     }
 
-    private fun formatReleaseNotes(sections: List<ReleaseNotes.Section>): CharSequence {
+    private fun formatReleaseNotes(
+        sections: List<ReleaseNotes.Section>,
+        currentVersion: String,
+    ): CharSequence {
         val fg = ContextCompat.getColor(this, R.color.fg)
         val muted = ContextCompat.getColor(this, R.color.muted)
         val sb = SpannableStringBuilder()
-        for (sec in sections) {
-            if (sb.isNotEmpty()) sb.append("\n\n")
-            val start = sb.length
-            sb.append(sec.version)
-            sb.setSpan(StyleSpan(Typeface.BOLD), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            sb.setSpan(ForegroundColorSpan(fg), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            for (line in sec.summaries) {
+        for ((i, sec) in sections.withIndex()) {
+            if (i > 0) sb.append("\n\n")
+            if (sec.version != currentVersion) {
+                val start = sb.length
+                sb.append(sec.version)
+                sb.setSpan(StyleSpan(Typeface.BOLD), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                sb.setSpan(ForegroundColorSpan(fg), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                sb.append('\n')
+            }
+            for ((j, line) in sec.summaries.withIndex()) {
+                if (j > 0) sb.append('\n')
                 val bulletAt = sb.length
-                sb.append("\n• ").append(line)
+                sb.append("• ").append(line)
                 sb.setSpan(
                     ForegroundColorSpan(muted),
                     bulletAt,
