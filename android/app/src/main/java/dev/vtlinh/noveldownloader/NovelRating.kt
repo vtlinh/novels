@@ -8,7 +8,7 @@ import org.jsoup.nodes.Document
 import java.util.concurrent.TimeUnit
 
 /* Personal novel ranking: full stars only, 1..MAX. Stored in the same prefs
-   bag as hot/finished marks. Tapping the star already set clears the rating. */
+   bag as finished marks. Tapping the star already set clears the rating. */
 object NovelRating {
 
     const val MAX = 10

@@ -372,7 +372,7 @@ class DownloadStore(context: Context) :
         )
     }
 
-    /* stamp a novel as just-downloaded (list sorts newest first) */
+    /* stamp a novel as just-downloaded (equal-star ties sort newest first) */
     fun touchNovel(folder: String, slug: String, now: Long) {
         writableDatabase.execSQL(
             "UPDATE novels SET last_dl=? WHERE folder=? AND slug=?", arrayOf(now, folder, slug),
