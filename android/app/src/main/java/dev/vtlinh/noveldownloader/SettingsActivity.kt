@@ -12,15 +12,22 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/* App settings: the Storage card (download folder + "Compress my novels"),
-   the Anthropic API key, library auto status-check interval, and reading
-   options. Toggling compression starts a background pass that converts every
-   novel to match; new downloads follow the same flag. The key is saved on
-   focus loss and when leaving. Descriptions live behind each setting's help icon. */
+/* App settings: the Storage card (download folder, library size, and
+   "Compress my novels"), the Anthropic API key, library auto status-check
+   interval, and reading options. Toggling compression starts a background
+   pass that converts every novel to match; new downloads follow the same
+   flag. The key is saved on focus loss and when leaving. Descriptions live
+   behind each setting's help icon. */
 class SettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
+    /* bumped on every scan so a slower walk cannot overwrite a newer folder */
+    private var storageGen = 0
 
     private val pickFolder =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
@@ -31,6 +38,7 @@ class SettingsActivity : AppCompatActivity() {
                 )
                 prefs.edit().putString("tree", uri.toString()).apply()
                 updateFolderLabel()
+                refreshStorage()
             }
         }
 
@@ -63,6 +71,10 @@ class SettingsActivity : AppCompatActivity() {
             } catch (e: Exception) {}
         }
         updateFolderLabel()
+        bindHelp(
+            R.id.storageUsedHelp, "Used",
+            "Space taken by downloaded chapters in the folder above, including compressed copies and translations. Other files in that folder are not counted.",
+        )
 
         /* single "Compress my novels" switch: on → compress every novel and
            new downloads, off → uncompress everything and download plain. The
@@ -145,11 +157,49 @@ class SettingsActivity : AppCompatActivity() {
         prefs.edit().putString("apiKey", key).apply()
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshStorage()
+    }
+
     private fun updateFolderLabel() {
         val tree = prefs.getString("tree", null)
         findViewById<TextView>(R.id.folderLabel).text =
             if (tree == null) "No folder selected"
             else folderDisplayName(tree)
+    }
+
+    /* One ContentResolver query per directory — the same walk the library
+       scan uses. Off the main thread: a library of a hundred novels is a
+       hundred queries, and the first listing of a large folder is slow. */
+    private fun refreshStorage() {
+        val gen = ++storageGen
+        val label = findViewById<TextView>(R.id.storageUsedLabel)
+        val tree = prefs.getString("tree", null)
+        if (tree == null) {
+            label.text = "—"
+            return
+        }
+        label.text = "…"
+        lifecycleScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                try { measure(tree) } catch (e: Exception) { "—" }
+            }
+            if (gen != storageGen) return@launch
+            label.text = text
+        }
+    }
+
+    private fun measure(tree: String): String {
+        val treeUri = Uri.parse(tree)
+        fun kids(docId: String) = try {
+            Saf.children(contentResolver, treeUri, docId).map {
+                Folder.Item(it.name, it.docId, it.isDir, it.size)
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        return Storage.label(Storage.total(kids(Saf.rootId(treeUri)), ::kids))
     }
 
     /* "primary:Documents/Novels" -> "Novels" */
