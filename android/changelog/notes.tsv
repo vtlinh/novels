@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Show release notes in a dialog from Version
+	Show total novel storage on Settings
+1.33.24	Show release notes in a dialog from Version
 1.33.23	Release notes on the About page
 1.33.21	Split novel info and chapters into tabs
 1.33.20	Show library ratings as 10★
