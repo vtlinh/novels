@@ -192,6 +192,11 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun measure(tree: String): String {
         val treeUri = Uri.parse(tree)
+        /* A novel folder that cannot be listed is skipped; failing to list
+           the tree itself must not look like an empty library. */
+        val root = Saf.children(contentResolver, treeUri, Saf.rootId(treeUri)).map {
+            Folder.Item(it.name, it.docId, it.isDir, it.size)
+        }
         fun kids(docId: String) = try {
             Saf.children(contentResolver, treeUri, docId).map {
                 Folder.Item(it.name, it.docId, it.isDir, it.size)
@@ -199,7 +204,7 @@ class SettingsActivity : AppCompatActivity() {
         } catch (e: Exception) {
             emptyList()
         }
-        return Storage.label(Storage.total(kids(Saf.rootId(treeUri)), ::kids))
+        return Storage.label(Storage.total(root, ::kids))
     }
 
     /* "primary:Documents/Novels" -> "Novels" */

@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Show total novel storage on Settings
+	Don't report a lost download folder as empty
+1.33.25	Show total novel storage on Settings
 1.33.24	Show release notes in a dialog from Version
 1.33.23	Release notes on the About page
 1.33.21	Split novel info and chapters into tabs
