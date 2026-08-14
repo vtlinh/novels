@@ -19,15 +19,16 @@ class NovelRatingTest {
     }
 
     @Test
-    fun `bar is full stars then empty stars`() {
-        assertEquals("★★★★★★★★☆☆", NovelRating.bar(8))
-        assertEquals("☆☆☆☆☆☆☆☆☆☆", NovelRating.bar(0))
-        assertEquals("★★★★★★★★★★", NovelRating.bar(10))
+    fun `bar is a count times a star`() {
+        assertEquals("8x★", NovelRating.bar(8))
+        assertEquals("0x★", NovelRating.bar(0))
+        assertEquals("10x★", NovelRating.bar(10))
+        assertEquals("1x★", NovelRating.bar(1))
     }
 
     @Test
     fun `bar never exceeds MAX`() {
-        assertEquals(NovelRating.MAX, NovelRating.bar(99).length)
-        assertEquals(NovelRating.MAX, NovelRating.bar(-1).length)
+        assertEquals("10x★", NovelRating.bar(99))
+        assertEquals("0x★", NovelRating.bar(-1))
     }
 }
