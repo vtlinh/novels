@@ -5,14 +5,16 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.SeekBar
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
 /* App settings: the Storage card (download folder + "Compress my novels"),
-   the Anthropic API key, and reading options. Toggling compression starts a
-   background pass that converts every novel to match; new downloads follow the
-   same flag. The key is saved on focus loss and when leaving. */
+   the Anthropic API key, library auto status-check interval, and reading
+   options. Toggling compression starts a background pass that converts every
+   novel to match; new downloads follow the same flag. The key is saved on
+   focus loss and when leaving. */
 class SettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -79,6 +81,29 @@ class SettingsActivity : AppCompatActivity() {
 
         /* the compress/uncompress pass runs silently in the background — no
            live status; zipStatus keeps its descriptive hint */
+
+        /* Automatic library status check: 0 = never, 1..7 = minimum days
+           between foreground sweeps (StatusAutoCheck, same lifecycle as the
+           self-updater). */
+        val daysLabel = findViewById<TextView>(R.id.statusCheckDaysLabel)
+        val daysSeek = findViewById<SeekBar>(R.id.statusCheckDaysSeek)
+        fun daysCaption(d: Int) = when (d) {
+            0 -> "Never"
+            1 -> "1 day"
+            else -> "$d days"
+        }
+        val initialDays = StatusAutoCheck.days(this)
+        daysSeek.max = 7
+        daysSeek.progress = initialDays
+        daysLabel.text = daysCaption(initialDays)
+        daysSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                daysLabel.text = daysCaption(progress)
+                if (fromUser) StatusAutoCheck.setDays(this@SettingsActivity, progress)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
 
         /* keep the reader's screen on while TTS reads aloud (off by default) */
         val keepAwakeCheck = findViewById<CheckBox>(R.id.keepAwakeCheck)

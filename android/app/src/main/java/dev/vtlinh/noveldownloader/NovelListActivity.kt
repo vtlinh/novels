@@ -17,11 +17,8 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /* Library (launcher): every novel in the saved download folder, resumable with
@@ -1055,7 +1052,7 @@ class NovelListActivity : AppCompatActivity() {
                        anyway. */
                     !DownloadService.isBusy(normKey(it.rec.slug)) &&
                         (!done || store.chapterOrderCount(folder, it.rec.slug) == 0)
-                }
+                }.map { NovelCheck.Target(it.rec, it.display, it.local) }
             } } catch (e: Exception) {
                 status.text = "Couldn't read the library — ${e.message}"
                 btn.isEnabled = true
@@ -1066,65 +1063,26 @@ class NovelListActivity : AppCompatActivity() {
                 btn.isEnabled = true
                 return@launch
             }
-            val done = java.util.concurrent.atomic.AtomicInteger(0)
-            /* Novels whose own setting says to fetch whatever the check finds.
-               Collected rather than started on the spot: this runs three wide
-               and a download started mid-sweep gets its files renamed and
-               deduped out from under the write by the very sweep that started
-               it. They go to the queue once every novel has been asked. */
-            val fetch = java.util.Collections.synchronizedList(ArrayList<String>())
-            withContext(Dispatchers.IO) {
-                coroutineScope {
-                    val sem = Semaphore(3)
-                    for (row in targets) {
-                        launch {
-                            sem.withPermit {
-                                /* The busy test at snapshot time is not enough:
-                                   this sweep runs three wide for minutes, and
-                                   a download started after it began gets its
-                                   files renamed and deduped out from under the
-                                   write. Ask again when this novel's turn
-                                   actually comes. */
-                                if (DownloadService.isBusy(normKey(row.rec.slug))) {
-                                    done.incrementAndGet()
-                                    return@withPermit
-                                }
-                                val res = NovelCheck.one(
-                                    engine, store, folder, row.rec, row.display, row.local,
-                                )
-                                /* the setting as it is NOW, not as it was when
-                                   the sweep snapshotted its targets — the busy
-                                   test got a re-ask for the same reason, and a
-                                   sweep runs for minutes: un-ticking
-                                   auto-download mid-sweep must stick, because
-                                   with translation pinned on it is money */
-                                if (res != null && res.missing > 0 &&
-                                    try {
-                                        store.novel(folder, row.rec.slug)?.autoDownload == true
-                                    } catch (e: Exception) { false }
-                                ) {
-                                    fetch.add(res.url)
-                                }
-                                val n = done.incrementAndGet()
-                                withContext(Dispatchers.Main) {
-                                    status.text = "Checking… $n/${targets.size}"
-                                }
-                            }
-                        }
-                    }
+            val result = NovelCheck.sweep(
+                this@NovelListActivity, engine, store, folder, targets,
+            ) { n, total ->
+                withContext(Dispatchers.Main) {
+                    status.text = "Checking… $n/$total"
                 }
             }
-            val started = fetch.toList().count { NovelCheck.startDownload(this@NovelListActivity, it) }
             btn.isEnabled = true
             /* through render, not before it — render overwrites the status
                twice in the same turn, so a message set here was never seen */
             render(
-                "Status checked (${targets.size} novel(s))." + when {
-                    fetch.isEmpty() -> ""
-                    started == fetch.size -> " Downloading $started with new chapters."
+                "Status checked (${result.asked} novel(s))." + when {
+                    result.fetchUrls.isEmpty() -> ""
+                    result.started == result.fetchUrls.size ->
+                        " Downloading ${result.started} with new chapters."
                     /* from the background the service start is refused — say
                        so rather than reporting downloads that never began */
-                    else -> " $started of ${fetch.size} downloads started — the rest were refused; open the app and check again."
+                    else ->
+                        " ${result.started} of ${result.fetchUrls.size} downloads started" +
+                            " — the rest were refused; open the app and check again."
                 },
             )
         }

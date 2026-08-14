@@ -175,6 +175,70 @@
                 android:focusable="true" />
         </LinearLayout>
 
+        <!-- ══ Library ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:padding="18dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Library"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Automatic status check"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+
+                <TextView
+                    android:id="@+id/statusCheckDaysLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Never"
+                    android:textSize="14sp"
+                    android:textColor="@color/accent"
+                    android:textStyle="bold"
+                    android:minWidth="72dp"
+                    android:gravity="end" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/statusCheckDaysSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:max="7"
+                android:progress="0"
+                android:progressTint="@color/accent"
+                android:thumbTint="@color/accent"
+                android:progressBackgroundTint="@color/input_stroke" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="When you open the app, check novels for new chapters if at least this many days have passed since the last automatic check. 0 = never. Same check as the Library's Check button."
+                android:textSize="12sp"
+                android:textColor="@color/muted" />
+        </LinearLayout>
+
         <!-- ══ Reading ══ -->
         <LinearLayout
             android:layout_width="match_parent"
