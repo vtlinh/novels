@@ -36,8 +36,7 @@ class SettingsActivity : AppCompatActivity() {
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
-                prefs.edit().putString("tree", uri.toString())
-                    .remove("storageUsedShown").remove("storageUsedTree").apply()
+                prefs.edit().putString("tree", uri.toString()).apply()
                 updateFolderLabel()
                 refreshStorage()
             }
@@ -74,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
         updateFolderLabel()
         bindHelp(
             R.id.storageUsedHelp, "Used",
-            "Space taken by downloaded chapters in the folder above, including compressed copies and translations. Other files in that folder are not counted.",
+            "Space taken by downloaded chapters in the folder above, including compressed copies and translations. Remembered per novel until a download, translation, compress, or a file change.",
         )
 
         /* single "Compress my novels" switch: on → compress every novel and
@@ -170,24 +169,24 @@ class SettingsActivity : AppCompatActivity() {
             else folderDisplayName(tree)
     }
 
-    /* Off the main thread: a library of a hundred novels is a hundred
-       listings, and a large folder is slow. The last successful total stays
-       on screen until a new one lands — wiping it to "…" on every open made
-       a slow walk look like the size was never calculated. */
+    /* Off the main thread. Per-novel sizes live in the DB; a matching
+       folder stamp skips the SAF walk. Forgotten sizes, or a stamp that
+       no longer matches (a file arrived or left, including from outside
+       the app), are remeasured. */
     private fun refreshStorage() {
         val gen = ++storageGen
         val label = findViewById<TextView>(R.id.storageUsedLabel)
         val tree = prefs.getString("tree", null)
         if (tree == null) {
-            prefs.edit().remove("storageUsedShown").remove("storageUsedTree").apply()
             label.text = "—"
             return
         }
-        val cached = if (prefs.getString("storageUsedTree", null) == tree) {
-            prefs.getString("storageUsedShown", null)
-        } else null
+        val preview = try {
+            val known = DownloadStore(this).diskCaches(tree).map { it.bytes }.filter { it >= 0L }
+            if (known.isEmpty()) null else Storage.format(known.sum())
+        } catch (e: Exception) { null }
         if (label.text.isNullOrBlank() || label.text == "—" || label.text == "…") {
-            label.text = cached ?: "…"
+            label.text = preview ?: "…"
         }
         lifecycleScope.launch {
             val text = try {
@@ -202,24 +201,22 @@ class SettingsActivity : AppCompatActivity() {
             } catch (e: kotlinx.coroutines.CancellationException) {
                 return@launch
             } catch (e: Exception) {
-                cached ?: "—"
+                preview ?: "—"
             }
             if (text == null || gen != storageGen) return@launch
             label.text = text
-            if (text != "—") {
-                prefs.edit().putString("storageUsedShown", text).putString("storageUsedTree", tree).apply()
-            }
         }
     }
 
     private fun measure(tree: String, gen: Int, onPartial: (Storage.Total) -> Unit): String? {
         val treeUri = Uri.parse(tree)
-        /* Names only at the root — asking for COLUMN_SIZE of each novel
-           directory can make the provider recursively sum the whole library
-           before this query returns. */
+        val store = DownloadStore(this)
+        val caches = try { store.diskCaches(tree) } catch (e: Exception) { emptyList() }
         val root = Saf.children(
             contentResolver, treeUri, Saf.rootId(treeUri), includeSize = false,
-        ).map { Folder.Item(it.name, it.docId, it.isDir, it.size) }
+        )
+        val byName = HashMap<String, Saf.Entry>()
+        for (e in root) if (e.isDir) byName[e.name] = e
         fun kids(docId: String) = try {
             Saf.children(contentResolver, treeUri, docId).map {
                 Folder.Item(it.name, it.docId, it.isDir, it.size)
@@ -228,13 +225,30 @@ class SettingsActivity : AppCompatActivity() {
             emptyList()
         }
         var acc = Storage.Total(0L, 0, 0)
-        for (dir in root) {
+        for (row in caches) {
             if (gen != storageGen || isDestroyed) return null
-            if (!dir.isDir) continue
-            val listing = kids(dir.ref)
-            acc += Storage.of(listing)
+            val dir = byName[row.dirName] ?: continue
+            val dirMod = Saf.modified(contentResolver, treeUri, dir.docId)
+            val trId = row.stamp?.trId ?: ""
+            val trMod = if (trId.isEmpty()) 0L else Saf.modified(contentResolver, treeUri, trId)
+            val now = Folder.Stamp(dir.docId, dirMod, trId, trMod)
+            val hit = Storage.remembered(row.bytes, row.stamp, now)
+            if (hit != null) {
+                acc += Storage.Total(hit, if (hit == 0L) 0 else 1, 0)
+                onPartial(acc)
+                continue
+            }
+            /* mtime BEFORE the listing, same race Folder.Stamp documents */
+            val listing = kids(dir.docId)
             val translated = listing.firstOrNull { it.isDir && it.name == "translated" }
-            if (translated != null) acc += Storage.of(kids(translated.ref))
+            val trNow = translated?.let { Saf.modified(contentResolver, treeUri, it.ref) } ?: 0L
+            val stamp = Folder.Stamp(dir.docId, dirMod, translated?.ref ?: "", trNow)
+            var got = Storage.of(listing)
+            if (translated != null) got += Storage.of(kids(translated.ref))
+            acc += got
+            if (got.files == 0 || got.files != got.unknown) {
+                try { store.setDiskBytes(tree, row.slug, got.bytes, stamp) } catch (e: Exception) {}
+            }
             onPartial(acc)
         }
         return Storage.label(acc)

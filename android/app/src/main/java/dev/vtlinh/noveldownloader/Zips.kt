@@ -201,7 +201,11 @@ object Zips {
                only thing that would ever remove them; the chapter itself is
                absent from the index, so the next download fetches it again. */
             for (f in kids) {
-                if (!f.isDir && isPartName(f.name)) deleteDoc(cr, docUri(treeUri, f.docId))
+                if (!f.isDir && isPartName(f.name) &&
+                    deleteDoc(cr, docUri(treeUri, f.docId))
+                ) {
+                    changed = true
+                }
             }
             val byName = kids.associateBy { it.name }
             val parentUri = docUri(treeUri, parentDocId)
@@ -269,7 +273,11 @@ object Zips {
                direction sweeps them — this pass is the only one that walks the
                folder when compression is off. */
             for (f in kids) {
-                if (!f.isDir && isPartName(f.name)) deleteDoc(cr, docUri(treeUri, f.docId))
+                if (!f.isDir && isPartName(f.name) &&
+                    deleteDoc(cr, docUri(treeUri, f.docId))
+                ) {
+                    changed = true
+                }
             }
             for (f in kids) {
                 if (f.isDir || isPartName(f.name) || !isGzName(f.name)) continue

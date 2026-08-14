@@ -156,4 +156,53 @@ class StorageTest {
         assertEquals("1 MB", Storage.format(1024L * 1024))
         assertEquals("1.5 GB", Storage.format((1536L * 1024 * 1024)))
     }
+
+    @Test
+    fun `an unmeasured size is not reused`() {
+        val now = Folder.Stamp("novel", 1000L, "tr", 2000L)
+        assertEquals(null, Storage.remembered(-1L, now, now))
+        assertEquals(null, Storage.remembered(500L, null, now))
+    }
+
+    @Test
+    fun `a matching stamp reuses the stored size`() {
+        val s = Folder.Stamp("novel", 1000L, "tr", 2000L)
+        assertEquals(4096L, Storage.remembered(4096L, s, s.copy()))
+        assertEquals(0L, Storage.remembered(0L, s, s.copy()))
+    }
+
+    /* Downloads, deletes, and compress rewrite the novel folder; translations
+       land in translated/. Either mtime moving is enough. */
+    @Test
+    fun `a download or translation invalidates the stored size`() {
+        val cached = Folder.Stamp("novel", 1000L, "tr", 2000L)
+        assertEquals(
+            null,
+            Storage.remembered(4096L, cached, Folder.Stamp("novel", 1500L, "tr", 2000L)),
+        )
+        assertEquals(
+            null,
+            Storage.remembered(4096L, cached, Folder.Stamp("novel", 1000L, "tr", 2500L)),
+        )
+        assertEquals(
+            null,
+            Storage.remembered(4096L, cached, Folder.Stamp("other", 1000L, "tr", 2000L)),
+        )
+    }
+
+    /* 0 is "the provider reported nothing", not a timestamp. Equal zeros
+       would otherwise look like a hit, and a rewrite would never remeasure. */
+    @Test
+    fun `a provider that reports no mtime is not reused`() {
+        val none = Folder.Stamp("novel", 0L, "", 0L)
+        assertEquals(null, Storage.remembered(4096L, none, Folder.Stamp("novel", 0L, "", 0L)))
+        val trUnknown = Folder.Stamp("novel", 1000L, "tr", 0L)
+        assertEquals(null, Storage.remembered(4096L, trUnknown, trUnknown.copy()))
+    }
+
+    @Test
+    fun `an untranslated novel with a real folder mtime is reused`() {
+        val s = Folder.Stamp("novel", 1000L, "", 0L)
+        assertEquals(4096L, Storage.remembered(4096L, s, s.copy()))
+    }
 }

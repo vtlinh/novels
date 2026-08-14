@@ -721,6 +721,7 @@ class Translator(
                         if (writeTranslated(tdir, ch.first, text)) {
                             done.add(ch.first); saved++
                             log("saved  translated/${ch.first}")
+                            try { store.forgetDiskBytes(folder, slug) } catch (e: Exception) {}
                         } else {
                             failed++
                             writeFailed++
@@ -879,7 +880,10 @@ class Translator(
                                     log("! recovered reply $idx is chapter $outNum, not $srcNum — not saved")
                                     continue
                                 }
-                                if (writeTranslated(tdir, fn, text)) { done.add(fn); n++; log("saved  translated/$fn (recovered)") }
+                                if (writeTranslated(tdir, fn, text)) {
+                                    done.add(fn); n++; log("saved  translated/$fn (recovered)")
+                                    try { store.forgetDiskBytes(folder, slug) } catch (e: Exception) {}
+                                }
                                 else recWriteFailed++
                             }
                         }

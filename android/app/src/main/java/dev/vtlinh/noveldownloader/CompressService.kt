@@ -132,7 +132,13 @@ class CompressService : Service() {
                         } catch (e: Exception) {
                             false
                         }
-                        if (changed) changedAny = true
+                        if (changed) {
+                            changedAny = true
+                            try {
+                                DownloadStore(this@CompressService)
+                                    .forgetDiskBytesForDir(treeStr, d.name)
+                            } catch (e: Exception) {}
+                        }
                     }
                     /* refs changed shape (txt <-> gz) → the cached chapter
                        listings are stale across the library */
