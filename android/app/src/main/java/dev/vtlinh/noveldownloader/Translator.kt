@@ -33,10 +33,10 @@ class Translator(
     private val status: (String) -> Unit,
 ) {
     companion object {
-        private const val OPUS = "claude-opus-4-8"
+        private const val OPUS = "claude-opus-5"
         private const val SONNET = "claude-sonnet-5"   // novel-title translation (short, cheap)
         private const val EFFORT = "medium"
-        private const val MAX_TOKENS = 128000        // Opus 4.8 max output; a bundle's whole translation must fit under this
+        private const val MAX_TOKENS = 128000        // Opus 5 max output; a bundle's whole translation must fit under this
         private const val BUNDLE_TOKEN_BUDGET = 80000 // estimated output tokens packed per bundle (headroom below MAX_TOKENS)
         private const val MAX_RETRIES = 4
         private const val POLL_MS = 10_000L          // gap between batch status checks
@@ -387,6 +387,11 @@ class Translator(
         val params = JSONObject()
             .put("model", OPUS)
             .put("max_tokens", MAX_TOKENS)
+            /* Opus 5 thinks by default, and those tokens share MAX_TOKENS with
+               the translation JSON. A packed bundle that spent the remaining
+               room on thinking would truncate and be bought again. Effort is
+               already medium, which is allowed with thinking off. */
+            .put("thinking", JSONObject().put("type", "disabled"))
             .put("system", SYSTEM)
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
             .put(
