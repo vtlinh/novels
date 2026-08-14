@@ -1718,7 +1718,7 @@ class DownloadEngine(
             return@withContext
         }
         /* register for the List Novels screen (first run keeps its timestamp;
-           last_dl always bumps so the list sorts newest download first) */
+           last_dl always bumps so equal-star ties sort newest download first) */
         store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
         store.touchNovel(folderKey, slug, System.currentTimeMillis())
         store.setNovelInfo(

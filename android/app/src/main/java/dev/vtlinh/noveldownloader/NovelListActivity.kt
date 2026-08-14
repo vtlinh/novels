@@ -27,8 +27,9 @@ import kotlinx.coroutines.withContext
    subdirectories (novels downloaded before the registry existed, or copied
    in from elsewhere). "Check status" asks each site for its chapter count,
    finished flag, and author; a finished novel with everything on disk shows
-   a Complete tag instead of a Download button and sinks to the bottom, and
-   an ongoing novel with every chapter on disk shows an Up to date tag.
+   a Complete tag instead of a Download button, and an ongoing novel with
+   every chapter on disk shows an Up to date tag. ALL NOVELS sorts by personal
+   star ranking, then most recently updated.
 
    Cold start: resume a live reading session when one exists; otherwise open
    the Browser when this list is empty. Console output (formerly the Home
@@ -76,11 +77,8 @@ class NovelListActivity : AppCompatActivity() {
             }
         }
 
-    /* ---- per-novel user marks (hot / finished / garbage) ---- */
-    private fun isHot(slug: String) = prefs.getBoolean("novelHot:$slug", false)
+    /* ---- per-novel user marks (finished / garbage) ---- */
     private fun isRead(slug: String) = prefs.getBoolean("novelRead:$slug", false)
-    private fun setHot(slug: String, v: Boolean) =
-        prefs.edit().putBoolean("novelHot:$slug", v).apply()
     private fun setRead(slug: String, v: Boolean) =
         prefs.edit().putBoolean("novelRead:$slug", v).apply()
     private fun garbageSet(): Set<String> =
@@ -409,9 +407,9 @@ class NovelListActivity : AppCompatActivity() {
                     for (k in listOf(
                         "lastCh:", "lastChAt:", "readPos:", "readParaText:",
                         "ttsPos:", "ttsPosAt:", "ttsParaText:",
-                        /* the hot/finished marks are per-slug too — dropping
-                           them re-floated a finished novel up the sort */
-                        "novelHot:", "novelRead:",
+                        /* finished is per-slug too — dropping it hid the
+                           FINISHED tag on a novel the user had marked */
+                        "novelRead:",
                     )) {
                         val v = all[k + lose.slug] ?: continue
                         if (all[k + win.slug] != null) continue
@@ -467,14 +465,14 @@ class NovelListActivity : AppCompatActivity() {
                 NovelCheck.localCount(store, folder, rec),
             )
         }.sortedWith(
-            /* finished (user-marked) novels sink to the bottom; hot novels
-               float to the top of their half (so hot+finished sits above
-               plain finished). Then incomplete first, most recently
-               downloaded on top (first-download time as legacy fallback). */
-            compareBy<Row> { isRead(it.rec.slug) }
-                .thenBy { !isHot(it.rec.slug) }
-                .thenBy { it.rec.complete }
-                .thenByDescending { maxOf(it.rec.lastDl, it.rec.started) },
+            /* more stars first; same stars, most recently updated first.
+               The three latest reads are pinned above this in render(). */
+            LibrarySort.comparator(
+                { NovelRating.get(prefs, it.rec.slug) },
+                { it.rec.lastDl },
+                { it.rec.lastRead },
+                { it.rec.started },
+            ),
         )
     }
 
@@ -692,7 +690,7 @@ class NovelListActivity : AppCompatActivity() {
                         .putExtra("slug", row.rec.slug),
                 )
             }
-            /* long-press: hot / finished / garbage marks */
+            /* long-press: finished / garbage marks */
             setOnLongClickListener { showMarkSheet(row); true }
         }
         /* "complete" is the SITE saying the story is finished — it says
@@ -711,7 +709,6 @@ class NovelListActivity : AppCompatActivity() {
         val upToDate = !row.rec.complete && haveAll && !surplus
         val rating = NovelRating.get(prefs, row.rec.slug)
         val text = android.text.SpannableStringBuilder().apply {
-            if (isHot(row.rec.slug)) append("★ ")   // hot marker (monochrome)
             append(row.display)
             if (rating > 0) {
                 append("\n")
@@ -830,7 +827,7 @@ class NovelListActivity : AppCompatActivity() {
         return line
     }
 
-    /* long-press menu: hot / finished / garbage */
+    /* long-press menu: finished / garbage */
     private fun showMarkSheet(row: Row) {
         val slug = row.rec.slug
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
@@ -854,9 +851,6 @@ class NovelListActivity : AppCompatActivity() {
                 setOnClickListener { sheet.dismiss(); onTap() }
             },
         )
-        item(if (isHot(slug)) "Unmark hot (back to normal)" else "★ Mark as hot") {
-            setHot(slug, !isHot(slug)); render()
-        }
         item(if (isRead(slug)) "Mark as unread" else "Mark as finished") {
             setRead(slug, !isRead(slug)); render()
         }
