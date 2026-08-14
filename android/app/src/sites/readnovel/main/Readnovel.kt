@@ -101,6 +101,46 @@ object Readnovel : Site {
     override fun author(doc: Document) =
         doc.selectFirst("a[itemprop=author]")?.text()?.trim()?.ifEmpty { null }
 
+    /* Genre links are bare <a itemprop=genre> — joining their text restores
+       the commas the site's own whitespace collapses away. */
+    override fun genres(doc: Document): String? {
+        val g = doc.select("a[itemprop=genre]").map { it.text().trim() }.filter { it.isNotEmpty() }
+        return g.joinToString(", ").ifEmpty { null }
+    }
+
+    /* The field titled "Source" on this host is the alternate-title line
+       ("Martial Peak, Wǔ Liàn Diān Fēng, 武炼巅峰"), not a publisher. Map it
+       to alternativeNames so the info screen shows the right label. */
+    override fun alternativeNames(doc: Document): String? {
+        val el = doc.selectFirst(".info-chitiet[title=Source]")
+            ?: doc.select(".info-chitiet").firstOrNull {
+                it.selectFirst("span.glyphicon-copy") != null
+            }
+            ?: return null
+        val clone = el.clone()
+        clone.select("h3").remove()
+        return clone.text().trim().ifEmpty { null }
+    }
+
+    override fun statusLabel(doc: Document): String? =
+        doc.select(".info-chitiet").firstOrNull {
+            it.selectFirst("span.glyphicon-time") != null
+        }?.let { el ->
+            val clone = el.clone()
+            clone.select("h3").remove()
+            clone.text().trim().ifEmpty { null }
+        }
+
+    override fun description(doc: Document) =
+        SiteHelp.descriptionText(doc)
+            ?: doc.selectFirst("[itemprop=description]")?.let { el ->
+                var t = el.text().replace('\u00a0', ' ').replace(Regex("\\s+"), " ").trim()
+                if (t.startsWith("SUMMARY", ignoreCase = true)) {
+                    t = t.removePrefix("SUMMARY").removePrefix("summary").trim()
+                }
+                t.ifEmpty { null }
+            }
+
     override fun chapterContent(doc: Document) =
         SiteHelp.firstOf(doc, listOf(".chapter-content", "#chapter-c", ".chapter-c"))
 

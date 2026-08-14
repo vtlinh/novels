@@ -45,6 +45,12 @@ data class NovelRec(
     /* where the last full read of the listing ended, for a check that resumes
        rather than paging through the whole thing (see Resume) */
     val resume: Resume.Point? = null,
+    /* novel-page info for the chapter-list header ("" when not yet scraped) */
+    val altNames: String = "",
+    val genres: String = "",
+    val source: String = "",
+    val description: String = "",
+    val statusLabel: String = "",
 )
 
 /* a cached, fully-resolved chapter listing (DownloadStore.chlist): filenames
@@ -433,6 +439,7 @@ class DownloadStore(context: Context) :
                 "slug", "url", "title", "started", "total", "complete", "author", "disk_count",
                 "last_dl", "last_read", "auto_dl", "translate",
                 "resume_page", "resume_url", "resume_before",
+                "alt_names", "genres", "source", "description", "status_label",
             ),
             "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
@@ -453,6 +460,11 @@ class DownloadStore(context: Context) :
                         } else {
                             null
                         },
+                        altNames = c.getString(15) ?: "",
+                        genres = c.getString(16) ?: "",
+                        source = c.getString(17) ?: "",
+                        description = c.getString(18) ?: "",
+                        statusLabel = c.getString(19) ?: "",
                     ),
                 )
             }
@@ -522,6 +534,36 @@ class DownloadStore(context: Context) :
             "UPDATE novels SET author=? WHERE folder=? AND slug=?",
             arrayOf(author, folder, slug),
         )
+    }
+
+    /* Write every novel-page info field we have. Blank inputs leave the stored
+       value alone — a status check that failed to find genres must not wipe
+       ones a previous download already recorded. */
+    fun setNovelInfo(
+        folder: String,
+        slug: String,
+        author: String? = null,
+        altNames: String? = null,
+        genres: String? = null,
+        source: String? = null,
+        description: String? = null,
+        statusLabel: String? = null,
+    ) {
+        val db = writableDatabase
+        fun put(col: String, v: String?) {
+            if (!v.isNullOrBlank()) {
+                db.execSQL(
+                    "UPDATE novels SET $col=? WHERE folder=? AND slug=?",
+                    arrayOf(v.trim(), folder, slug),
+                )
+            }
+        }
+        put("author", author)
+        put("alt_names", altNames)
+        put("genres", genres)
+        put("source", source)
+        put("description", description)
+        put("status_label", statusLabel)
     }
 
     fun updateNovelCheck(folder: String, slug: String, total: Int, complete: Boolean) {

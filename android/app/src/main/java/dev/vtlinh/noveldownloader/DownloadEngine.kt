@@ -965,6 +965,7 @@ class DownloadEngine(
         val completed: Boolean,
         val author: String?,
         val orderedFilenames: List<String>,   // site listing order, engine filenames
+        val info: NovelPageInfo = NovelPageInfo(author = author),
     )
 
     /* Status probe for the List Novels screen: list the novel's chapters the
@@ -1204,6 +1205,7 @@ class DownloadEngine(
         SiteStatus(
             siteOrdered.size, site.isCompleted(doc), site.author(doc),
             siteOrdered.mapNotNull { it.filename },
+            NovelPageInfo.from(site, doc),
         )
     }
 
@@ -1371,7 +1373,10 @@ class DownloadEngine(
                 resumePoint(site, base, slug, lastChapterPage, chaptersBeforePage),
             )
         } catch (e: Exception) {}
-        SiteStatus(total, site.isCompleted(doc), site.author(doc), filenames)
+        SiteStatus(
+            total, site.isCompleted(doc), site.author(doc), filenames,
+            NovelPageInfo.from(site, doc),
+        )
     }
 
     suspend fun run(
@@ -1716,7 +1721,16 @@ class DownloadEngine(
            last_dl always bumps so the list sorts newest download first) */
         store.registerNovel(folderKey, slug, base, title, System.currentTimeMillis())
         store.touchNovel(folderKey, slug, System.currentTimeMillis())
-        author?.let { store.setAuthor(folderKey, slug, it) }
+        store.setNovelInfo(
+            folderKey, slug,
+            author = author,
+            altNames = site.alternativeNames(doc),
+            genres = site.genres(doc),
+            source = site.source(doc),
+            description = site.description(doc),
+            statusLabel = site.statusLabel(doc)
+                ?: if (site.isCompleted(doc)) "Completed" else null,
+        )
         saveCover(slug, doc)
         /* Index the site's chapter order for the reader — but only from a
            listing we read in full. A prefix would replace a 4500-chapter

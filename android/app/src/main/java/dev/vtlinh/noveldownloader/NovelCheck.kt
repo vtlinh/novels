@@ -167,7 +167,15 @@ object NovelCheck {
             /* record the URL that answered, so the next sweep doesn't start by
                asking the host that no longer has it */
             if (url != rec.url) store.recordNovelUrl(folder, rec.slug, url, display, 0L)
-            res.author?.let { store.setAuthor(folder, rec.slug, it) }
+            store.setNovelInfo(
+                folder, rec.slug,
+                author = res.info.author ?: res.author,
+                altNames = res.info.altNames,
+                genres = res.info.genres,
+                source = res.info.source,
+                description = res.info.description,
+                statusLabel = res.info.statusLabel,
+            )
             /* index the site's chapter order for the reader — skipped when
                already indexed and unchanged */
             if (store.chapterOrderCount(folder, rec.slug) != res.orderedFilenames.size) {
