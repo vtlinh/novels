@@ -80,6 +80,16 @@
             android:textSize="13sp"
             android:textColor="@color/muted" />
 
+        <!-- Novel info (author, genres, personal ranking, description). Stays
+             above the chapter list regardless of ascending/descending sort. -->
+        <LinearLayout
+            android:id="@+id/novelInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical"
+            android:visibility="gone" />
+
         <ListView
             android:id="@+id/chapterListView"
             android:layout_width="match_parent"

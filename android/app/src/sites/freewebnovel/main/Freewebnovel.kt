@@ -92,6 +92,24 @@ object Freewebnovel : Site {
     override fun author(doc: Document) =
         doc.selectFirst("a[href*=/author/]")?.text()?.trim()?.ifEmpty { null }
             ?: doc.selectFirst(".item span.s1 a")?.text()?.trim()?.ifEmpty { null }
+            ?: itemRight(doc, "glyphicon-user")
+
+    /* Genres sit in the .item whose icon is the list. */
+    override fun genres(doc: Document) = itemRight(doc, "glyphicon-th-list")
+        ?.replace(Regex("\\s*,\\s*"), ", ")
+
+    /* "Chinese Novel" / "English Novel" — the site's origin line, not a
+       publisher name, but it is what this host prints in that slot. */
+    override fun source(doc: Document) = itemRight(doc, "glyphicon-globe")
+
+    override fun statusLabel(doc: Document) = itemRight(doc, "glyphicon-time")
+
+    override fun description(doc: Document) = SiteHelp.descriptionText(doc)
+
+    /* The text in the .right of the .item whose icon class contains `icon`. */
+    private fun itemRight(doc: Document, icon: String): String? =
+        doc.select(".item").firstOrNull { it.selectFirst("span.$icon") != null }
+            ?.selectFirst(".right")?.text()?.trim()?.ifEmpty { null }
 
     override fun chapterContent(doc: Document) =
         SiteHelp.firstOf(doc, listOf("#article", ".txt"))

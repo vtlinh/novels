@@ -92,8 +92,25 @@ object Novelfull : Site {
             ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
             ?: SiteHelp.metaTitle(doc)
 
+    /* Every author link, not just the first — Library of Heaven's Path lists
+       both "Heng Sao Tian Ya" and "横扫天涯", and the info screen shows both. */
     override fun author(doc: Document) =
-        doc.selectFirst("a[href*=/author/]")?.text()?.trim()?.ifEmpty { null }
+        SiteHelp.infoField(doc, "Author")
+            ?: doc.select("a[href*=/author/]")
+                .map { it.text().trim() }.filter { it.isNotEmpty() }
+                .distinct().joinToString(", ").ifEmpty { null }
+
+    override fun alternativeNames(doc: Document) =
+        SiteHelp.infoField(doc, "Alternative names", "Alternative name")
+
+    /* .com prints "Genre:", .net prints "Genres:" — same field */
+    override fun genres(doc: Document) = SiteHelp.infoField(doc, "Genre", "Genres")
+
+    override fun source(doc: Document) = SiteHelp.infoField(doc, "Source")
+
+    override fun statusLabel(doc: Document) = SiteHelp.infoField(doc, "Status")
+
+    override fun description(doc: Document) = SiteHelp.descriptionText(doc)
 
     override fun chapterContent(doc: Document) =
         SiteHelp.firstOf(doc, listOf("#chapter-content", ".chapter-content", "#chapter-c", ".chapter-c"))

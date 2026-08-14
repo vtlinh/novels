@@ -357,6 +357,38 @@ class SchemaTest {
         }
     }
 
+    /* Novel-info columns arrive empty: they are measurements of a page, and
+       an upgrade has no page to measure. A non-empty default would invent
+       metadata the site never printed. */
+    @Test
+    fun `an existing novel upgrades with blank novel-info fields`() {
+        for (v in 5..20) {
+            open().use { c ->
+                at(v, c)
+                c.createStatement().use {
+                    it.execute(
+                        "INSERT INTO novels(folder,slug,url,title,started) " +
+                            "VALUES('f','than-y','https://site/than-y/','Thần Y',1)",
+                    )
+                }
+                Schema.upgrade(Jdbc(c), v)
+                c.createStatement().use { s ->
+                    s.executeQuery(
+                        "SELECT alt_names, genres, source, description, status_label " +
+                            "FROM novels WHERE slug='than-y'",
+                    ).use { r ->
+                        assertTrue("upgrading from v$v lost the novel", r.next())
+                        assertEquals("upgrading from v$v: alt_names", "", r.getString(1))
+                        assertEquals("upgrading from v$v: genres", "", r.getString(2))
+                        assertEquals("upgrading from v$v: source", "", r.getString(3))
+                        assertEquals("upgrading from v$v: description", "", r.getString(4))
+                        assertEquals("upgrading from v$v: status_label", "", r.getString(5))
+                    }
+                }
+            }
+        }
+    }
+
     /* Anything older than v4 is rebuilt rather than migrated, and that is a
        deliberate data loss — it is all cache and index. It has to actually
        leave a working current schema behind, though. */

@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 20
+    const val VERSION = 21
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -53,6 +53,12 @@ object Schema {
                paging through the whole listing again. 0 = no resume point. */
             "resume_page INTEGER DEFAULT 0, resume_url TEXT DEFAULT '', " +
             "resume_before INTEGER DEFAULT 0, " +
+            /* Novel-page info shown above the chapter list. Empty until a
+               download or status check has read the page; the chapter list
+               also refreshes these when they are still blank. */
+            "alt_names TEXT DEFAULT '', genres TEXT DEFAULT '', " +
+            "source TEXT DEFAULT '', description TEXT DEFAULT '', " +
+            "status_label TEXT DEFAULT '', " +
             "PRIMARY KEY(folder, slug))"
     /* which novel a folder NAME belongs to, so a second novel that
        sanitises onto the same name is sent elsewhere instead of writing
@@ -221,6 +227,17 @@ object Schema {
             db.soft("ALTER TABLE novels ADD COLUMN resume_page INTEGER DEFAULT 0")
             db.soft("ALTER TABLE novels ADD COLUMN resume_url TEXT DEFAULT ''")
             db.soft("ALTER TABLE novels ADD COLUMN resume_before INTEGER DEFAULT 0")
+        }
+        /* Novel-info fields scraped from the novel page (author was already
+           here; these are the rest of what the chapter-list header shows).
+           Empty defaults — nothing to seed: they are measurements of a page,
+           and there is no page here to measure. */
+        if (oldVersion < 21) {
+            db.soft("ALTER TABLE novels ADD COLUMN alt_names TEXT DEFAULT ''")
+            db.soft("ALTER TABLE novels ADD COLUMN genres TEXT DEFAULT ''")
+            db.soft("ALTER TABLE novels ADD COLUMN source TEXT DEFAULT ''")
+            db.soft("ALTER TABLE novels ADD COLUMN description TEXT DEFAULT ''")
+            db.soft("ALTER TABLE novels ADD COLUMN status_label TEXT DEFAULT ''")
         }
     }
 }

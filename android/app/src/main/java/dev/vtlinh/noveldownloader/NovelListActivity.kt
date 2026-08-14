@@ -709,9 +709,19 @@ class NovelListActivity : AppCompatActivity() {
         /* checked, still-ongoing novel with every site chapter on disk:
            nothing to download until the site adds more */
         val upToDate = !row.rec.complete && haveAll && !surplus
-        val text = buildString {
+        val rating = NovelRating.get(prefs, row.rec.slug)
+        val text = android.text.SpannableStringBuilder().apply {
             if (isHot(row.rec.slug)) append("★ ")   // hot marker (monochrome)
             append(row.display)
+            if (rating > 0) {
+                append("\n")
+                val start = length
+                append(NovelRating.bar(rating))
+                setSpan(
+                    android.text.style.ForegroundColorSpan(getColor(R.color.star)),
+                    start, length, 0,
+                )
+            }
             if (row.rec.author.isNotEmpty()) append("\n${row.rec.author}")
             if (!done) {
                 /* "on-disk / site-total" — total is filled in by downloads

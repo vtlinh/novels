@@ -226,6 +226,182 @@ class ChapterListActivity : AppCompatActivity() {
         }
 
         ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
+        bindNovelInfo()
+    }
+
+    /* Novel-page info + personal ranking, fixed above the chapter list so
+       flipping ascending/descending never moves it. Fills from the store
+       first; if description (or everything) is still blank, fetches the
+       novel page once to fill in. */
+    private fun bindNovelInfo() {
+        val panel = findViewById<android.widget.LinearLayout>(R.id.novelInfo)
+        val slug = intent.getStringExtra("slug")
+        val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null)
+        if (slug.isNullOrEmpty() || folder.isNullOrEmpty()) {
+            panel.visibility = android.view.View.GONE
+            return
+        }
+        val prefs = getSharedPreferences("app", MODE_PRIVATE)
+        lifecycleScope.launch {
+            var rec = withContext(Dispatchers.IO) {
+                try { DownloadStore(this@ChapterListActivity).novel(folder, slug) } catch (e: Exception) { null }
+            }
+            /* Old downloads only have author (if that). Pull the rest when the
+               synopsis is still missing and we know where the novel lives. */
+            if (rec != null && rec.description.isEmpty() && rec.url.isNotEmpty()) {
+                val url = rec.url
+                val fetched = withContext(Dispatchers.IO) {
+                    try {
+                        val info = NovelPageInfo.fetch(url) ?: return@withContext null
+                        DownloadStore(this@ChapterListActivity).setNovelInfo(
+                            folder, slug,
+                            author = info.author,
+                            altNames = info.altNames,
+                            genres = info.genres,
+                            source = info.source,
+                            description = info.description,
+                            statusLabel = info.statusLabel,
+                        )
+                        info
+                    } catch (e: Exception) { null }
+                }
+                if (fetched != null) {
+                    rec = withContext(Dispatchers.IO) {
+                        try { DownloadStore(this@ChapterListActivity).novel(folder, slug) } catch (e: Exception) { rec }
+                    }
+                }
+            }
+            renderNovelInfo(panel, rec, slug, prefs)
+        }
+    }
+
+    private fun renderNovelInfo(
+        panel: android.widget.LinearLayout,
+        rec: NovelRec?,
+        slug: String,
+        prefs: android.content.SharedPreferences,
+    ) {
+        panel.removeAllViews()
+        val author = rec?.author.orEmpty()
+        val alt = rec?.altNames.orEmpty()
+        val genres = rec?.genres.orEmpty()
+        val source = rec?.source.orEmpty()
+        val status = rec?.statusLabel.orEmpty().ifEmpty {
+            when {
+                rec == null -> ""
+                rec.complete -> "Completed"
+                rec.total > 0 -> "Ongoing"
+                else -> ""
+            }
+        }
+        val desc = rec?.description.orEmpty()
+        val hasMeta = author.isNotEmpty() || alt.isNotEmpty() || genres.isNotEmpty() ||
+            source.isNotEmpty() || status.isNotEmpty() || desc.isNotEmpty()
+        /* Always show the ranking row when we have a slug — the user can rate
+           even before any site info has been scraped. */
+        panel.visibility = android.view.View.VISIBLE
+
+        fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
+
+        fun addField(label: String, value: String) {
+            if (value.isEmpty()) return
+            panel.addView(
+                TextView(this).apply {
+                    text = android.text.SpannableStringBuilder().apply {
+                        append(
+                            android.text.SpannableString("$label: ").also {
+                                it.setSpan(
+                                    android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                                    0, it.length, 0,
+                                )
+                            },
+                        )
+                        append(value)
+                    }
+                    textSize = 13f
+                    setTextColor(getColor(R.color.fg))
+                    setPadding(0, dp(2), 0, dp(2))
+                    setLineSpacing(0f, 1.2f)
+                },
+            )
+        }
+
+        if (hasMeta) {
+            addField("Author", author)
+            addField("Alternative names", alt)
+            addField("Genre", genres)
+            addField("Source", source)
+            addField("Status", status)
+        }
+
+        /* Personal ranking: ten full stars. Tap the current value to clear. */
+        val starsRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        fun paintStars(current: Int) {
+            starsRow.removeAllViews()
+            for (i in 1..NovelRating.MAX) {
+                starsRow.addView(
+                    TextView(this).apply {
+                        text = "★"
+                        textSize = 22f
+                        setTextColor(
+                            getColor(if (i <= current) R.color.star else R.color.muted),
+                        )
+                        setPadding(dp(2), dp(2), dp(2), dp(2))
+                        setOnClickListener {
+                            val next = NovelRating.toggle(prefs, slug, i)
+                            paintStars(next)
+                        }
+                    },
+                )
+            }
+        }
+        paintStars(NovelRating.get(prefs, slug))
+        panel.addView(starsRow)
+
+        if (desc.isNotEmpty()) {
+            val collapsedLines = 4
+            val descView = TextView(this).apply {
+                text = desc
+                textSize = 13f
+                setTextColor(getColor(R.color.fg))
+                setLineSpacing(0f, 1.25f)
+                setPadding(0, dp(6), 0, 0)
+                maxLines = collapsedLines
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            panel.addView(descView)
+            val more = TextView(this).apply {
+                text = "See more »"
+                textSize = 13f
+                setTextColor(getColor(R.color.accent))
+                gravity = android.view.Gravity.END
+                setPadding(0, dp(2), 0, dp(4))
+                setOnClickListener {
+                    val expanded = descView.maxLines == Int.MAX_VALUE
+                    if (expanded) {
+                        descView.maxLines = collapsedLines
+                        text = "See more »"
+                    } else {
+                        descView.maxLines = Int.MAX_VALUE
+                        text = "« See less"
+                    }
+                }
+            }
+            panel.addView(more)
+            /* Hide "See more" when the text already fits in the collapsed height. */
+            descView.post {
+                val layout = descView.layout ?: return@post
+                if (layout.lineCount <= collapsedLines &&
+                    !(layout.lineCount == collapsedLines && layout.getEllipsisCount(collapsedLines - 1) > 0)
+                ) {
+                    more.visibility = android.view.View.GONE
+                }
+            }
+        }
     }
 
     /* The reader leaves by bringing a chapter list forward with

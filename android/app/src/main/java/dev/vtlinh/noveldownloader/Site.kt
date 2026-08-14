@@ -78,6 +78,25 @@ interface Site {
 
     fun author(doc: Document): String?
 
+    /* Alternative / other titles the site lists for this novel. Null when the
+       page does not carry any — several hosts simply omit the field. */
+    fun alternativeNames(doc: Document): String? = null
+
+    /* Comma-separated genres / tags, as the site prints them. */
+    fun genres(doc: Document): String? = null
+
+    /* Origin / publisher / language line when the site has one ("Qidian
+       International", "Chinese Novel", …). Not the host we scraped from. */
+    fun source(doc: Document): String? = null
+
+    /* The status string the site prints ("Completed", "Ongoing", "Full",
+       "Đang ra", …). Distinct from isCompleted, which is the boolean the
+       engine uses; this is what the novel-info screen shows. */
+    fun statusLabel(doc: Document): String? = null
+
+    /* Synopsis / description. Plain text, no site chrome. */
+    fun description(doc: Document): String? = null
+
     /* ---- the chapter page ---- */
 
     /* The element holding the prose. Null lets the caller fall back to the
@@ -123,5 +142,49 @@ internal object SiteHelp {
             if (m != null) max = maxOf(max, m.groupValues[1].toInt())
         }
         return max
+    }
+
+    /* Text after an <h3>Label:</h3> inside the novel's .info block — the shape
+       novelfull / truyenfull / truyenfullmoi all share. Labels are matched
+       case-insensitively without a trailing colon. "N/A" is treated as empty
+       (novelfull prints that for novels with no alternate title). */
+    fun infoField(doc: Document, vararg labels: String): String? {
+        val want = labels.map { it.trim().trimEnd(':').lowercase() }.toSet()
+        for (h3 in doc.select(".info h3")) {
+            val key = h3.text().trim().trimEnd(':').lowercase()
+            if (key !in want) continue
+            val parent = h3.parent() ?: continue
+            val links = parent.select("a").map { it.text().trim() }.filter { it.isNotEmpty() }
+            val v = if (links.isNotEmpty()) {
+                links.joinToString(", ")
+            } else {
+                val clone = parent.clone()
+                clone.select("h3").remove()
+                clone.text().trim()
+            }
+            if (v.isNotEmpty() && !v.equals("N/A", ignoreCase = true)) return v
+        }
+        return null
+    }
+
+    /* Synopsis containers these sites use. Prefer <p> breaks when present so
+       a multi-paragraph blurb keeps its shape; otherwise collapse whitespace.
+       Strips a leading "SUMMARY" label some hosts put inside the same element. */
+    fun descriptionText(doc: Document): String? {
+        val el = doc.selectFirst(".desc-text")
+            ?: doc.selectFirst("h4.abstract + .txt .inner")
+            ?: doc.selectFirst("h4.abstract + .txt")
+            ?: return null
+        val paras = el.select("p").map { it.text().replace('\u00a0', ' ').trim() }
+            .filter { it.isNotEmpty() }
+        var t = if (paras.isNotEmpty()) {
+            paras.joinToString("\n\n")
+        } else {
+            el.text().replace('\u00a0', ' ').replace(Regex("\\s+"), " ").trim()
+        }
+        if (t.startsWith("SUMMARY", ignoreCase = true)) {
+            t = t.removePrefix("SUMMARY").removePrefix("summary").trim()
+        }
+        return t.ifEmpty { null }
     }
 }

@@ -15,4 +15,6 @@
     <color name="input_stroke">#333A42</color>
     <color name="log_bg">#0D1013</color>
     <color name="ic_launcher_background">#111418</color>
+    <!-- personal novel ranking stars (filled) -->
+    <color name="star">#F5C518</color>
 </resources>

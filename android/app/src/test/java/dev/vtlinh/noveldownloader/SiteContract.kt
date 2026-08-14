@@ -174,6 +174,35 @@ abstract class SiteContract {
         }
     }
 
+    /* The chapter-list header shows author / genres / description scraped
+       from the same page. Not every host prints every field (alternative
+       names are often missing), but a page that yields neither an author
+       nor a description has nothing useful for that header — and across the
+       captured corpora every novel page has at least one of the two. */
+    @Test
+    fun `every captured novel page yields author or description`() {
+        for (r in novels) {
+            val doc = Jsoup.parse(page(r[1]), r[3])
+            val author = site.author(doc)
+            val desc = site.description(doc)
+            assertTrue(
+                "${r[1]}: no author and no description",
+                !author.isNullOrBlank() || !desc.isNullOrBlank(),
+            )
+        }
+    }
+
+    /* Genres are what the info header lists under "Genre". Null is fine for
+       a host that does not print them; an empty string is a bug in the
+       scraper (it found the field and then wiped it). */
+    @Test
+    fun `genres are either absent or non-empty`() {
+        for (r in novels) {
+            val g = site.genres(Jsoup.parse(page(r[1]), r[3]))
+            if (g != null) assertTrue("${r[1]}: empty genres", g.isNotBlank())
+        }
+    }
+
     /* ...and it must be the NOVEL's name, not the page's.
        "Yields a non-empty title" was too weak to be worth much: novelfull.net
        wraps its og:title in "Read <title> novel online free - NovelFull", and

@@ -90,7 +90,16 @@ object Truyenfullmoi : Site {
             ?: doc.selectFirst("h1")?.text()?.trim()?.ifEmpty { null }
 
     override fun author(doc: Document) =
-        doc.selectFirst("a[itemprop=author]")?.text()?.trim()?.ifEmpty { null }
+        SiteHelp.infoField(doc, "Tác giả")
+            ?: doc.selectFirst("a[itemprop=author]")?.text()?.trim()?.ifEmpty { null }
+
+    override fun genres(doc: Document) = SiteHelp.infoField(doc, "Thể loại")
+
+    override fun source(doc: Document) = SiteHelp.infoField(doc, "Nguồn")
+
+    override fun statusLabel(doc: Document) = SiteHelp.infoField(doc, "Trạng thái")
+
+    override fun description(doc: Document) = SiteHelp.descriptionText(doc)
 
     override fun chapterContent(doc: Document) =
         SiteHelp.firstOf(doc, listOf("#chapter-c", ".chapter-c"))

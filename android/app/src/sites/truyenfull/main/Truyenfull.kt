@@ -60,8 +60,17 @@ object Truyenfull : Site {
     override fun title(doc: Document) = SiteHelp.metaTitle(doc)
 
     override fun author(doc: Document) =
-        doc.selectFirst("a[itemprop=author]")?.text()?.trim()?.ifEmpty { null }
+        SiteHelp.infoField(doc, "Tác giả")
+            ?: doc.selectFirst("a[itemprop=author]")?.text()?.trim()?.ifEmpty { null }
             ?: doc.selectFirst("a[href*=tac-gia]")?.text()?.trim()?.ifEmpty { null }
+
+    override fun genres(doc: Document) = SiteHelp.infoField(doc, "Thể loại")
+
+    override fun source(doc: Document) = SiteHelp.infoField(doc, "Nguồn")
+
+    override fun statusLabel(doc: Document) = SiteHelp.infoField(doc, "Trạng thái")
+
+    override fun description(doc: Document) = SiteHelp.descriptionText(doc)
 
     override fun chapterContent(doc: Document) =
         SiteHelp.firstOf(doc, listOf("#chapter-c", ".chapter-c", "div[itemprop=articleBody]", ".box-chap"))
