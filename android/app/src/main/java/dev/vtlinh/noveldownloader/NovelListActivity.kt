@@ -30,7 +30,8 @@ import kotlinx.coroutines.withContext
    subdirectories (novels downloaded before the registry existed, or copied
    in from elsewhere). "Check status" asks each site for its chapter count,
    finished flag, and author; a finished novel with everything on disk shows
-   a Complete tag instead of a Download button and sinks to the bottom.
+   a Complete tag instead of a Download button and sinks to the bottom, and
+   an ongoing novel with every chapter on disk shows an Up to date tag.
 
    Cold start: resume a live reading session when one exists; otherwise open
    the Browser when this list is empty. Console output (formerly the Home
@@ -717,10 +718,10 @@ class NovelListActivity : AppCompatActivity() {
             if (row.rec.author.isNotEmpty()) append("\n${row.rec.author}")
             if (!done) {
                 /* "on-disk / site-total" — total is filled in by downloads
-                   and Check status */
+                   and Check status. "up to date" is a tag on the right, not
+                   inline — same shape as COMPLETE, different colour. */
                 if (row.rec.total > 0) append("\n${row.local}/${row.rec.total} chapters")
                 else append("\n${row.local} chapter(s)")
-                if (upToDate) append(" — up to date")
                 if (row.rec.url.isEmpty()) append(" — tap Check status to locate")
             }
         }
@@ -778,7 +779,23 @@ class NovelListActivity : AppCompatActivity() {
                     }
                 },
             )
-        } else if (row.rec.url.isNotEmpty() && !upToDate) {   // includes finished-but-incomplete
+        } else if (upToDate) {
+            /* Caught up on an ongoing novel — same pill as COMPLETE, accent
+               blue so it reads as "current" rather than "finished". */
+            line.addView(
+                TextView(ctx).apply {
+                    this.text = "UP TO DATE"
+                    textSize = 11f
+                    setTextColor(Color.parseColor("#4F8CFF"))
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setPadding(dp(10), dp(4), dp(10), dp(4))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(6).toFloat()
+                        setColor(Color.parseColor("#1A2740"))
+                    }
+                },
+            )
+        } else if (row.rec.url.isNotEmpty()) {   // includes finished-but-incomplete
             /* already downloading (or waiting its turn) → say so and go dead,
                so a second job can't be started for the same novel */
             val key = normKey(row.rec.slug)
