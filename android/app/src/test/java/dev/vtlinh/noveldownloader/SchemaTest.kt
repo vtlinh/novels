@@ -389,6 +389,35 @@ class SchemaTest {
         }
     }
 
+    /* Per-novel on-disk size arrives unknown: it is a measurement of the
+       folder, and an upgrade has no folder to measure. A default of 0 would
+       look like an empty library until something remeasured. */
+    @Test
+    fun `an existing novel upgrades with its stored size unknown`() {
+        for (v in 5..21) {
+            open().use { c ->
+                at(v, c)
+                c.createStatement().use {
+                    it.execute(
+                        "INSERT INTO novels(folder,slug,url,title,started) " +
+                            "VALUES('f','than-y','https://site/than-y/','Thần Y',1)",
+                    )
+                }
+                Schema.upgrade(Jdbc(c), v)
+                c.createStatement().use { s ->
+                    s.executeQuery(
+                        "SELECT disk_bytes, disk_stamp_dir, disk_stamp_tr FROM novels WHERE slug='than-y'",
+                    ).use { r ->
+                        assertTrue("upgrading from v$v lost the novel", r.next())
+                        assertEquals("upgrading from v$v: disk_bytes", -1L, r.getLong(1))
+                        assertEquals("upgrading from v$v: disk_stamp_dir", "", r.getString(2))
+                        assertEquals("upgrading from v$v: disk_stamp_tr", "", r.getString(3))
+                    }
+                }
+            }
+        }
+    }
+
     /* Anything older than v4 is rebuilt rather than migrated, and that is a
        deliberate data loss — it is all cache and index. It has to actually
        leave a working current schema behind, though. */

@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 21
+    const val VERSION = 22
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -59,6 +59,13 @@ object Schema {
             "alt_names TEXT DEFAULT '', genres TEXT DEFAULT '', " +
             "source TEXT DEFAULT '', description TEXT DEFAULT '', " +
             "status_label TEXT DEFAULT '', " +
+            /* On-disk size of this novel's chapter files, and the folder
+               stamp taken when it was measured. -1 = unknown or stale:
+               Settings walks the folder. A matching stamp skips the walk.
+               Forgotten whenever this app writes chapter files, so a
+               provider that reports no mtime still remeasures. */
+            "disk_bytes INTEGER DEFAULT -1, " +
+            "disk_stamp_dir TEXT DEFAULT '', disk_stamp_tr TEXT DEFAULT '', " +
             "PRIMARY KEY(folder, slug))"
     /* which novel a folder NAME belongs to, so a second novel that
        sanitises onto the same name is sent elsewhere instead of writing
@@ -238,6 +245,15 @@ object Schema {
             db.soft("ALTER TABLE novels ADD COLUMN source TEXT DEFAULT ''")
             db.soft("ALTER TABLE novels ADD COLUMN description TEXT DEFAULT ''")
             db.soft("ALTER TABLE novels ADD COLUMN status_label TEXT DEFAULT ''")
+        }
+        /* Per-novel on-disk size for the Settings total. -1 = not yet
+           measured (or forgotten because files changed). Nothing to seed:
+           a size is a measurement of the folder, and there is no folder
+           here to measure. */
+        if (oldVersion < 22) {
+            db.soft("ALTER TABLE novels ADD COLUMN disk_bytes INTEGER DEFAULT -1")
+            db.soft("ALTER TABLE novels ADD COLUMN disk_stamp_dir TEXT DEFAULT ''")
+            db.soft("ALTER TABLE novels ADD COLUMN disk_stamp_tr TEXT DEFAULT ''")
         }
     }
 }

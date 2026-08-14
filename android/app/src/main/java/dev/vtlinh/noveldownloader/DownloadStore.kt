@@ -293,6 +293,7 @@ class DownloadStore(context: Context) :
            epoch, pass the check and restore exactly what the delete removed. */
         bumpChlistEpoch(folder, slug)
         writableDatabase.delete("chlist", "folder=? AND slug=?", arrayOf(folder, slug))
+        forgetDiskBytes(folder, slug)
     }
 
     /* the compress pass rewrites refs across the whole library */
@@ -397,6 +398,99 @@ class DownloadStore(context: Context) :
         writableDatabase.execSQL(
             "UPDATE novels SET disk_count=? WHERE folder=? AND slug=?", arrayOf(n, folder, slug),
         )
+    }
+
+    /* ---- per-novel on-disk size (Settings "Used") ----
+
+       Forgotten, not updated, when files change: the new size is a
+       measurement of the folder, and the folder is not here. Settings
+       remeasures only the novels whose size is gone or whose stamp no
+       longer matches.
+
+       A provider that reports no mtime compares 0 against 0, so stamp
+       alone never notices an app write. Every path that changes bytes
+       has to forget:
+
+         - clearChapterList: store.add / removeChapter / renameChapter /
+           clear / clearUris, and every other caller that drops the
+           listing because files moved (download, delete, rename,
+           re-download, translation handover).
+         - addAll: deletes chlist itself, so it forgets too.
+         - writeTranslated: translation does not touch chlist.
+         - CompressService: each directory it actually rewrote, matched
+           by recorded dir_name, folder_owner, or the name Settings
+           would resolve — a novel that upgraded with an empty dir_name
+           still forgets. Novels already matching the setting stay.
+         - DownloadEngine's post-download compressDir: leftover loose
+           files after a download, not the library-wide pass.
+         - the half-written .part sweep in dedupeExtras: those files
+           count toward Used, and extras may be empty so removeChapter
+           never runs.
+
+       Must not forget: setChapterOrder (listing identity, not bytes);
+       clearAllChapterLists (listings, not sizes — compress forgets
+       per rewritten directory); linkUrl / setFingerprint / touchNovel /
+       setLastRead. */
+
+    class DiskCache(
+        val slug: String,
+        val dirName: String,
+        val bytes: Long,
+        val stamp: Folder.Stamp?,
+    )
+
+    fun diskCaches(folder: String): List<DiskCache> {
+        val out = ArrayList<DiskCache>()
+        readableDatabase.query(
+            "novels",
+            arrayOf("slug", "title", "dir_name", "disk_bytes", "disk_stamp_dir", "disk_stamp_tr"),
+            "folder=?", arrayOf(folder), null, null, null,
+        ).use { c ->
+            while (c.moveToNext()) {
+                val slug = c.getString(0)
+                val title = c.getString(1) ?: ""
+                val recorded = c.getString(2)?.ifEmpty { null }
+                val name = recorded ?: Extractor.folderName(title.ifEmpty { slug }, slug)
+                val bytes = if (c.isNull(3)) -1L else c.getLong(3)
+                val stamp = Folder.decodeStamp(c.getString(4) ?: "", c.getString(5) ?: "")
+                out.add(DiskCache(slug, name, bytes, stamp))
+            }
+        }
+        return out
+    }
+
+    fun setDiskBytes(folder: String, slug: String, bytes: Long, stamp: Folder.Stamp) {
+        val enc = Folder.encodeStamp(stamp)
+        writableDatabase.execSQL(
+            "UPDATE novels SET disk_bytes=?, disk_stamp_dir=?, disk_stamp_tr=? " +
+                "WHERE folder=? AND slug=?",
+            arrayOf(bytes, enc.first, enc.second, folder, slug),
+        )
+    }
+
+    fun forgetDiskBytes(folder: String, slug: String) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET disk_bytes=-1, disk_stamp_dir='', disk_stamp_tr='' " +
+                "WHERE folder=? AND slug=?",
+            arrayOf(folder, slug),
+        )
+    }
+
+    fun forgetDiskBytesForDir(folder: String, dirName: String) {
+        val slugs = HashSet<String>()
+        readableDatabase.query(
+            "novels", arrayOf("slug"), "folder=? AND dir_name=?",
+            arrayOf(folder, dirName), null, null, null,
+        ).use { c -> while (c.moveToNext()) slugs.add(c.getString(0)) }
+        /* A novel whose directory was never recorded still lives under
+           the name rebuilt from the title — the same name the compress
+           pass walks — and folder_owner may be the only link. Matching
+           dir_name alone would leave those rows cached after a rewrite. */
+        slugOwningName(folder, dirName)?.let { slugs.add(it) }
+        for (row in diskCaches(folder)) {
+            if (row.dirName == dirName) slugs.add(row.slug)
+        }
+        for (slug in slugs) forgetDiskBytes(folder, slug)
     }
 
     /* ---- novels registry (List Novels screen) ---- */
@@ -973,6 +1067,7 @@ class DownloadStore(context: Context) :
         } finally {
             db.endTransaction()
         }
+        forgetDiskBytes(folder, slug)
     }
 
     /* filename -> the page it came from, for every file we can identify.

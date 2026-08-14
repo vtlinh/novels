@@ -540,13 +540,18 @@ class DownloadEngine(
             val base = e.name.removeSuffix(".gz")
             if (re.matches(base)) chapterFiles.add(OnDisk(e.name, base, e.docId, e.size))
         }
+        var sweptParts = false
         for (docId in halfWritten) {
-            try {
+            val ok = try {
                 DocumentsContract.deleteDocument(
                     cr, DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
                 )
-            } catch (e: Exception) {}
+            } catch (e: Exception) { false }
+            if (ok) sweptParts = true
         }
+        /* .part files count toward Used. extras may be empty, so the
+           removeChapter forget below never runs. */
+        if (sweptParts) try { store.forgetDiskBytes(folderKey, slug) } catch (e: Exception) {}
         val extras = chapterFiles.filter { it.base !in assigned }
         if (extras.isEmpty()) return 0
 
@@ -2246,6 +2251,12 @@ class DownloadEngine(
                 val docId = DocumentsContract.getDocumentId(dir.uri)
                 if (Zips.compressDir(context, context.contentResolver, treeUri, Saf.Entry(docId, folderName, true))) {
                     log("Chapters compressed")
+                    /* Leftover loose files just became .gz. store.add already
+                       forgot the download, but Settings can measure between
+                       the last chapter and this pass, and a provider that
+                       reports no mtime would then keep that uncompressed
+                       total. */
+                    try { store.forgetDiskBytes(folderKey, slug) } catch (e: Exception) {}
                 }
             } catch (e: Exception) {
                 log("Compress failed — ${e.message}")

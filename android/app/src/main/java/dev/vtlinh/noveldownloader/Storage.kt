@@ -58,6 +58,21 @@ object Storage {
         return format(t.bytes)
     }
 
+    /* A stored per-novel size is usable only when it was actually measured
+       (not -1) AND the folder looks as it did then. Downloads, deletes,
+       compress, and translations all move a directory mtime; a provider
+       that reports none answers 0, which is not a timestamp — equal zeros
+       are not evidence the folder is unchanged, so this refuses them.
+       App writes also forget the stored size, because a provider can
+       report a stale non-zero mtime just after a rewrite. */
+    fun remembered(bytes: Long, stored: Folder.Stamp?, now: Folder.Stamp): Long? {
+        if (bytes < 0L) return null
+        if (!Folder.folderUnchanged(stored, now)) return null
+        if (now.dirMod == 0L) return null
+        if (now.trId.isNotEmpty() && now.trMod == 0L) return null
+        return bytes
+    }
+
     fun format(bytes: Long): String {
         if (bytes < 1024L) return "$bytes B"
         val units = arrayOf("KB", "MB", "GB", "TB")
