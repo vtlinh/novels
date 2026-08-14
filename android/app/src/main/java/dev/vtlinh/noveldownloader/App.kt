@@ -8,10 +8,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-/* Watches the whole app's foreground lifecycle so the self-update check runs
-   from ANY screen — the reader, chapter list, etc. Previously it only ran on
-   the old Home screen's onResume, which the "resume into the reader" flow
-   skips, so auto-updates never fired. */
+/* Watches the whole app's foreground lifecycle so the self-update check and
+   the optional library status auto-check run from ANY screen — the reader,
+   chapter list, etc. Previously the updater only ran on the old Home
+   screen's onResume, which the "resume into the reader" flow skips, so
+   auto-updates never fired. */
 class App : Application() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -25,6 +26,7 @@ class App : Application() {
             object : DefaultLifecycleObserver {
                 override fun onStart(owner: LifecycleOwner) {
                     Updater.autoCheck(applicationContext, scope)
+                    StatusAutoCheck.autoCheck(applicationContext, scope)
                     /* Downloads first. The compress pass stands aside for a
                        running download, and starting it first meant it read
                        runningFlow before the resumed queue had set it — so on

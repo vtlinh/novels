@@ -2,6 +2,13 @@ package dev.vtlinh.noveldownloader
 
 import android.content.Context
 import android.content.Intent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 /* Checking ONE novel against its site, and acting on the answer.
 
@@ -12,7 +19,8 @@ import android.content.Intent
    listing came back with a hole in it, and write the result without letting a
    locked database take the app down. Every one of those rules is a defect that
    was fixed once already. A second copy of them on the settings screen would
-   be a second chance to get them wrong. */
+   be a second chance to get them wrong. The foreground auto-check
+   (StatusAutoCheck) reuses the same sweep. */
 object NovelCheck {
 
     /* Novels a check is running on RIGHT NOW, keyed like DownloadService's
@@ -170,6 +178,86 @@ object NovelCheck {
             DownloadService.appendLog("Could not save the check for $display — ${e.message}")
         }
         return Result(url, res.total, complete, maxOf(0, res.total - local), resumed)
+    }
+
+    /* One novel the Library (or auto-check) wants visited. `display` is the
+       title shown to the user; `local` is chapters already on this device. */
+    class Target(
+        val rec: NovelRec,
+        val display: String,
+        val local: Int,
+    )
+
+    /* What a sweep finished with — how many novels were asked, which URLs
+       should be fetched (auto-download), and how many of those starts the
+       service actually accepted. */
+    class SweepResult(
+        val asked: Int,
+        val fetchUrls: List<String>,
+        val started: Int,
+    )
+
+    /* Visit every target, up to three at a time, then queue auto-downloads
+       for novels whose setting says to fetch what the check found. Same
+       rules the Library's Check button used inline — extracted so the
+       foreground auto-check cannot drift. */
+    suspend fun sweep(
+        context: Context,
+        engine: DownloadEngine,
+        store: DownloadStore,
+        folder: String,
+        targets: List<Target>,
+        onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): SweepResult {
+        if (targets.isEmpty()) return SweepResult(0, emptyList(), 0)
+        val done = AtomicInteger(0)
+        /* Collected rather than started on the spot: this runs three wide
+           and a download started mid-sweep gets its files renamed and
+           deduped out from under the write by the very sweep that started
+           it. They go to the queue once every novel has been asked. */
+        val fetch = java.util.Collections.synchronizedList(ArrayList<String>())
+        withContext(Dispatchers.IO) {
+            coroutineScope {
+                val sem = Semaphore(3)
+                for (row in targets) {
+                    launch {
+                        sem.withPermit {
+                            /* The busy test at snapshot time is not enough:
+                               this sweep runs three wide for minutes, and
+                               a download started after it began gets its
+                               files renamed and deduped out from under the
+                               write. Ask again when this novel's turn
+                               actually comes. */
+                            if (DownloadService.isBusy(Ownership.normKey(row.rec.slug))) {
+                                done.incrementAndGet()
+                                return@withPermit
+                            }
+                            val res = one(
+                                engine, store, folder, row.rec, row.display, row.local,
+                            )
+                            /* the setting as it is NOW, not as it was when
+                               the sweep snapshotted its targets — the busy
+                               test got a re-ask for the same reason, and a
+                               sweep runs for minutes: un-ticking
+                               auto-download mid-sweep must stick, because
+                               with translation pinned on it is money */
+                            if (res != null && res.missing > 0 &&
+                                try {
+                                    store.novel(folder, row.rec.slug)?.autoDownload == true
+                                } catch (e: Exception) { false }
+                            ) {
+                                fetch.add(res.url)
+                            }
+                            val n = done.incrementAndGet()
+                            onProgress(n, targets.size)
+                        }
+                    }
+                }
+            }
+        }
+        val urls = fetch.toList()
+        val started = urls.count { startDownload(context, it) }
+        return SweepResult(targets.size, urls, started)
     }
 
     /* Queue this novel for download. The service lines it up behind whatever
