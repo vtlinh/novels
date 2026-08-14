@@ -96,7 +96,11 @@ class ReleaseNotesTest {
         assertTrue("backfill is missing", entries.size > 100)
         assertTrue(
             "this PR's summary must be unreleased so package-time concat picks it up",
-            entries.any { it.version == null && it.summary.contains("per-novel storage") },
+            entries.any { it.version == null && it.summary.contains("everyday language") },
+        )
+        assertTrue(
+            "1.33.28 shipped per-novel storage caching",
+            entries.any { it.version == "1.33.28" && it.summary.contains("per-novel storage") },
         )
         assertTrue(
             "1.33.27 shipped the Settings size hang fix",
