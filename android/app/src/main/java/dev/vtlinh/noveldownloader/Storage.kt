@@ -12,7 +12,9 @@ package dev.vtlinh.noveldownloader
    report one, which is not zero. */
 object Storage {
 
-    data class Total(val bytes: Long, val files: Int, val unknown: Int)
+    data class Total(val bytes: Long, val files: Int, val unknown: Int) {
+        operator fun plus(o: Total) = Total(bytes + o.bytes, files + o.files, unknown + o.unknown)
+    }
 
     fun isCounted(name: String): Boolean {
         if (Zips.isPartName(name)) return true
@@ -20,28 +22,34 @@ object Storage {
         return ChapterName.RE.matches(base)
     }
 
+    /* One directory listing — files only. Directory sizes are ignored even
+       when the provider reports them: they are not a chapter, and some
+       providers fill them with a recursive sum we must not double-count. */
+    fun of(items: List<Folder.Item>): Total {
+        var bytes = 0L
+        var files = 0
+        var unknown = 0
+        for (e in items) {
+            if (e.isDir || !isCounted(e.name)) continue
+            files++
+            if (e.size < 0L) unknown++ else bytes += e.size
+        }
+        return Total(bytes, files, unknown)
+    }
+
     fun total(
         root: List<Folder.Item>,
         childrenOf: (String) -> List<Folder.Item>,
     ): Total {
-        var bytes = 0L
-        var files = 0
-        var unknown = 0
-        fun add(items: List<Folder.Item>) {
-            for (e in items) {
-                if (e.isDir || !isCounted(e.name)) continue
-                files++
-                if (e.size < 0L) unknown++ else bytes += e.size
-            }
-        }
+        var acc = Total(0L, 0, 0)
         for (dir in root) {
             if (!dir.isDir) continue
             val kids = childrenOf(dir.ref)
-            add(kids)
+            acc += of(kids)
             val translated = kids.firstOrNull { it.isDir && it.name == "translated" }
-            if (translated != null) add(childrenOf(translated.ref))
+            if (translated != null) acc += of(childrenOf(translated.ref))
         }
-        return Total(bytes, files, unknown)
+        return acc
     }
 
     fun label(t: Total): String {

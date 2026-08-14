@@ -10,25 +10,35 @@ object Saf {
 
     class Entry(val docId: String, val name: String, val isDir: Boolean, val size: Long = -1L)
 
-    fun children(cr: ContentResolver, treeUri: Uri, docId: String): List<Entry> {
+    /* `includeSize` is for files. Asking a provider for COLUMN_SIZE of a
+       DIRECTORY can make it recursively sum every child before the cursor
+       returns — a root listing of a large library then looks hung. Callers
+       that only need names pass false. */
+    fun children(
+        cr: ContentResolver,
+        treeUri: Uri,
+        docId: String,
+        includeSize: Boolean = true,
+    ): List<Entry> {
         val out = ArrayList<Entry>()
         val uri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
-        cr.query(
-            uri,
-            arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_SIZE,
-            ),
-            null, null, null,
-        )?.use { c ->
+        val cols = if (includeSize) arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+        ) else arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+        )
+        cr.query(uri, cols, null, null, null)?.use { c ->
             while (c.moveToNext()) {
                 out.add(
                     Entry(
                         c.getString(0), c.getString(1) ?: "",
                         c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
-                        if (c.isNull(3)) -1L else c.getLong(3),
+                        if (!includeSize || c.isNull(3)) -1L else c.getLong(3),
                     ),
                 )
             }
