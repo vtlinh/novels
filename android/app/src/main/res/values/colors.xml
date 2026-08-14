@@ -17,4 +17,6 @@
     <color name="ic_launcher_background">#111418</color>
     <!-- personal novel ranking stars (filled) -->
     <color name="star">#F5C518</color>
+    <!-- accent at low opacity: current-chapter row, "ongoing" chip -->
+    <color name="accent_bg">#1A2740</color>
 </resources>

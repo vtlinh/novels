@@ -229,19 +229,38 @@ class ChapterListActivity : AppCompatActivity() {
         bindNovelInfo()
     }
 
+    private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
+
+    private fun openChapter(name: String) {
+        val dirName = intent.getStringExtra("dir") ?: return
+        val title = intent.getStringExtra("title") ?: dirName
+        startActivity(
+            Intent(this, ReaderActivity::class.java)
+                .putExtra("dir", dirName)
+                .putExtra("title", title)
+                .putExtra("slug", intent.getStringExtra("slug"))
+                .putExtra("start", name)
+                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+        )
+    }
+
     /* Novel-page info + personal ranking, fixed above the chapter list so
        flipping ascending/descending never moves it. Fills from the store
        first; if description (or everything) is still blank, fetches the
        novel page once to fill in. */
     private fun bindNovelInfo() {
+        val card = findViewById<android.widget.LinearLayout>(R.id.novelCard)
         val panel = findViewById<android.widget.LinearLayout>(R.id.novelInfo)
         val slug = intent.getStringExtra("slug")
         val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null)
         if (slug.isNullOrEmpty() || folder.isNullOrEmpty()) {
-            panel.visibility = android.view.View.GONE
+            card.visibility = android.view.View.GONE
             return
         }
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
+        /* Cover first so the card isn't a blank hole while the store answers. */
+        card.visibility = android.view.View.VISIBLE
+        bindCover(slug, intent.getStringExtra("title").orEmpty())
         lifecycleScope.launch {
             var rec = withContext(Dispatchers.IO) {
                 try { DownloadStore(this@ChapterListActivity).novel(folder, slug) } catch (e: Exception) { null }
@@ -271,11 +290,53 @@ class ChapterListActivity : AppCompatActivity() {
                     }
                 }
             }
-            renderNovelInfo(panel, rec, slug, prefs)
+            renderNovelInfo(card, panel, rec, slug, prefs)
+        }
+    }
+
+    private fun chip(label: String, textColor: Int, background: Int): TextView =
+        TextView(this).apply {
+            text = label
+            textSize = 11f
+            setTextColor(getColor(textColor))
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            setBackgroundResource(background)
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = dp(8) }
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+
+    private fun bindCover(slug: String, title: String) {
+        findViewById<android.widget.FrameLayout>(R.id.coverWrap).clipToOutline = true
+        val img = findViewById<android.widget.ImageView>(R.id.coverImage)
+        val letter = findViewById<TextView>(R.id.coverLetter)
+        val file = DownloadEngine.coverFile(this, slug)
+        val bmp = if (file.exists()) {
+            try {
+                android.graphics.BitmapFactory.decodeFile(
+                    file.path,
+                    android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 },
+                )
+            } catch (e: Exception) { null }
+        } else null
+        if (bmp != null) {
+            img.setImageBitmap(bmp)
+            img.visibility = android.view.View.VISIBLE
+            letter.visibility = android.view.View.GONE
+        } else {
+            img.setImageDrawable(null)
+            img.visibility = android.view.View.GONE
+            letter.visibility = android.view.View.VISIBLE
+            letter.text = title.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "·"
         }
     }
 
     private fun renderNovelInfo(
+        card: android.widget.LinearLayout,
         panel: android.widget.LinearLayout,
         rec: NovelRec?,
         slug: String,
@@ -295,50 +356,67 @@ class ChapterListActivity : AppCompatActivity() {
             }
         }
         val desc = rec?.description.orEmpty()
-        val hasMeta = author.isNotEmpty() || alt.isNotEmpty() || genres.isNotEmpty() ||
-            source.isNotEmpty() || status.isNotEmpty() || desc.isNotEmpty()
-        /* Always show the ranking row when we have a slug — the user can rate
+        /* Always show the card when we have a slug — the user can rate
            even before any site info has been scraped. */
-        panel.visibility = android.view.View.VISIBLE
+        card.visibility = android.view.View.VISIBLE
+        bindCover(slug, intent.getStringExtra("title").orEmpty())
 
-        fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
-
-        fun addField(label: String, value: String) {
-            if (value.isEmpty()) return
-            panel.addView(
-                TextView(this).apply {
-                    text = android.text.SpannableStringBuilder().apply {
-                        append(
-                            android.text.SpannableString("$label: ").also {
-                                it.setSpan(
-                                    android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
-                                    0, it.length, 0,
-                                )
-                            },
-                        )
-                        append(value)
-                    }
-                    textSize = 13f
-                    setTextColor(getColor(R.color.fg))
-                    setPadding(0, dp(2), 0, dp(2))
-                    setLineSpacing(0f, 1.2f)
-                },
-            )
+        val authorView = findViewById<TextView>(R.id.heroAuthor)
+        if (author.isNotEmpty()) {
+            authorView.text = author
+            authorView.visibility = android.view.View.VISIBLE
+        } else {
+            authorView.visibility = android.view.View.GONE
         }
 
-        if (hasMeta) {
-            addField("Author", author)
-            addField("Alternative names", alt)
-            addField("Genre", genres)
-            addField("Source", source)
-            addField("Status", status)
+        val genresView = findViewById<TextView>(R.id.heroGenres)
+        val genreLine = genres.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            .joinToString(" · ")
+        if (genreLine.isNotEmpty()) {
+            genresView.text = genreLine
+            genresView.visibility = android.view.View.VISIBLE
+        } else {
+            genresView.visibility = android.view.View.GONE
+        }
+
+        val chips = findViewById<android.widget.LinearLayout>(R.id.chipsRow)
+        chips.removeAllViews()
+        if (status.isNotEmpty()) {
+            val completed = status.equals("Completed", ignoreCase = true)
+            chips.addView(
+                chip(
+                    status,
+                    if (completed) R.color.ok_fg else R.color.accent,
+                    if (completed) R.drawable.bg_chip_ok else R.drawable.bg_chip_accent,
+                ),
+            )
+        }
+        if (source.isNotEmpty()) {
+            chips.addView(chip(source, R.color.fg, R.drawable.bg_chip))
+        }
+        chips.visibility = android.view.View.VISIBLE
+        findViewById<android.view.View>(R.id.chipsScroll).visibility =
+            if (chips.childCount > 0) android.view.View.VISIBLE else android.view.View.GONE
+
+        if (alt.isNotEmpty()) {
+            panel.addView(
+                TextView(this).apply {
+                    text = alt
+                    textSize = 12f
+                    setTextColor(getColor(R.color.muted))
+                    setPadding(0, dp(8), 0, 0)
+                    setLineSpacing(0f, 1.25f)
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                },
+            )
         }
 
         /* Personal ranking: ten full stars. Tap the current value to clear. */
         val starsRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, dp(8), 0, dp(4))
+            setPadding(0, dp(10), 0, dp(2))
         }
         fun paintStars(current: Int) {
             starsRow.removeAllViews()
@@ -346,11 +424,11 @@ class ChapterListActivity : AppCompatActivity() {
                 starsRow.addView(
                     TextView(this).apply {
                         text = "★"
-                        textSize = 22f
+                        textSize = 20f
                         setTextColor(
                             getColor(if (i <= current) R.color.star else R.color.muted),
                         )
-                        setPadding(dp(2), dp(2), dp(2), dp(2))
+                        setPadding(dp(3), dp(4), dp(3), dp(4))
                         setOnClickListener {
                             val next = NovelRating.toggle(prefs, slug, i)
                             paintStars(next)
@@ -363,31 +441,31 @@ class ChapterListActivity : AppCompatActivity() {
         panel.addView(starsRow)
 
         if (desc.isNotEmpty()) {
-            val collapsedLines = 4
+            val collapsedLines = 3
             val descView = TextView(this).apply {
                 text = desc
-                textSize = 13f
+                textSize = 14f
                 setTextColor(getColor(R.color.fg))
-                setLineSpacing(0f, 1.25f)
-                setPadding(0, dp(6), 0, 0)
+                setLineSpacing(0f, 1.4f)
+                setPadding(0, dp(8), 0, 0)
                 maxLines = collapsedLines
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
             panel.addView(descView)
             val more = TextView(this).apply {
-                text = "See more »"
+                text = "See more"
                 textSize = 13f
                 setTextColor(getColor(R.color.accent))
                 gravity = android.view.Gravity.END
-                setPadding(0, dp(2), 0, dp(4))
+                setPadding(0, dp(6), 0, dp(2))
                 setOnClickListener {
                     val expanded = descView.maxLines == Int.MAX_VALUE
                     if (expanded) {
                         descView.maxLines = collapsedLines
-                        text = "See more »"
+                        text = "See more"
                     } else {
                         descView.maxLines = Int.MAX_VALUE
-                        text = "« See less"
+                        text = "See less"
                     }
                 }
             }
@@ -512,21 +590,29 @@ class ChapterListActivity : AppCompatActivity() {
         val relativeCurrent =
             if (currentPos in winStart until winEnd) currentPos - winStart else -1
         val adapter = object : ArrayAdapter<String>(
-            this, android.R.layout.simple_list_item_1, labels,
+            this, R.layout.item_chapter, R.id.chapterLabel, labels,
         ) {
             override fun getView(
                 position: Int,
                 convertView: android.view.View?,
                 parent: android.view.ViewGroup,
             ): android.view.View {
-                val v = super.getView(position, convertView, parent) as TextView
-                if (position == relativeCurrent) {
-                    v.setTextColor(getColor(R.color.accent))
-                    v.setTypeface(null, android.graphics.Typeface.BOLD)
-                } else {
-                    v.setTextColor(getColor(R.color.fg))
-                    v.setTypeface(null, android.graphics.Typeface.NORMAL)
-                }
+                val v = super.getView(position, convertView, parent)
+                val current = currentPos >= 0 && winStart + position == currentPos
+                v.setBackgroundResource(
+                    if (current) R.drawable.bg_chapter_current else 0,
+                )
+                v.findViewById<android.view.View>(R.id.chapterAccent).visibility =
+                    if (current) android.view.View.VISIBLE else android.view.View.INVISIBLE
+                val label = v.findViewById<TextView>(R.id.chapterLabel)
+                label.setTextColor(getColor(if (current) R.color.accent else R.color.fg))
+                label.setTypeface(
+                    null,
+                    if (current) android.graphics.Typeface.BOLD
+                    else android.graphics.Typeface.NORMAL,
+                )
+                v.findViewById<android.view.View>(R.id.chapterNow).visibility =
+                    if (current) android.view.View.VISIBLE else android.view.View.GONE
                 return v
             }
         }
@@ -610,7 +696,6 @@ class ChapterListActivity : AppCompatActivity() {
 
     private fun load(preserveScroll: Boolean = false) {
         val dirName = intent.getStringExtra("dir") ?: return finish()
-        val title = intent.getStringExtra("title") ?: dirName
         val status = findViewById<TextView>(R.id.statusText)
         val listView = findViewById<ListView>(R.id.chapterListView)
         val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null) ?: return finish()
@@ -625,7 +710,12 @@ class ChapterListActivity : AppCompatActivity() {
         /* ⇅ flips between reading order and newest-first (kept per novel) */
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
         val descKey = "chSortDesc:${slug ?: dirName}"
-        findViewById<TextView>(R.id.sortBtn).setOnClickListener {
+        val sortBtn = findViewById<TextView>(R.id.sortBtn)
+        val newestFirst = prefs.getBoolean(descKey, false)
+        sortBtn.setTextColor(getColor(if (newestFirst) R.color.accent else R.color.fg))
+        sortBtn.contentDescription =
+            if (newestFirst) "Show oldest first" else "Show newest first"
+        sortBtn.setOnClickListener {
             prefs.edit().putBoolean(descKey, !prefs.getBoolean(descKey, false)).apply()
             load()
         }
@@ -642,18 +732,22 @@ class ChapterListActivity : AppCompatActivity() {
                     chapterNames(this@ChapterListActivity, Uri.parse(folder), dirName, order, slug)
                 } catch (e: Exception) { null }
             } ?: run {
-                status.text = "Could not read \"$dirName\"."
+                status.text = "Could not read"
+                findViewById<android.view.View>(R.id.continueBtn).visibility =
+                    android.view.View.GONE
                 return@launch
             }
             val ordered = chapters.ordered.let {
                 if (prefs.getBoolean(descKey, false)) it.reversed() else it
             }
             if (ordered.isEmpty()) {
-                status.text = "No chapters found in \"$dirName\"."
+                status.text = "None found"
+                findViewById<android.view.View>(R.id.continueBtn).visibility =
+                    android.view.View.GONE
                 allOrdered = emptyList()
                 return@launch
             }
-            status.text = "${ordered.size} chapter(s)"
+            status.text = if (ordered.size == 1) "1 chapter" else "${ordered.size} chapters"
             val lastRenderedCount = renderedCount
             renderedCount = ordered.size
             /* the chapter currently being read: highlighted and scrolled into
@@ -662,6 +756,17 @@ class ChapterListActivity : AppCompatActivity() {
                 ReaderActivity.resumeChapter(this@ChapterListActivity, it)
             }
             val newCurrent = lastName?.let { ordered.indexOf(it) } ?: -1
+            val continueBtn = findViewById<android.widget.Button>(R.id.continueBtn)
+            val startName = if (newCurrent >= 0) lastName else chapters.ordered.firstOrNull()
+            if (!slug.isNullOrEmpty() && startName != null) {
+                continueBtn.visibility = android.view.View.VISIBLE
+                val label = labelOf(startName)
+                continueBtn.text =
+                    if (newCurrent >= 0) "Continue · $label" else "Start reading · $label"
+                continueBtn.setOnClickListener { openChapter(startName) }
+            } else {
+                continueBtn.visibility = android.view.View.GONE
+            }
             /* swapping the adapter drops the scroll position; note where the
                list is sitting so a live refresh can put it back */
             val keepPos = listView.firstVisiblePosition
@@ -699,14 +804,7 @@ class ChapterListActivity : AppCompatActivity() {
                    alive behind us (e.g. reading aloud), bring THAT instance
                    forward (it gets onNewIntent and jumps to the chapter)
                    instead of building a new reader over it */
-                startActivity(
-                    Intent(this@ChapterListActivity, ReaderActivity::class.java)
-                        .putExtra("dir", dirName)
-                        .putExtra("title", title)
-                        .putExtra("slug", intent.getStringExtra("slug"))
-                        .putExtra("start", allOrdered[abs])
-                        .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-                )
+                openChapter(allOrdered[abs])
             }
             bindWindow(
                 listView,
