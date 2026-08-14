@@ -173,19 +173,23 @@
 - Always tell the user which app version is being deployed after a merge:
   read the published `version.json`'s `versionName` (or the android.yml run's
   "Compute version name" log) and report `v<versionName>`.
+- **Every PR adds a release-note row.** One line at the top of
+  `android/changelog/notes.tsv`: version column blank, then a tab, then a
+  very short summary of what changed. The About page shows these under
+  Version; packaging concatenates blank rows under this build's
+  `versionName`. If any rows are still blank, they shipped in the current
+  android-latest build — stamp them first so the next APK does not swallow
+  them: `python3 tools/seal-changelog.py`.
 
 ## Release notes
 
-The About page lists them, grouped by versionName. Each PR that changes
-what a user sees adds **one row** at the top of `android/changelog/notes.tsv`:
-version column blank, then a tab, then a very short summary of what
-changed. Packaging concatenates every blank-version row under the
-`APP_VERSION_NAME` stamped on that APK — they become this version's notes.
-Rows already given a version stay under it.
+The About page lists them under Version. This build's bullets hang off the
+version number; older versions follow with their own headers.
 
-If any rows are still blank when you add yours, they shipped in the
-current android-latest build: stamp them first so the next APK does not
-swallow them.
+`android/changelog/notes.tsv` is the source. Every PR adds one blank-version
+row at the top. Packaging (`generateReleaseNotes`) concatenates those rows
+under `APP_VERSION_NAME` and ships the result as `assets/changelog.tsv`.
+Rows already given a version stay under it.
 
 ```
 python3 tools/seal-changelog.py          # fills blank rows from android-latest
