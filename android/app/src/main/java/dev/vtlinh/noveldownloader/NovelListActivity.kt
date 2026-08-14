@@ -28,8 +28,9 @@ import kotlinx.coroutines.withContext
    in from elsewhere). "Check status" asks each site for its chapter count,
    finished flag, and author; a finished novel with everything on disk shows
    a Complete tag instead of a Download button, and an ongoing novel with
-   every chapter on disk shows an Up to date tag. ALL NOVELS sorts by personal
-   star ranking, then most recently updated.
+   every chapter on disk shows an Up to date tag. ALL NOVELS sorts unfinished
+   first (stars, then most recently updated); novels the user marked finished
+   sit at the bottom.
 
    Cold start: resume a live reading session when one exists; otherwise open
    the Browser when this list is empty. Console output (formerly the Home
@@ -465,13 +466,16 @@ class NovelListActivity : AppCompatActivity() {
                 NovelCheck.localCount(store, folder, rec),
             )
         }.sortedWith(
-            /* more stars first; same stars, most recently updated first.
-               The three latest reads are pinned above this in render(). */
+            /* unfinished first, then finished at the bottom; within each,
+               more stars first, same stars most recently updated first.
+               The three latest unfinished reads are pinned above this
+               in render(). */
             LibrarySort.comparator(
                 { NovelRating.get(prefs, it.rec.slug) },
                 { it.rec.lastDl },
                 { it.rec.lastRead },
                 { it.rec.started },
+                { isRead(it.rec.slug) },
             ),
         )
     }
@@ -616,9 +620,14 @@ class NovelListActivity : AppCompatActivity() {
                 return@launch
             }
             status.text = finalStatus ?: "${rs.size} novel(s)"
-            /* the 3 most recently READ novels get their own section on top */
-            val recent = rs.filter { it.rec.lastRead > 0 }
-                .sortedByDescending { it.rec.lastRead }.take(3)
+            /* the 3 most recently READ unfinished novels get their own
+               section on top — a finished mark sends the novel to the
+               bottom of ALL NOVELS instead of pinning it here */
+            val recent = LibrarySort.recentlyRead(
+                rs,
+                { it.rec.lastRead },
+                { isRead(it.rec.slug) },
+            )
             val recentSlugs = recent.map { it.rec.slug }.toSet()
             val others = rs.filter { it.rec.slug !in recentSlugs }
             if (recent.isNotEmpty()) {

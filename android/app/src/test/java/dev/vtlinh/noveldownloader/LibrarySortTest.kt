@@ -10,12 +10,14 @@ class LibrarySortTest {
         val lastDl: Long = 0,
         val lastRead: Long = 0,
         val started: Long = 0,
+        val finished: Boolean = false,
     )
 
     private fun order(vararg items: Item): List<Item> =
         items.toList().sortedWith(
             LibrarySort.comparator(
                 { it.stars }, { it.lastDl }, { it.lastRead }, { it.started },
+                { it.finished },
             ),
         )
 
@@ -58,5 +60,37 @@ class LibrarySortTest {
         assertEquals(40L, LibrarySort.updatedAt(10, 40, 2))
         assertEquals(10L, LibrarySort.updatedAt(10, 0, 2))
         assertEquals(0L, LibrarySort.updatedAt(0, 0, 0))
+    }
+
+    @Test
+    fun `a finished novel sits below every unfinished one`() {
+        val finished = Item(stars = 10, lastDl = 100, finished = true)
+        val unread = Item(stars = 0, lastDl = 1, finished = false)
+        assertEquals(listOf(unread, finished), order(finished, unread))
+    }
+
+    @Test
+    fun `finished novels still rank by stars among themselves`() {
+        val low = Item(stars = 2, finished = true)
+        val high = Item(stars = 9, finished = true)
+        assertEquals(listOf(high, low), order(low, high))
+    }
+
+    @Test
+    fun `recently read skips finished novels and keeps the three latest`() {
+        val a = Item(stars = 1, lastRead = 50)
+        val b = Item(stars = 1, lastRead = 40)
+        val finished = Item(stars = 1, lastRead = 90, finished = true)
+        val c = Item(stars = 1, lastRead = 30)
+        val d = Item(stars = 1, lastRead = 20)
+        val never = Item(stars = 1, lastRead = 0)
+        assertEquals(
+            listOf(a, b, c),
+            LibrarySort.recentlyRead(
+                listOf(d, finished, never, c, a, b),
+                { it.lastRead },
+                { it.finished },
+            ),
+        )
     }
 }
