@@ -26,6 +26,12 @@ object StatusAutoCheck {
         prefs(context).edit().putInt(DAYS_KEY, days.coerceIn(0, 7)).apply()
     }
 
+    /* Remember that a status sweep just ran (manual or automatic), so the
+       next foreground auto-check waits the configured minimum days. */
+    fun markChecked(context: Context) {
+        prefs(context).edit().putLong(LAST_KEY, System.currentTimeMillis()).apply()
+    }
+
     /* Runs whenever the app is brought to the foreground. Skips when the
        setting is Never, when the last auto sweep was too recent, when no
        download folder is set, or when a sweep is already in flight. */
@@ -41,7 +47,7 @@ object StatusAutoCheck {
         /* Stamp at the start so a long sweep (or a crash mid-way) doesn't
            restart on every foreground until it finishes — same idea as
            Updater's in-memory lastAutoCheck, persisted across process death. */
-        prefs.edit().putLong(LAST_KEY, now).apply()
+        markChecked(context)
         val app = context.applicationContext
         scope.launch {
             try {
