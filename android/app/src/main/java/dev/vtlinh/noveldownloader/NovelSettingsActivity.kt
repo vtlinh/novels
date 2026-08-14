@@ -3,6 +3,7 @@ package dev.vtlinh.noveldownloader
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.TextView
@@ -34,7 +35,7 @@ class NovelSettingsActivity : AppCompatActivity() {
     private var local = 0
     private var busy = false
 
-    /* Help text behind each (?). Some change with novel state (finished,
+    /* Help text behind each help icon. Some change with novel state (finished,
        already English, resumable check); bindHelp shows whatever is current. */
     private var autoDownloadHelp =
         "When a status check finds chapters this novel doesn't have yet, fetch them without asking."
@@ -63,7 +64,7 @@ class NovelSettingsActivity : AppCompatActivity() {
     }
 
     private fun bindHelp(id: Int, title: String, message: () -> String) {
-        findViewById<TextView>(id).setOnClickListener {
+        findViewById<View>(id).setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle(title)
                 .setMessage(message())

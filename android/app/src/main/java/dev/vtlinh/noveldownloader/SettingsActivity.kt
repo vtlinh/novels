@@ -3,6 +3,7 @@ package dev.vtlinh.noveldownloader
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.SeekBar
@@ -16,7 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
    the Anthropic API key, library auto status-check interval, and reading
    options. Toggling compression starts a background pass that converts every
    novel to match; new downloads follow the same flag. The key is saved on
-   focus loss and when leaving. Descriptions live behind each setting's (?). */
+   focus loss and when leaving. Descriptions live behind each setting's help icon. */
 class SettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -130,7 +131,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun bindHelp(id: Int, title: String, message: String) {
-        findViewById<TextView>(id).setOnClickListener {
+        findViewById<View>(id).setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle(title)
                 .setMessage(message)
