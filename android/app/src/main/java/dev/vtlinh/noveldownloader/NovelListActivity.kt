@@ -1070,6 +1070,10 @@ class NovelListActivity : AppCompatActivity() {
                     status.text = "Checking… $n/$total"
                 }
             }
+            /* A manual sweep counts as "checked recently" for the automatic
+               interval — otherwise opening the app tomorrow would re-hit every
+               site the user just asked. */
+            StatusAutoCheck.markChecked(this@NovelListActivity)
             btn.isEnabled = true
             /* through render, not before it — render overwrites the status
                twice in the same turn, so a message set here was never seen */

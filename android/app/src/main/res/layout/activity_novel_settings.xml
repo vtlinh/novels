@@ -70,44 +70,73 @@
                 android:textStyle="bold"
                 android:textColor="@color/fg" />
 
-            <CheckBox
-                android:id="@+id/autoDownloadCheck"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:paddingStart="6dp"
-                android:text="Auto-download new chapters"
-                android:textSize="14sp"
-                android:textColor="@color/fg"
-                app:buttonTint="@color/accent" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <TextView
-                android:id="@+id/autoDownloadNote"
+                <CheckBox
+                    android:id="@+id/autoDownloadCheck"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingStart="6dp"
+                    android:text="Auto-download new chapters"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg"
+                    app:buttonTint="@color/accent" />
+
+                <TextView
+                    android:id="@+id/autoDownloadHelp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="(?)"
+                    android:textSize="14sp"
+                    android:textColor="@color/muted"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="4dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:contentDescription="About Auto-download new chapters" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="When a status check finds chapters this novel doesn't have yet, fetch them without asking."
-                android:textSize="12sp"
-                android:textColor="@color/muted" />
-
-            <CheckBox
-                android:id="@+id/translateCheck"
-                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:paddingStart="6dp"
-                android:text="Translate to English"
-                android:textSize="14sp"
-                android:textColor="@color/fg"
-                app:buttonTint="@color/accent" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <TextView
-                android:id="@+id/translateNote"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:textSize="12sp"
-                android:textColor="@color/muted" />
+                <CheckBox
+                    android:id="@+id/translateCheck"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingStart="6dp"
+                    android:text="Translate to English"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg"
+                    app:buttonTint="@color/accent" />
+
+                <TextView
+                    android:id="@+id/translateHelp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="(?)"
+                    android:textSize="14sp"
+                    android:textColor="@color/muted"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="4dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:contentDescription="About Translate to English" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- ══ This novel ══ -->
@@ -127,45 +156,75 @@
                 android:textStyle="bold"
                 android:textColor="@color/fg" />
 
-            <Button
-                android:id="@+id/recheckBtn"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="Check for new chapters"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#ffffff"
-                app:backgroundTint="@color/accent"
-                app:cornerRadius="8dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <TextView
-                android:id="@+id/recheckNote"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:textSize="12sp"
-                android:textColor="@color/muted" />
+                <Button
+                    android:id="@+id/recheckBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Check for new chapters"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="#ffffff"
+                    app:backgroundTint="@color/accent"
+                    app:cornerRadius="8dp" />
 
-            <Button
-                android:id="@+id/redownloadBtn"
+                <TextView
+                    android:id="@+id/recheckHelp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="(?)"
+                    android:textSize="14sp"
+                    android:textColor="@color/muted"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:contentDescription="About Check for new chapters" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text="Re-download all chapters"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="@color/fg"
-                app:backgroundTint="@color/btn_secondary"
-                app:cornerRadius="8dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Deletes every chapter of this novel from the download folder, reads the site's chapter list from the beginning, and downloads the lot again."
-                android:textSize="12sp"
-                android:textColor="@color/muted" />
+                <Button
+                    android:id="@+id/redownloadBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Re-download all chapters"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/fg"
+                    app:backgroundTint="@color/btn_secondary"
+                    app:cornerRadius="8dp" />
+
+                <TextView
+                    android:id="@+id/redownloadHelp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="(?)"
+                    android:textSize="14sp"
+                    android:textColor="@color/muted"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:contentDescription="About Re-download all chapters" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </ScrollView>
