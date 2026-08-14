@@ -173,3 +173,21 @@
 - Always tell the user which app version is being deployed after a merge:
   read the published `version.json`'s `versionName` (or the android.yml run's
   "Compute version name" log) and report `v<versionName>`.
+
+## Release notes
+
+The About page lists them, grouped by versionName. Each PR that changes
+what a user sees adds **one row** at the top of `android/changelog/notes.tsv`:
+version column blank, then a tab, then a very short summary of what
+changed. Packaging concatenates every blank-version row under the
+`APP_VERSION_NAME` stamped on that APK — they become this version's notes.
+Rows already given a version stay under it.
+
+If any rows are still blank when you add yours, they shipped in the
+current android-latest build: stamp them first so the next APK does not
+swallow them.
+
+```
+python3 tools/seal-changelog.py          # fills blank rows from android-latest
+# then add the new blank-version row at the top of android/changelog/notes.tsv
+```
