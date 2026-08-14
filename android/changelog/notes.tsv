@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Release notes on the About page
+	Show release notes under the Version heading
+1.33.23	Release notes on the About page
 1.33.21	Split novel info and chapters into tabs
 1.33.20	Show library ratings as 10★
 1.33.19	Sort the library by stars; remove the hot mark
