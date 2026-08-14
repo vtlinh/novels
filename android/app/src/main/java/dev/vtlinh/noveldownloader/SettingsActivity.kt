@@ -7,14 +7,16 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 
 /* App settings: the Storage card (download folder + "Compress my novels"),
    the Anthropic API key, library auto status-check interval, and reading
    options. Toggling compression starts a background pass that converts every
    novel to match; new downloads follow the same flag. The key is saved on
-   focus loss and when leaving. */
+   focus loss and when leaving. Descriptions live behind each setting's (?). */
 class SettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -72,15 +74,12 @@ class SettingsActivity : AppCompatActivity() {
                 .putBoolean("compressJobActive", true)
                 .apply()
             if (prefs.getString("tree", null) == null) {
-                findViewById<TextView>(R.id.zipStatus).text = "Pick a download folder first."
+                Toast.makeText(this, "Pick a download folder first.", Toast.LENGTH_SHORT).show()
                 prefs.edit().putBoolean("compressJobActive", false).apply()
             } else {
                 try { CompressService.start(this) } catch (e: Exception) {}
             }
         }
-
-        /* the compress/uncompress pass runs silently in the background — no
-           live status; zipStatus keeps its descriptive hint */
 
         /* Automatic library status check: 0 = never, 1..7 = minimum days
            between foreground sweeps (StatusAutoCheck, same lifecycle as the
@@ -110,6 +109,33 @@ class SettingsActivity : AppCompatActivity() {
         keepAwakeCheck.isChecked = prefs.getBoolean("keepAwake", false)
         keepAwakeCheck.setOnCheckedChangeListener { _, checked ->
             prefs.edit().putBoolean("keepAwake", checked).apply()
+        }
+
+        bindHelp(
+            R.id.compressHelp, "Compress my novels",
+            "Stores chapters as per-chapter gzip (~70% smaller). New downloads follow this setting; existing novels are converted in the background. Reading works either way.",
+        )
+        bindHelp(
+            R.id.apiKeyHelp, "Anthropic API key",
+            "Used for chapter translation, which costs money — each translation is billed to your Anthropic account balance. Stored only on this device.",
+        )
+        bindHelp(
+            R.id.statusCheckHelp, "Automatic status check",
+            "When you open the app, check novels for new chapters if at least this many days have passed since the last automatic check. 0 = never. Same check as the Library's Check button.",
+        )
+        bindHelp(
+            R.id.keepAwakeHelp, "Keep screen awake",
+            "Stops the screen from dimming off on the reader while text-to-speech is playing.",
+        )
+    }
+
+    private fun bindHelp(id: Int, title: String, message: String) {
+        findViewById<TextView>(id).setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("OK", null)
+                .show()
         }
     }
 
