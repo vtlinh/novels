@@ -13,7 +13,9 @@ object NovelRating {
 
     const val MAX = 10
 
-    private fun key(slug: String) = "novelRating:$slug"
+    const val PREF_PREFIX = "novelRating:"
+
+    private fun key(slug: String) = PREF_PREFIX + slug
 
     fun get(prefs: SharedPreferences, slug: String): Int =
         prefs.getInt(key(slug), 0).coerceIn(0, MAX)
