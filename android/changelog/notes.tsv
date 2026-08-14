@@ -1,0 +1,320 @@
+# version<TAB>summary
+# Source for the About page. A blank version is unreleased: packaging
+# concatenates those rows under APP_VERSION_NAME (tools/release-notes.py).
+# Stamp blank rows with the published versionName before adding a new one
+# (tools/seal-changelog.py).
+
+	Release notes on the About page
+1.33.21	Split novel info and chapters into tabs
+1.33.20	Show library ratings as 10★
+1.33.19	Sort the library by stars; remove the hot mark
+1.33.18	Show library ratings as 10×★
+1.33.17	Redesign the chapter list as a novel detail page
+1.33.16	Tint the help icon with the app palette
+1.33.15	Circular help icon
+1.33.14	Novel info header and personal star ranking
+1.33.13	Move settings descriptions behind help icons
+1.33.12	Automatic novel status check on a 0–7 day interval
+1.33.11	Show UP TO DATE as a library tag
+1.33.10	Disable auto-download when the novel is finished
+1.33.9	Chapter list loads a window around the current chapter
+1.33.8	Start on Library; drop Home; console footer on Library
+1.33.7	Microphone icon for the voice-settings button
+1.33.6	Bigger voice button; skip controls closer in
+1.33.5	Shorter reader footer
+1.33.4	Bigger TTS transport buttons
+1.33.3	Paragraph skip buttons (and headset skip keys); font size cap 50
+1.33.1	Re-center the double-tapped sentence once the gesture ends
+1.32.11	Stop force-deleting the end-of-book terminator
+1.32.10	Stop the poll chain starving the TTS caller's shared timer
+1.32.9	Re-arm the short-page poll chain instead of letting it die
+1.32.8	Retry a short-page relist while the download runs
+1.32.7	Re-arm the relist latch
+1.32.6	Live-listing in the reader, plus defects in the previous fixes
+1.32.5	Fix seven more in the reader and TTS
+1.32.4	Fix eight more, including two in the previous round's fixes
+1.32.3	Fix nine reader, TTS, and download defects
+1.32.2	Back from the reader lands on the chapter list
+1.32.1	Resume a status check where the listing ended; per-novel settings
+1.31.40	Move the English/Vietnamese line to 90% unaccented characters
+1.31.39	Decide the TTS language by counting over a whole chapter
+1.31.38	Sort the voice picker by what the reader can actually see
+1.31.36	Offer only the voices that render on the phone
+1.31.35	Stop an empty buffer being read as English
+1.31.34	Match a voice's language by either of its codes
+1.31.33	Hand the translation over before deleting the duplicate that holds it
+1.31.32	Remove the media-button route that could never carry a press
+1.31.31	Stop the media path claiming credit the wrong thing earned
+1.31.30	Load a small window of chapters in both directions
+1.31.29	Make a sound so headset buttons are delivered here at all
+1.31.28	Decide a headset press from whether the reader is speaking
+1.31.27	Notice a translation that arrives after the listing was cached
+1.31.26	Stop treating an empty URL as a novel page
+1.31.25	Support freewebnovel.com
+1.31.24	List every supported site on the browser start screen
+1.31.23	Support read-novel.com; keep links the URL parser used to drop
+1.31.22	Support truyenfullmoi.com
+1.31.21	Give every site its own directory
+1.31.20	Strip a chapter heading however the page lays it out
+1.31.19	Capture novelfull.net: 100 novels and 30 chapters
+1.31.18	Test the furniture rule against real .net pages
+1.31.17	A title has to be the novel's name, not the page's
+1.31.16	Support novelfull.net; keep site furniture out of folder names
+1.31.15	Serve the release from the Worker now the repo is private
+1.31.14	One interface, one class, and one test class per site
+1.31.13	Ignore a TTS report from a sentence we already threw away
+1.31.12	A first report of a missing page is not a second
+1.31.11	One definition of the folder a novel is recorded as using
+1.31.10	Document why the remaining guards are still needed
+1.31.9	Stop renaming the folder when a title is translated
+1.31.8	One rule for what a listing page answered
+1.31.7	Pin what a novel's folder holds
+1.31.6	Run schema migrations against a real SQLite in tests
+1.31.5	Rename the folder we own, not the one with the right name
+1.31.4	Open where the reader actually left off
+1.31.3	An unreadable chapter is not a stale cache
+1.31.2	Clear the cached listing when only a translation moved
+1.31.1	Apply the allowlist to every redirect hop
+1.30.144	Do not renumber a library against a guess
+1.30.143	Own the folder we are in, not the name we once claimed
+1.30.142	Keep cleanup sweeps off the user's own files
+1.30.141	Capture 100 novels and 27 chapter pages from each site
+1.30.140	One archive per page; require fixtures for a new site
+1.30.139	Keep captured pages in an archive, not as loose files
+1.30.138	Capture novelfull fixtures from the real site
+1.30.137	Fix what the delayed verification pass found
+1.30.136	Test the listing read against real pages from both sites
+1.30.135	Only distrust a fallback listing when it actually produced links
+1.30.134	Refuse to delete against a listing that is not the chapter list
+1.30.133	Stop trusting names to say which chapter a file holds
+1.30.132	Fix four holes opened by this round's own fixes
+1.30.131	Keep the reader's place when the chapters move under it
+1.30.130	Stop paying twice for translations already in hand
+1.30.129	Stop deriving a novel's folder from its title
+1.30.128	Stop the blank-page fix from rebuilding the hole it closed
+1.30.127	A page that answers 200 with nothing no longer deletes chapters
+1.30.126	Stop reinstalls from re-downloading a library that is still on disk
+1.30.125	Decide which file is which chapter from the listing, not the name
+1.30.124	Record which folder each novel actually uses
+1.30.123	Stop paying twice for translations; stop aborting healthy installs
+1.30.122	A 404'd tail of the listing no longer deletes the rest of the novel
+1.30.121	A partial listing adds chapters instead of replacing them
+1.30.120	Fix regressions the previous audit fixes introduced
+1.30.119	Keep two novels out of the same folder
+1.30.118	Finish the remaining library-safety loose ends
+1.30.117	Stop the reader overwriting a reading spot it could not honour
+1.30.116	Stop offering a build the device has already refused
+1.30.115	Don't let a pagination link count as a chapter
+1.30.114	Stop a failed write from leaving a stub that becomes the chapter
+1.30.113	File recovered translations by the page they came from
+1.30.112	Refuse to name chapters from a listing we only partly read
+1.30.111	Stop one delisted chapter from unravelling a whole renumbering
+1.30.110	Trust the page a file came from; stop counting chapters that are gone
+1.30.109	Stop losing the only copy of a chapter; stop walking the bookmark back
+1.30.108	Never rename or delete from a listing that did not fetch in full
+1.30.107	Stop the stale-index check undoing a careful folder rename
+1.30.106	Identify each file by its page and act only on what changed
+1.30.105	Don't rename a chapter onto a name its translation still holds
+1.30.104	Carry the saved reading spot across a rename
+1.30.103	Translate compressed chapters and store translations compressed
+1.30.102	Write chapters gzipped instead of compressing them afterwards
+1.30.101	Offer a download when a novel holds more files than the site lists
+1.30.100	Settle unexplained extras by re-fetching the novel
+1.30.99	Check the novels the list offers a Download button for
+1.30.98	Match duplicate chapters on their text, not their heading
+1.30.97	Check status tidies the library, not just downloads
+1.30.96	Remove duplicate chapter files once their content proves it
+1.30.95	A finished novel missing chapters is not done
+1.30.94	Drop the legacy whole-novel chapters.zip
+1.30.93	Rename chapters into the site's order when the listing shifts
+1.30.92	Give a chapter a name for life and keep its position
+1.30.91	Drop the typo-tolerant slug rule
+1.30.90	Take a chapter's place from the listing, not from its name
+1.30.89	Name undownloadable links from Check status too
+1.30.88	Don't count chapters that can never be downloaded
+1.30.87	Let the listing page say what a chapter is
+1.30.86	Novelfull chapters are not numbered in the URL
+1.30.85	Sort chapters by number; stop the widget polluting site order
+1.30.84	Fix a duplicate field that broke the build
+1.30.84	Keep chapters in order when the site listing does not cover them
+1.30.84	Open the chapter list from the banner and fill it in as chapters land
+1.30.83	Report a started download in the banner, not a snackbar
+1.30.82	Name the novel that is downloading; don't offer to start it twice
+1.30.81	Download a new build on sight; install only when asked
+1.30.80	Browser: translate toggle, in-place download, and a library banner
+1.30.79	Keep the address bar on the browser start screen
+1.30.78	Frame the resumed spot 20% down
+1.30.77	Stop selectable text yanking the page back to the top
+1.30.76	Reopen where TTS stopped, not where the viewport happened to be
+1.30.75	Reopen the chapter TTS is in, so its position restores
+1.30.74	Load before placing, so a mid-chapter TTS spot is reachable
+1.30.73	Restore only the TTS spot and make it visible on arrival
+1.30.72	Restore the reading position with its own anchor
+1.30.71	Anchor the TTS position and stop losing it to a clamped scroll
+1.30.70	Notifications no longer duck or stop TTS
+1.30.69	Headset play-pause actually reaches the reader
+1.30.68	Re-apply the scroll after the forward fill lands
+1.30.67	Refresh counts after download; jump to the TTS spot
+1.30.66	TTS survives rotation and stops for other media and calls
+1.30.65	Count zipped chapters so a full novel is not shown as 0/N
+1.30.64	Flip chapter order from the header
+1.30.63	Cache the chapter listing so opening a novel does not walk the folder
+1.30.62	Per-novel TTS resume, queued downloads, and x/y counts
+1.30.61	Long-press library marks: hot, finished, garbage
+1.30.60	Fix a release-build compile error in the download queue
+1.30.60	Queue novels started while another is downloading
+1.30.59	Compression runs invisibly in the background
+1.30.58	Going Home no longer kills a reading-aloud reader
+1.30.57	Speech-edit test text is simply the TTS paragraph
+1.30.56	Keep Check for updates tappable; drop the speech-edit title field
+1.30.55	TTS-binding spinner, voice icon, and a fast-scroll voice list
+1.30.54	Monochrome icons throughout
+1.30.53	Speaker icon for the voice-settings button
+1.30.52	Tap to edit a speech rule; long-press for multi-select
+1.30.51	Test speech edits against the TTS paragraph
+1.30.50	Hide inactive speech edits
+1.30.49	Reuse the live reader when reopening the same novel
+1.30.48	Make default speech edits editable, with per-rule restore
+1.30.47	Move speech-edit Import/Export behind a menu
+1.30.46	Retry a stalled install after 4s instead of 40s
+1.30.45	Start TTS at the tapped sentence; pause when headphones disconnect
+1.30.44	Drop the Loading… placeholder when opening a chapter
+1.30.43	Fix a release-build compile error in speech edits
+1.30.43	Long-press to move speech edits to top or bottom
+1.30.42	Coordinate chapter loading with TTS, scrolling, and touch
+1.30.41	Don't prepend previous chapters right after selecting a chapter
+1.30.40	Download each update APK once and reuse it
+1.30.39	Clear the tap cursor around TTS so Stop does not yank scroll
+1.30.38	Recover a stuck Installing… without re-downloading
+1.30.37	Fix restore/nav scroll landing at chapter top
+1.30.36	Chapter-nav top gap; keep TTS on re-pick
+1.30.35	Single Compress my novels switch with a resumable job
+1.30.34	Settings: API key link and a note that translation costs money
+1.30.33	Remove Supported sites from About
+1.30.32	Load chapters forward-only
+1.30.31	Settling scrolls after open cannot corrupt saved progress
+1.30.30	Clear the insertion cursor on open so it cannot yank scroll
+1.30.29	Place restore scroll on a layout pass
+1.30.28	Fix cold-restart landing on the top of the buffer
+1.30.27	Stagger scroll recovery so it never fires mid-load
+1.30.26	Preload a 20-chapter window and restore scroll after
+1.30.25	Always show the update banner when an update is available
+1.30.24	A bad speech-edit rule cannot crash the read
+1.30.23	Import and export speech edits
+1.30.22	Default speech edits are always applied
+1.30.21	Managed speech-edits list
+1.30.20	Reliable saved-voice recovery and default speech edits
+1.30.19	Recover the saved TTS voice after an engine retry
+1.30.18	Voice button opens a bottom-sheet menu
+1.30.17	Integer tick marks on the shake-threshold slider
+1.30.16	Shake threshold as a 1–10 slider
+1.30.15	Shake-to-reset feedback and fractional thresholds
+1.30.14	Voice settings live only in the reader menu
+1.30.13	Font size shows a one-line sample
+1.30.12	Guide to the Install unknown apps toggle when blocked
+1.30.11	Reader settings: sleep timer and shake-to-reset
+1.30.10	Auto-update from any screen
+1.30.9	Bluetooth media buttons register through MediaSession
+1.30.8	Remove the back button from the chapter list
+1.30.7	Keep TTS playing when going back to the chapter list
+1.30.6	Confirm before translating English novels; hold audio focus
+1.30.5	TTS notification shows progress and cover art
+1.30.4	Validate source language from the novel page
+1.30.3	Detect English source by character ratio, not by site
+1.30.2	Skip translation for novels that are already English
+1.30.1	Version names become year.week.patch
+1.1	Human-facing version is now 1.1
+1.0	TTS notification uses a centered always-shown control
+1.0	Keep the library scrollbar off the status tags
+1.0	Self-updates can install with no extra tap
+1.0	Version numbers start at 1.0
+0.1	Settings screen with grouped cards
+0.1	About screen with app info and a manual update check
+0.1	Recover from a dismissed update-install prompt
+0.1	Keep the screen awake while TTS reads
+0.1	Fix a release-build compile error in the TTS toggle
+0.1	TTS notification shows the chapter heading and Pause/Play
+0.1	Bluetooth headset play/pause controls TTS
+0.1	Picking an already-loaded chapter scrolls instead of reloading
+0.1	Cancel in-flight flings when a prepend re-anchors
+0.1	Chapter drawer opened by swipe scrolls to the current chapter
+0.1	Drop the append jump-guard
+0.1	Double tap starts TTS, never text selection
+0.1	Stop the cursor jump when chapters append
+0.1	Compress one chapter at a time
+0.1	Accept legacy title-suffixed chapter filenames
+0.1	Fix Compress reporting 0 novels; add Download compressed
+0.1	No flicker when opening to a saved position
+0.1	Fix the Settings layout so release builds compile
+0.1	Zip novels from Settings; the reader handles compressed chapters
+0.1	Google TTS engine only, with an in-app voice-data reset
+0.1	Cycle TTS engines with live diagnostics
+0.1	Recover the Google TTS engine when the voice list is empty
+0.1	Stock two chapters in both directions after that window
+0.1	Load neighbouring chapters after a short quiet window
+0.1	Stop chapter drift when the previous chapter prepends
+0.1	Restore scroll against the final layout
+0.1	Don't prepend the previous chapter while TTS is speaking
+0.1	Combine Library and Reader into one page
+0.1	Resume into the reader when the app reopens mid-reading
+0.1	Reopening the current chapter returns to where you left off
+0.1	Keep the spoken line at 20% height
+0.1	Pausing TTS no longer keeps scrolling
+0.1	Browser back returns to the domain list
+0.1	Stop TTS auto-scroll fighting chapter loading
+0.1	Folder and API key move to a Settings screen
+0.1	Browser header: back on the left, download on the right
+0.1	Back button on the browser start screen
+0.1	Text-style pause glyph and finer speed steps
+0.1	Keep TTS reading in the background
+0.1	Browser start screen lists recent domains
+0.1	Move Browser mode into the navigation drawer
+0.1	Name the TTS language once in the voice sheet
+0.1	Auto-scroll during TTS to keep the spoken line centered
+0.1	Play/pause glyphs match the reader text style
+0.1	Never show an empty voice list
+0.1	Auto-detect TTS language, highlight the sentence, resume position
+0.1	Text-to-speech in the reader
+0.1	Save reading position when a chapter opens
+0.1	Back buttons on the chapter list and reader
+0.1	Remember and scroll to the chapter being read
+0.1	Reader header probes just below the viewport top
+0.1	Cover thumbnails on novel lists
+0.1	Fix the header jumping when the previous chapter prepends
+0.1	Fast scrolling on chapter lists
+0.1	Same drawer header on the chapter list
+0.1	Language toggle lives only in the reader menu
+0.1	Highlight the current chapter; keep the place on language flip
+0.1	Ignore the site's latest-chapters widget when ordering
+0.1	Reader header shows Chapter N: Title
+0.1	Status check includes complete novels with an unindexed order
+0.1	Keep font controls on one line without closing the popup
+0.1	Hide the language toggle when there is no translation
+0.1	Chapter drawer, backward loading, and neighbour preload
+0.1	Sort chapters by the site's listing order
+0.1	Recent reads, language toggle, and reader settings
+0.1	Reading mode
+0.1	Remove the temporary encoding-repair button
+0.1	Three-layer ad filtering in browser mode
+0.1	Harden HTML-entity decoding
+0.1	Strip author suffixes from novel titles
+0.1	One-time repair for mangled chapter encoding
+0.1	Fix leftover HTML entities in saved chapters
+0.1	Sort the library by most recent download
+0.1	Treat punctuation-only slug differences as the same novel
+0.1	Hide Download when there is nothing new
+0.1	Scan the folder once, then serve the library from the database
+0.1	Fix the library taking minutes to appear
+0.1	Explain an empty library instead of failing silently
+0.1	Show author, Complete tag, and scan the download folder
+0.1	Library screen with resume and status check
+0.1	Ship signed release APKs
+0.1	Check for updates when the app comes to the foreground
+0.1	Force dark mode in the in-app browser
+0.1	Filter ads in browser mode
+0.1	Browser mode always opens at the domain
+0.1	Show the saved folder on the home screen
+0.1	Stream chapter downloads through one pool
+0.1	Restyle the UI to match the web app
+0.1	Rename the browser-mode button
+0.1	First native Android app

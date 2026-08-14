@@ -80,12 +80,48 @@ android {
     sourceSets {
         getByName("main") {
             java.srcDirs(siteRoots.map { File(it, "main") })
+            /* Filled in by generateReleaseNotes: unreleased changelog rows
+               concatenated under this build's versionName. */
+            assets.srcDir(layout.buildDirectory.dir("generated/changelogAssets"))
         }
         getByName("test") {
             java.srcDirs(siteRoots.map { File(it, "test/java") })
             resources.srcDirs(siteRoots.map { File(it, "test/resources") })
         }
     }
+}
+
+/* Blank-version rows in android/changelog/notes.tsv are everything that
+   landed since the last version was sealed. Packaging concatenates them
+   under versionName and ships the result as assets/changelog.tsv. */
+val generateReleaseNotes = tasks.register("generateReleaseNotes") {
+    val input = rootProject.file("changelog/notes.tsv")
+    val outDir = layout.buildDirectory.dir("generated/changelogAssets")
+    inputs.file(input)
+    inputs.property("versionName", appVersionName)
+    outputs.dir(outDir)
+    doLast {
+        val dest = outDir.get().asFile.apply { mkdirs() }.resolve("changelog.tsv")
+        val script = rootProject.projectDir.resolve("../tools/release-notes.py")
+        exec {
+            commandLine(
+                "python3", script.absolutePath,
+                "--input", input.absolutePath,
+                "--output", dest.absolutePath,
+                "--version", appVersionName,
+            )
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+    dependsOn(generateReleaseNotes)
+}
+tasks.matching { it.name.startsWith("package") }.configureEach {
+    dependsOn(generateReleaseNotes)
+}
+afterEvaluate {
+    tasks.findByName("preBuild")?.dependsOn(generateReleaseNotes)
 }
 
 dependencies {
