@@ -39,7 +39,7 @@ assert again == sealed
 notes = (ROOT / "android/changelog/notes.tsv").read_text()
 filled = rn.fill(notes, "1.33.22")
 assert not any(l.startswith("\t") for l in filled.splitlines())
-assert "1.33.22\tShow release notes under the Version heading" in filled
+assert "1.33.22\tShow release notes in a dialog from Version" in filled
 assert filled.count("1.33.22\t") == 1
 
 print("ok")

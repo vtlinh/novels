@@ -96,7 +96,7 @@ class ReleaseNotesTest {
         assertTrue("backfill is missing", entries.size > 100)
         assertTrue(
             "this PR's summary must be unreleased so package-time concat picks it up",
-            entries.any { it.version == null && it.summary.contains("under the Version") },
+            entries.any { it.version == null && it.summary.contains("dialog from Version") },
         )
         assertTrue(
             "1.33.23 shipped the About-page notes",
