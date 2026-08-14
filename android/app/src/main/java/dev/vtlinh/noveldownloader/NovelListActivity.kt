@@ -393,6 +393,9 @@ class NovelListActivity : AppCompatActivity() {
                     if (lose.autoDownload && !win.autoDownload) {
                         store.setAutoDownload(folder, win.slug, true)
                     }
+                    SlugMerge.lastReadToCarry(win.lastRead, lose.lastRead)?.let {
+                        store.setLastRead(folder, win.slug, it)
+                    }
                 } catch (e: Exception) {}
                 /* ...and the reading/read-aloud positions, which live in
                    prefs under the losing SLUG. They are the same novel, and
@@ -401,17 +404,13 @@ class NovelListActivity : AppCompatActivity() {
                    list highlighted nothing, and the spot was gone with no
                    message. Only onto a winner with no spot of its own — a
                    position the user made under the winning slug is newer
-                   truth than the orphan. */
+                   truth than the orphan. The personal star ranking is the
+                   same shape: stored under the scan slug, looked up under
+                   the site slug, and the library now sorts by it. */
                 try {
                     val all = prefs.all
                     val e = prefs.edit()
-                    for (k in listOf(
-                        "lastCh:", "lastChAt:", "readPos:", "readParaText:",
-                        "ttsPos:", "ttsPosAt:", "ttsParaText:",
-                        /* finished is per-slug too — dropping it hid the
-                           FINISHED tag on a novel the user had marked */
-                        "novelRead:",
-                    )) {
+                    for (k in SlugMerge.PREF_PREFIXES) {
                         val v = all[k + lose.slug] ?: continue
                         if (all[k + win.slug] != null) continue
                         when (v) {
