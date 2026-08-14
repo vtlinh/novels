@@ -38,10 +38,10 @@ object NovelRating {
         return n
     }
 
-    /* Compact "8x★" for the library row — a count, not a row of ten stars. */
+    /* Compact "8★" for the library row — a count, not a row of ten stars. */
     fun bar(stars: Int): String {
         val n = stars.coerceIn(0, MAX)
-        return "${n}x★"
+        return "${n}★"
     }
 }
 
