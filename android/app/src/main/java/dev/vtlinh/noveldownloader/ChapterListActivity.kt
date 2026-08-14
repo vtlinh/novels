@@ -468,7 +468,7 @@ class ChapterListActivity : AppCompatActivity() {
         /* Personal ranking: ten full stars. Tap the current value to clear. */
         val starsRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
+            gravity = android.view.Gravity.CENTER
             setPadding(0, dp(10), 0, dp(2))
         }
         fun paintStars(current: Int) {
