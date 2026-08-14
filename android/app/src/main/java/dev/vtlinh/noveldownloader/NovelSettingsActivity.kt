@@ -166,10 +166,25 @@ class NovelSettingsActivity : AppCompatActivity() {
         }
     }
 
+    /* Off and untouchable when the site has finished the novel — there are
+       no chapters left for a status check to find. The BOX still shows what
+       is stored: a novel that finished after auto-download was turned on has
+       not had that answer cleared, and if the site ever marks it ongoing
+       again the same tick still applies. */
     private fun bindAutoDownload(folder: String, state: State) {
         val box = findViewById<CheckBox>(R.id.autoDownloadCheck)
+        val note = findViewById<TextView>(R.id.autoDownloadNote)
         box.setOnCheckedChangeListener(null)
         box.isChecked = state.rec?.autoDownload == true
+        val finished = state.rec?.complete == true
+        /* Busy also greys this out (setBusy); don't fight it here. */
+        box.isEnabled = !finished && !busy
+        box.alpha = if (finished) 0.5f else 1f
+        note.text = if (finished) {
+            "The site has finished this novel — there are no new chapters to download."
+        } else {
+            "When a status check finds chapters this novel doesn't have yet, fetch them without asking."
+        }
         box.setOnCheckedChangeListener { _, checked ->
             persist { store.setAutoDownload(folder, slug, checked) }
         }
@@ -465,6 +480,9 @@ class NovelSettingsActivity : AppCompatActivity() {
         busy = b
         findViewById<Button>(R.id.recheckBtn).isEnabled = !b
         findViewById<Button>(R.id.redownloadBtn).isEnabled = !b
-        findViewById<CheckBox>(R.id.autoDownloadCheck).isEnabled = !b
+        /* A finished novel stays untouchable even when nothing is in flight —
+           setBusy used to flip this back on and undid bindAutoDownload. */
+        val finished = rec?.complete == true
+        findViewById<CheckBox>(R.id.autoDownloadCheck).isEnabled = !b && !finished
     }
 }
