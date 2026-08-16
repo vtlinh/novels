@@ -15,6 +15,22 @@ object Sites {
 
     fun forUrl(url: String): Site? = all.firstOrNull { it.matches(url) }
 
+    /* Host the novel was downloaded from, for the info screen. Not the
+       publisher line the site prints as "Source" — that is a different
+       field, and collapsing them would hide that a book on novelfull.net
+       is not the one on novelfull.com. www. is dropped so the two
+       spellings of truyenfullmoi read as one site. Null when there is no
+       URL (folder-scan) or it does not parse. */
+    fun website(url: String): String? {
+        if (url.isBlank()) return null
+        return try {
+            java.net.URI(url.trim()).host
+                ?.lowercase()
+                ?.removePrefix("www.")
+                ?.ifEmpty { null }
+        } catch (e: Exception) { null }
+    }
+
     /* Normalized busy-key from a novel URL — MUST equal
        Ownership.normKey(<the slug the store records>) for the same novel,
        because these are the two halves of every "is this novel busy?" test:

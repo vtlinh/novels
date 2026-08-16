@@ -400,6 +400,9 @@ class ChapterListActivity : AppCompatActivity() {
         val alt = rec?.altNames.orEmpty()
         val genres = rec?.genres.orEmpty()
         val source = rec?.source.orEmpty()
+        /* Host we fetched from, not the publisher `source` chip. A folder
+           scan has no URL, so nothing to show until Check status finds it. */
+        val website = rec?.url?.let { Sites.website(it) }.orEmpty()
         val status = rec?.statusLabel.orEmpty().ifEmpty {
             when {
                 rec == null -> ""
@@ -443,6 +446,9 @@ class ChapterListActivity : AppCompatActivity() {
                     if (completed) R.drawable.bg_chip_ok else R.drawable.bg_chip_accent,
                 ),
             )
+        }
+        if (website.isNotEmpty()) {
+            chips.addView(chip(website, R.color.fg, R.drawable.bg_chip))
         }
         if (source.isNotEmpty()) {
             chips.addView(chip(source, R.color.fg, R.drawable.bg_chip))

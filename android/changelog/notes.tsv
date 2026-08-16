@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Explain settings help in everyday language
+	Show the download website on novel info
+1.33.29	Explain settings help in everyday language
 1.33.28	Cache per-novel storage size until files change
 1.33.27	Fix Settings storage size staying on …
 1.33.26	Don't report a lost download folder as empty
