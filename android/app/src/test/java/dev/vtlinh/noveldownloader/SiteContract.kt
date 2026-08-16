@@ -130,7 +130,7 @@ abstract class SiteContract {
             assertEquals(
                 "${r[1]}: chapters in container",
                 r[6].toInt(),
-                found.links.map { it.first }.distinct().size,
+                found.links.map { it.url }.distinct().size,
             )
         }
     }

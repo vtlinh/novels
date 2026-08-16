@@ -155,7 +155,7 @@ class RealPageTest {
             assertEquals(
                 "${f.file}: chapter count disagrees with what the page holds",
                 f.chapters,
-                found.links.map { it.first }.distinct().size,
+                found.links.map { it.url }.distinct().size,
             )
         }
     }
@@ -165,7 +165,7 @@ class RealPageTest {
     @Test
     fun `the novel's own url and its page links are never collected as chapters`() {
         for (f in fixtures) {
-            val links = Listing.collect(doc(f), f.site, f.slug).links.map { it.first }
+            val links = Listing.collect(doc(f), f.site, f.slug).links.map { it.url }
             /* by PATH: these pages carry absolute links to the site's other
                host, so comparing whole URLs would pass without proving
                anything */
@@ -191,7 +191,7 @@ class RealPageTest {
     fun `page one lists chapters in ascending site order`() {
         for (f in fixtures.filter { it.kind == "novel" && it.site.name == "truyenfull" }) {
             val nums = Listing.collect(doc(f), f.site, f.slug).links
-                .mapNotNull { f.site.chapterNumFromUrl(it.first) }
+                .mapNotNull { f.site.chapterNumFromUrl(it.url) }
             assertTrue("${f.file}: no numbered chapters", nums.size > 5)
             assertEquals("${f.file}: page 1 does not start at chapter 1", 1, nums.first())
             /* Broadly ascending, not strictly. A real page in this corpus
@@ -255,6 +255,21 @@ class RealPageTest {
             val found = Listing.collect(doc(f), f.site, f.slug)
             assertFalse("${f.file}: read as a fallback", found.fellBack)
             assertTrue("${f.file}: a real last page still holds chapters", found.links.isNotEmpty())
+        }
+    }
+
+    /* The detector has to stay quiet on real listings: a false positive
+       would hold back every chapter after it and never save them. */
+    @Test
+    fun `captured listing chapters are not marked as previews`() {
+        for (f in fixtures) {
+            val found = Listing.collect(doc(f), f.site, f.slug)
+            val marked = found.links.filter { it.preview }
+            assertTrue(
+                "${f.file}: ${marked.size} listing link(s) read as previews: " +
+                    marked.take(3).joinToString { it.text },
+                marked.isEmpty(),
+            )
         }
     }
 }
@@ -322,6 +337,16 @@ class RealChapterTest {
                 throw AssertionError("${c.file}: parseChapter threw — ${e.message}")
             }
             assertTrue("${c.file}: empty result", out.isNotBlank())
+        }
+    }
+
+    @Test
+    fun `captured chapter pages are not previews`() {
+        for (c in chapters) {
+            assertFalse(
+                "${c.file}: page read as a preview",
+                Listing.pageIsPreview(Jsoup.parse(read(c.file), c.url), c.site, ""),
+            )
         }
     }
 

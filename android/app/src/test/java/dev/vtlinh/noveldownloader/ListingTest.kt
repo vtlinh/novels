@@ -298,4 +298,130 @@ class ListingTest {
         assertFalse(Listing.record(5, Listing.answer(null, 0), g, m))
         assertTrue(Listing.record(5, Listing.answer("x", 200), g, m))
     }
+
+    @Test
+    fun `bare preview in a title is not a teaser label`() {
+        assertFalse(Listing.markedPreview("The Preview"))
+        assertFalse(Listing.markedPreview("A Preview of War"))
+        assertFalse(Listing.markedPreview("Chapter 12 VIP Room"))
+        assertFalse(Listing.markedPreview("Block the Cave"))
+        assertFalse(Listing.markedPreview("xem trước mắt những gì sẽ tới"))
+    }
+
+    @Test
+    fun `bracketed preview and a preview-only badge are teasers`() {
+        assertTrue(Listing.markedPreview("Preview"))
+        assertTrue(Listing.markedPreview("preview"))
+        assertTrue(Listing.markedPreview("Xem trước"))
+        assertTrue(Listing.markedPreview("Chapter 7540 Hatred Crafting (Preview)"))
+        assertTrue(Listing.markedPreview("Chương 12 [xem trước]"))
+        assertTrue(Listing.markedPreview("This chapter is a preview. Unlock to read."))
+        assertFalse(Listing.markedPreview("this is a preview of the coming war"))
+    }
+
+    @Test
+    fun `fetch stops at the first listing preview, inclusive`() {
+        assertEquals(-1, Listing.fetchThrough(emptyList()))
+        assertEquals(2, Listing.fetchThrough(listOf(false, false, false)))
+        assertEquals(0, Listing.fetchThrough(listOf(true, false, false)))
+        assertEquals(1, Listing.fetchThrough(listOf(false, true, true)))
+        assertEquals(2, Listing.fetchThrough(listOf(false, false, true)))
+    }
+
+    @Test
+    fun `a sibling preview badge marks that chapter only`() {
+        val html = """
+            <div id="list-chapter">
+              <ul>
+                <li><a href="https://novelfull.com/book/chapter-1-start.html">Chapter 1 Start</a></li>
+                <li>
+                  <a href="https://novelfull.com/book/chapter-2-the-preview.html">Chapter 2 The Preview</a>
+                </li>
+                <li>
+                  <a href="https://novelfull.com/book/chapter-3-end.html">Chapter 3 End</a>
+                  <span class="label">Preview</span>
+                </li>
+              </ul>
+            </div>
+        """.trimIndent()
+        val found = Listing.collect(
+            org.jsoup.Jsoup.parse(html, "https://novelfull.com/book.html"),
+            dev.vtlinh.noveldownloader.sites.Novelfull,
+            "book",
+        )
+        assertEquals(3, found.links.size)
+        assertFalse("plain chapter", found.links[0].preview)
+        assertFalse("title contains Preview", found.links[1].preview)
+        assertTrue("sibling badge", found.links[2].preview)
+        assertEquals(2, Listing.fetchThrough(found.links.map { it.preview }))
+    }
+
+    @Test
+    fun `a preview span inside the chapter link is a teaser`() {
+        val html = """
+            <div id="list-chapter">
+              <ul>
+                <li>
+                  <a href="https://novelfull.com/book/chapter-4-end.html">
+                    <span class="chapter-text">Chapter 4 End</span>
+                    <span class="label">Preview</span>
+                  </a>
+                </li>
+              </ul>
+            </div>
+        """.trimIndent()
+        val found = Listing.collect(
+            org.jsoup.Jsoup.parse(html, "https://novelfull.com/book.html"),
+            dev.vtlinh.noveldownloader.sites.Novelfull,
+            "book",
+        )
+        assertEquals(1, found.links.size)
+        assertTrue(found.links[0].preview)
+    }
+
+    @Test
+    fun `a preview class on the list item is a teaser`() {
+        val html = """
+            <div id="list-chapter">
+              <ul>
+                <li><a href="https://novelfull.com/book/chapter-1-start.html">Chapter 1 Start</a></li>
+                <li class="chapter-preview">
+                  <a href="https://novelfull.com/book/chapter-2-end.html">Chapter 2 End</a>
+                </li>
+              </ul>
+            </div>
+        """.trimIndent()
+        val found = Listing.collect(
+            org.jsoup.Jsoup.parse(html, "https://novelfull.com/book.html"),
+            dev.vtlinh.noveldownloader.sites.Novelfull,
+            "book",
+        )
+        assertEquals(listOf(false, true), found.links.map { it.preview })
+    }
+
+    @Test
+    fun `an inner preview span on the heading is a teaser page`() {
+        val html = """
+            <a class="chapter-title">Chapter 12 End <span class="label">Preview</span></a>
+            <div id="chapter-content">
+              <p>This chapter is a preview. Unlock the full chapter to continue.</p>
+              <p>The opening lines of the teaser.</p>
+            </div>
+        """.trimIndent()
+        val doc = org.jsoup.Jsoup.parse(html, "https://novelfull.com/book/chapter-12-end.html")
+        assertTrue(Listing.pageIsPreview(doc, dev.vtlinh.noveldownloader.sites.Novelfull, "Chapter 12 End"))
+    }
+
+    @Test
+    fun `ordinary chapter prose mentioning preview is not a teaser page`() {
+        val html = """
+            <a class="chapter-title">Chapter 12 The Preview</a>
+            <div id="chapter-content">
+              <p>This is a preview of the coming war, he thought, watching the hills.</p>
+              <p>${"word ".repeat(80)}</p>
+            </div>
+        """.trimIndent()
+        val doc = org.jsoup.Jsoup.parse(html, "https://novelfull.com/book/chapter-12-the-preview.html")
+        assertFalse(Listing.pageIsPreview(doc, dev.vtlinh.noveldownloader.sites.Novelfull, "Chapter 12 The Preview"))
+    }
 }

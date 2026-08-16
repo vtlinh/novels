@@ -38,8 +38,88 @@ object Listing {
        (or held nothing) and these links came from reading the whole document
        instead, where the only chapter links are the "latest chapters" widget:
        a handful, in the wrong order. That is not a short listing, it is a
-       different document, and nothing destructive may run against it. */
-    class Found(val links: List<Pair<String, String>>, val fellBack: Boolean)
+       different document, and nothing destructive may run against it.
+
+       `preview` is a teaser the site is showing in place of the real chapter.
+       The listing still carries it — positions and totals stay honest — but
+       the download must not save it: a file on disk with the right URL is
+       treated as settled forever, so the full text would never be fetched
+       when it landed. */
+    data class Link(val url: String, val text: String, val preview: Boolean = false)
+    class Found(val links: List<Link>, val fellBack: Boolean)
+
+    /* Bracketed labels and a handful of furniture phrases — not the bare
+       word "preview", which is a real chapter title ("The Preview", "A
+       Preview of War"). Vietnamese "xem trước" is accepted as a whole badge
+       or inside brackets, not as a substring of "xem trước mắt". */
+    private val PREVIEW_BRACKETS = Regex(
+        """[(\[{【]\s*(?:preview|xem\s*trước)\s*[)\]}】]""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val PREVIEW_NOTICE = Regex(
+        """this\s+chapter\s+is\s+a\s+preview|this\s+is\s+a\s+preview\s+chapter|preview\s+only|full\s+chapter\s+will\s+be|unlock\s+(?:the\s+)?full\s+chapter""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    fun markedPreview(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+        val n = t.lowercase()
+        if (n == "preview" || n == "xem trước") return true
+        if (PREVIEW_BRACKETS.containsMatchIn(n)) return true
+        return t.length < 200 && PREVIEW_NOTICE.containsMatchIn(n)
+    }
+
+    /* CSS class tokens, not `max-image-preview` (a robots meta). */
+    private fun classIsPreview(names: Iterable<String>): Boolean =
+        names.any { raw ->
+            val k = raw.lowercase()
+            if ("max-image" in k) false
+            else k == "preview" || k.startsWith("preview-") ||
+                k.endsWith("-preview") || "-preview-" in k
+        }
+
+    /* The <a> itself, a badge beside it, or a class on the list item.
+       The parent element's full text is not consulted: that parent is often
+       the whole <ul>, and one sibling's "Preview" badge would then mark
+       every chapter in the list. */
+    fun linkIsPreview(a: org.jsoup.nodes.Element): Boolean {
+        if (markedPreview(a.ownText()) || markedPreview(a.text())) return true
+        if (classIsPreview(a.classNames())) return true
+        if (a.children().any { markedPreview(it.ownText()) || markedPreview(it.text()) || classIsPreview(it.classNames()) }) {
+            return true
+        }
+        if (a.siblingElements().any {
+            markedPreview(it.ownText()) || markedPreview(it.text()) || classIsPreview(it.classNames())
+        }) return true
+        val item = a.closest("li") ?: a.parent() ?: return false
+        if (item === a) return false
+        return classIsPreview(item.classNames())
+    }
+
+    /* Inclusive index of the last chapter this run may fetch. The first
+       listing-preview is included as a probe so the next run can pick it up
+       when the full text is there; everything after is held. Empty → -1. */
+    fun fetchThrough(preview: List<Boolean>): Int {
+        val i = preview.indexOfFirst { it }
+        return if (i < 0) preview.lastIndex else i
+    }
+
+    /* A fetched chapter page that is still a teaser. Heading and short
+       notice lines only — the prose is not scanned for the word "preview",
+       which is ordinary English. */
+    fun pageIsPreview(d: org.jsoup.nodes.Document, site: Site, linkText: String): Boolean {
+        if (markedPreview(linkText)) return true
+        val headEl = site.chapterHeading(d)
+        val heading = headEl?.text()?.trim().orEmpty()
+        if (markedPreview(heading)) return true
+        if (headEl != null && linkIsPreview(headEl)) return true
+        val content = site.chapterContent(d) ?: return false
+        if (classIsPreview(content.classNames())) return true
+        val lines = content.wholeText().split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+        val window = (lines.take(8) + lines.takeLast(8)).distinct()
+        return window.any { markedPreview(it) }
+    }
 
     /* The path of a link, for a url the JDK's parser will not accept.
 
@@ -68,8 +148,8 @@ object Listing {
     }
 
     fun collect(d: org.jsoup.nodes.Document, site: Site, slug: String): Found {
-        fun scan(root: org.jsoup.nodes.Element, inList: Boolean): List<Pair<String, String>> {
-            val out = ArrayList<Pair<String, String>>()
+        fun scan(root: org.jsoup.nodes.Element, inList: Boolean): List<Link> {
+            val out = ArrayList<Link>()
             for (a in root.select("a[href]")) {
                 val href = a.absUrl("href").substringBefore('#')
                 if (href.isEmpty()) continue
@@ -81,7 +161,7 @@ object Listing {
                     if (inList) site.isChapterInList(path, slug)
                     else site.isChapterPath(path, slug)
                 if (!isChapter) continue
-                out.add(href to a.text().trim())
+                out.add(Link(href, a.text().trim(), linkIsPreview(a)))
             }
             return out
         }

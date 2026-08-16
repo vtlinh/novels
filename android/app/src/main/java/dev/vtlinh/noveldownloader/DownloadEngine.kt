@@ -191,9 +191,10 @@ class DownloadEngine(
         return " · %.1f/s".format(rateStamps.size / windowSecs)
     }
 
-    class Chapter(val url: String, val text: String) {
+    class Chapter(val url: String, val text: String, val preview: Boolean = false) {
         var num: Int? = null
         var filename: String? = null
+        var pos: Int = 0
     }
 
     /* The site's own number for a chapter, used for the heading written
@@ -1016,8 +1017,10 @@ class DownloadEngine(
         fun addLinks(d: org.jsoup.nodes.Document): Int {
             val found = Listing.collect(d, site, slug)
             if (found.fellBack) fellBack = true
-            for ((href, text) in found.links) {
-                if (!seen.containsKey(href)) seen[href] = Chapter(href, text)
+            for (link in found.links) {
+                if (!seen.containsKey(link.url)) {
+                    seen[link.url] = Chapter(link.url, link.text, link.preview)
+                }
             }
             return found.links.size
         }
@@ -1172,7 +1175,10 @@ class DownloadEngine(
         for (ch in siteOrdered) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
         /* Names follow the page, exactly as a download would set them. */
-        for ((i, ch) in siteOrdered.withIndex()) ch.filename = "Chapter ${i + 1}.txt"
+        for ((i, ch) in siteOrdered.withIndex()) {
+            ch.pos = i
+            ch.filename = "Chapter ${i + 1}.txt"
+        }
         /* ...and the files are brought into line here too, so a library is
            tidied by a status check without having to re-download every
            novel to get it. Both passes leave early when there's nothing to
@@ -1273,7 +1279,7 @@ class DownloadEngine(
         /* No chapter-list container: these are the "latest chapters" widget's
            links, in the wrong order. Not a listing to splice anything onto. */
         if (head.fellBack) return@withContext null
-        val headUrls = head.links.map { it.first }
+        val headUrls = head.links.map { it.url }
         /* The splice only ever checks the JOIN. A chapter inserted at the
            FRONT moves every position by one and the join would still agree
            with itself, so the front is checked too — the novel page is
@@ -1305,7 +1311,7 @@ class DownloadEngine(
             val found = Listing.collect(d, site, slug)
             if (found.fellBack) return false
             val before = tail.size
-            for ((href, text) in found.links) if (!tail.containsKey(href)) tail[href] = text
+            for (link in found.links) if (!tail.containsKey(link.url)) tail[link.url] = link.text
             if (found.links.isEmpty()) {
                 missed.add(p)
             } else {
@@ -1427,8 +1433,10 @@ class DownloadEngine(
         fun addLinks(d: org.jsoup.nodes.Document): Int {
             val found = Listing.collect(d, site, slug)
             if (found.fellBack) fellBack = true
-            for ((href, text) in found.links) {
-                if (!seen.containsKey(href)) seen[href] = Chapter(href, text)
+            for (link in found.links) {
+                if (!seen.containsKey(link.url)) {
+                    seen[link.url] = Chapter(link.url, link.text, link.preview)
+                }
             }
             return found.links.size
         }
@@ -1708,7 +1716,10 @@ class DownloadEngine(
         /* the site's own number, still wanted for the heading inside the file */
         for (ch in chapters) ch.num = site.chapterNumFromUrl(ch.url) ?: Extractor.parseHeading(ch.text).first
         numberByPosition(siteOrdered)
-        for ((i, ch) in siteOrdered.withIndex()) ch.filename = "Chapter ${i + 1}.txt"
+        for ((i, ch) in siteOrdered.withIndex()) {
+            ch.pos = i
+            ch.filename = "Chapter ${i + 1}.txt"
+        }
         if (chapters.isEmpty()) {
             log("No chapters found — site layout may have changed")
             status("Error: no chapters found")
@@ -2005,9 +2016,22 @@ class DownloadEngine(
             return false
         }
 
+        /* A listing-preview is the first chapter the site is still teasing.
+           Fetch everything before it, and that chapter as a probe: if the
+           page is now the full text, save it; if not, leave it unsaved so
+           the next run retries. Chapters after it wait — concurrent fetches
+           would otherwise save later teasers (or later full chapters that
+           then sit past a hole). */
+        val through = Listing.fetchThrough(chapters.map { it.preview })
+        val pageCut = AtomicInteger(Int.MAX_VALUE)
+        val previewHits = java.util.Collections.synchronizedSet(HashSet<Int>())
+        val thisRunSaved = java.util.concurrent.ConcurrentHashMap<Int, String>()
         val toFetch =
-            if (refetchAll) chapters.filter { it.filename != null }
-            else chapters.filter { it.filename != null && !settled(it) }
+            if (refetchAll) chapters.filter { it.filename != null && it.pos <= through }
+            else chapters.filter { ch ->
+                ch.filename != null && ch.pos <= through && (ch.preview || !settled(ch))
+            }
+        val heldBack = (chapters.size - through - 1).coerceAtLeast(0)
         /* Titles that repeat in this listing. The heading compare that
            decides whether a translation survives an overwrite tolerates a
            legacy zero number — but only on a title that appears ONCE: for a
@@ -2025,16 +2049,18 @@ class DownloadEngine(
             Extractor.parseHeading(Extractor.cleanEncoding(it.text)).second.ifEmpty { null }
         }.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         if (stale.isNotEmpty()) log("${stale.size} chapter file(s) hold the wrong page — re-fetching those")
-        val skipped = chapters.size - toFetch.size
+        val skipped = chapters.size - toFetch.size - heldBack
         if (skipped > 0) log("skip $skipped already-downloaded chapter(s)")
+        if (heldBack > 0) log("holding $heldBack chapter(s) past a listing preview")
 
         /* One listing of the folder, shared. `findFile` is a full
            listFiles()+getName() sweep per call, so the replace path — which
            looks a name up to clear it, and again to read what is there —
            turned a re-fetch of an N-chapter novel into O(N^2) binder queries.
            Only built when something is actually going to be replaced. */
+        val probeReplace = toFetch.any { it.preview && it.filename in existing }
         val diskIndex: Map<String, DocumentFile>? =
-            if (refetchAll || stale.isNotEmpty()) {
+            if (refetchAll || stale.isNotEmpty() || probeReplace) {
                 try { dir.listFiles().mapNotNull { f -> f.name?.let { it to f } }.toMap() }
                 catch (e: Exception) { null }
             } else null
@@ -2072,16 +2098,33 @@ class DownloadEngine(
                         if (stopRequested) return@launch
                         inFlight.incrementAndGet()
                         try {
+                            if (ch.pos > pageCut.get()) {
+                                /* held: an earlier chapter this run is a teaser */
+                            } else {
                             val res = fetch(ch.url)
                             if (res.html == null) {
                                 outcome = res.status
                                 failed.add(ch)
                                 log("FAILED ${ch.url} — HTTP ${res.status}")
+                            } else if (ch.pos > pageCut.get()) {
+                                /* held: an earlier chapter this run is a teaser */
                             } else {
+                                val parsed = Jsoup.parse(res.html, ch.url)
+                                if (Listing.pageIsPreview(parsed, site, ch.text)) {
+                                    previewHits.add(ch.pos)
+                                    pageCut.updateAndGet { minOf(it, ch.pos) }
+                                    log(
+                                        "Preview: ${ch.filename ?: ch.url} — not saving; " +
+                                            "next run will retry when the full chapter is up",
+                                    )
+                                } else if (ch.pos > pageCut.get()) {
+                                    /* lost the race to an earlier preview */
+                                } else {
                                 val body = Extractor.parseChapter(
-                                    Jsoup.parse(res.html, ch.url), ch.text, ch.num ?: 0, site,
+                                    parsed, ch.text, ch.num ?: 0, site,
                                 )
-                                val replacing = refetchAll || ch.filename in stale
+                                val replacing = refetchAll || ch.filename in stale ||
+                                    (ch.preview && ch.filename in existing)
                                 /* Is what is already under this name the same
                                    chapter? Read it BEFORE the write, because
                                    that is the only thing that can answer
@@ -2124,8 +2167,11 @@ class DownloadEngine(
                                    what keeps this file's name stable if the site
                                    later relabels or renumbers the chapter */
                                 store.add(folderKey, slug, ch.filename!!, uri, ch.url)
+                                thisRunSaved[ch.pos] = ch.filename!!
                                 saved.incrementAndGet()
                                 noteSaved()
+                                }
+                            }
                             }
                         } catch (e: Exception) {
                             outcome = -1   // parse/write error, not a throttle signal
@@ -2147,8 +2193,45 @@ class DownloadEngine(
             }.forEach { it.join() }
         }
 
+        fun discardNamed(name: String) {
+            try {
+                look(name)?.let { f -> try { f.delete() } catch (e: Exception) {} }
+                look("$name.gz")?.let { f -> try { f.delete() } catch (e: Exception) {} }
+            } catch (e: Exception) {}
+            dropTranslation(dir, name)
+            try { store.removeChapter(folderKey, slug, name) } catch (e: Exception) {}
+            existing.remove(name)
+        }
+
+        var cutLogged = heldBack > 0
+        fun applyPreviewCut() {
+            val cut = minOf(through, pageCut.get())
+            if (cut < chapters.lastIndex) {
+                val past = chapters.size - cut - 1
+                if (past > 0 && !cutLogged) {
+                    cutLogged = true
+                    log("Holding $past chapter(s) past a preview — re-run when the full text is up")
+                }
+            }
+            for (ch in chapters) {
+                val name = ch.filename ?: continue
+                if (ch.pos in previewHits) {
+                    /* a previously saved teaser must not be served as the chapter */
+                    if (name in existing) discardNamed(name)
+                    thisRunSaved.remove(ch.pos)
+                } else if (ch.pos > cut) {
+                    if (thisRunSaved.remove(ch.pos) != null) {
+                        discardNamed(name)
+                        saved.decrementAndGet()
+                    }
+                }
+            }
+            failed.removeAll { it.pos > cut }
+        }
+
         setConc(CONC_START)
         fetchAll(toFetch, true)
+        applyPreviewCut()
 
         /* end-of-run retry passes over pooled failures, 7s apart */
         var pass = 0
@@ -2164,6 +2247,7 @@ class DownloadEngine(
             if (stopRequested) { failed.addAll(toRetry); break }
             status("Retry pass $pass/4: ${toRetry.size} chapter(s)…")
             fetchAll(toRetry, false)
+            applyPreviewCut()
             log("Retry pass $pass/4: ${toRetry.size - failed.size} recovered, ${failed.size} still failing")
         }
 
@@ -2175,8 +2259,11 @@ class DownloadEngine(
         /* record the site's chapter count + finished flag right here at
            download time (not only when the user taps Check status). Complete =
            the site says finished AND every listed chapter is on disk after
-           this run (nothing failed, nothing stopped). */
-        val allOnDisk = !stopRequested && failed.isEmpty()
+           this run (nothing failed, nothing stopped). A preview held back is
+           not on disk — the novel is not complete. */
+        val cut = minOf(through, pageCut.get())
+        val held = cut < chapters.lastIndex || previewHits.isNotEmpty()
+        val allOnDisk = !stopRequested && failed.isEmpty() && !held
         /* The re-fetch has just written every listed chapter under its own
            name, so run the dedupe AGAIN over what remains unclaimed. Before
            the fetch those files matched nothing because nothing sat at the
@@ -2211,14 +2298,21 @@ class DownloadEngine(
             if (listingComplete) store.setDiskCount(
                 folderKey, slug,
                 if (refetchAll) {
-                    saved.get()
+                    /* Chapters past a preview were not rewritten, so they are
+                       still the files that were already on disk. */
+                    saved.get() + chapters.count {
+                        it.filename != null && it.pos > cut &&
+                            it.filename in existing && it.filename !in stale
+                    }
                 } else {
                     /* A stale name is in `existing` (it was on disk) AND was
                        re-fetched into `saved` — counting both made the Library
                        read 103/100 and kept the novel in every future sweep,
-                       since its skip test wants local == total. */
+                       since its skip test wants local == total. A listing
+                       preview we probed and then saved is the same shape. */
                     chapters.count {
-                        it.filename != null && it.filename in existing && it.filename !in stale
+                        it.filename != null && it.filename in existing && it.filename !in stale &&
+                            it.pos !in thisRunSaved
                     } + saved.get()
                 },
             )
@@ -2229,7 +2323,9 @@ class DownloadEngine(
         } else if (translate && apiKey.isNotBlank() && !stopRequested) {
             try {
                 val t = translator ?: Translator(context, apiKey, log, status).also { translator = it }
-                t.translate(dir, store, folderKey, slug, chapters.mapNotNull { it.filename }) { stopRequested }
+                t.translate(dir, store, folderKey, slug, chapters.mapNotNull { ch ->
+                    ch.filename?.takeIf { it in existing || it in thisRunSaved.values }
+                }) { stopRequested }
             } catch (e: Exception) {
                 log("TRANSLATION FAILED — ${e.message}")
             }
