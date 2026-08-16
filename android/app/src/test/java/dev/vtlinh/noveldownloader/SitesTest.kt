@@ -73,6 +73,53 @@ class SitesTest {
     fun `a chapter number is read from the url`() {
         assertEquals(100, truyenfull.chapterNumFromUrl("https://truyenfull.today/tu-tien/chuong-100/"))
     }
+
+    /* The info screen shows the host the novel was fetched from. Using the
+       adapter name would collapse novelfull.com and novelfull.net, which
+       keep a novel on whichever host it was found. */
+    @Test
+    fun `the website is the host the url was fetched from`() {
+        assertEquals(
+            "novelfull.com",
+            Sites.website("https://novelfull.com/the-mech-touch.html"),
+        )
+        assertEquals(
+            "novelfull.net",
+            Sites.website("https://novelfull.net/the-mech-touch.html"),
+        )
+        assertEquals(
+            "truyenfull.today",
+            Sites.website("https://truyenfull.today/tu-tien/"),
+        )
+        assertEquals(
+            "truyenfull.live",
+            Sites.website("https://truyenfull.live/tu-tien/"),
+        )
+        assertEquals(
+            "truyenfullmoi.com",
+            Sites.website("https://www.truyenfullmoi.com/so-13-pho-mink.1666/"),
+        )
+        assertEquals(
+            "read-novel.com",
+            Sites.website("https://read-novel.com/novel766-the-mech-touch.html"),
+        )
+        assertEquals(
+            "freewebnovel.com",
+            Sites.website("https://freewebnovel.com/novel/the-kings-avatar"),
+        )
+        /* URI keeps the host's own case; skip lowercasing and www. stays. */
+        assertEquals(
+            "novelfull.com",
+            Sites.website("https://WWW.NovelFull.COM/the-mech-touch.html"),
+        )
+    }
+
+    @Test
+    fun `a folder-scan novel with no url has no website`() {
+        assertEquals(null, Sites.website(""))
+        assertEquals(null, Sites.website("   "))
+        assertEquals(null, Sites.website("not a url"))
+    }
     /* ---- the busy-key (Sites.slugKey) ---- */
 
     /* The two halves of every "is this novel busy?" test: the service
