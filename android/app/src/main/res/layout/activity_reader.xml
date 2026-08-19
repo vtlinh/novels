@@ -188,7 +188,7 @@
             </LinearLayout>
 
             <!-- shown in place of the play button while the TTS engine is
-                 still binding (tap = retry a given-up bind) -->
+                 still binding or has no voices yet (tap = retry) -->
             <ProgressBar
                 android:id="@+id/ttsSpinner"
                 android:layout_width="32dp"

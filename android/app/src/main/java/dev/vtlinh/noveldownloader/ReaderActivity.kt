@@ -605,9 +605,19 @@ class ReaderActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.ttsPrevBtn).setOnClickListener { skipParagraph(forward = false) }
         findViewById<TextView>(R.id.ttsNextBtn).setOnClickListener { skipParagraph(forward = true) }
         findViewById<android.view.View>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
-        /* the not-ready spinner doubles as a retry button once a bind gave up */
+        /* the not-ready spinner doubles as a retry button once a bind gave up
+           or voices never arrived */
         findViewById<android.widget.ProgressBar>(R.id.ttsSpinner).setOnClickListener {
-            if (!ttsReady && !ttsConnecting) initTts()
+            if (!ttsConnecting && !TtsPlay.canSpeak(ttsReady, hasOfferableVoices())) {
+                voiceRestoreTicks = 0
+                if (ttsReady) {
+                    try { tts?.shutdown() } catch (e: Exception) {}
+                    tts = null
+                    ttsReady = false
+                }
+                initTts()
+                updatePlayBtn()
+            }
         }
         updatePlayBtn()   // engine still binding at this point → show the spinner
 
@@ -846,19 +856,13 @@ class ReaderActivity : AppCompatActivity() {
                    like any other player (and silences it during a call) */
                 try { tts?.setAudioAttributes(ttsAudioAttributes()) } catch (e: Exception) {}
                 curTtsLang = ""   // re-apply the language profile on next speak
-                /* the retry just succeeded — restore the saved voice as soon
-                   as its data finishes loading */
+                /* Connected is not ready: voices load after OnInit. Keep the
+                   spinner up and honour a pending play only once a voice the
+                   reader would offer is actually there. */
                 voiceRestoreTicks = 0
-                ensureSavedVoice()
                 runOnUiThread {
-                    updatePlayBtn()   // spinner → play triangle
-                    /* a play pressed while the engine was away — carry it out
-                       now rather than make the user press again */
-                    val asked = pendingPlayUntil
-                    pendingPlayUntil = 0L
-                    if (!speaking && asked > android.os.SystemClock.elapsedRealtime()) {
-                        playButtonAction()
-                    }
+                    updatePlayBtn()
+                    ensureSavedVoice()
                 }
             } else {
                 ttsReady = false
@@ -867,6 +871,7 @@ class ReaderActivity : AppCompatActivity() {
                    inside the constructor, before `tts = t` below runs */
                 android.os.Handler(mainLooper).post {
                     tts?.shutdown()
+                    updatePlayBtn()
                     if (attempt < 4) {
                         android.os.Handler(mainLooper).postDelayed(
                             { initTts(attempt + 1) },
@@ -1021,15 +1026,34 @@ class ReaderActivity : AppCompatActivity() {
 
     private var voiceRestoreTicks = 0
 
-    /* After the engine (re)connects, the user's saved voice may not be present
-       in t.voices yet — voice data loads lazily, so a just-connected engine
-       briefly reports only the default. applyTtsConfig would silently fall back
-       to the locale default and never recover. This polls briefly and applies
-       the saved voice the moment it appears, so returning to the reader (or a
-       successful engine retry) restores the exact voice the user picked. */
+    private fun hasOfferableVoices(): Boolean = offerableVoices().isNotEmpty()
+
+    /* After the engine (re)connects, voices and the user's saved pick may
+       both still be missing — voice data loads lazily, so a just-connected
+       engine briefly reports nothing at all (the picker says "Default" /
+       "No voices yet…"). applyTtsConfig would silently fall back to the
+       locale default and never recover; starting to speak would highlight a
+       sentence that is never read.
+
+       Poll until a voice appears, honour a play that arrived while we were
+       waiting, and apply the saved pick the moment it is among them. */
     private fun ensureSavedVoice() {
-        val t = tts ?: return
-        if (!ttsReady) return
+        if (tts == null || !ttsReady) return
+        if (!hasOfferableVoices()) {
+            /* Keep polling while a play is waiting, otherwise give up at the
+               same ~12s budget the saved-voice wait uses. The spinner stays
+               either way — canSpeak is still false. */
+            val waitingPlay = pendingPlayUntil > android.os.SystemClock.elapsedRealtime()
+            if (waitingPlay || voiceRestoreTicks < 15) {
+                if (!waitingPlay) voiceRestoreTicks++
+                android.os.Handler(mainLooper).postDelayed({ ensureSavedVoice() }, 800)
+            }
+            updatePlayBtn()
+            return
+        }
+        voiceRestoreTicks = 0
+        updatePlayBtn()
+        honorPendingPlay()
         /* The engine connects while the chapter is still loading, and this
            runs the moment it does. Deciding the language from an empty buffer
            got "English" and applyTtsConfig then LATCHED it — the voice sheet
@@ -1054,6 +1078,14 @@ class ReaderActivity : AppCompatActivity() {
         if (voiceRestoreTicks >= 15) return   // ~12s, then give up quietly
         voiceRestoreTicks++
         android.os.Handler(mainLooper).postDelayed({ ensureSavedVoice() }, 800)
+    }
+
+    /* A play arrived while voices were still loading. startTtsFrom re-checks
+       canSpeak, so this is a no-op until they have. */
+    private fun honorPendingPlay() {
+        if (speaking) return
+        if (pendingPlayUntil <= android.os.SystemClock.elapsedRealtime()) return
+        playButtonAction()
     }
 
     private fun paraStartOf(off: Int): Int {
@@ -1300,16 +1332,21 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun startTtsFrom(off: Int) {
-        if (!ttsReady) {
+        if (!TtsPlay.canSpeak(ttsReady, hasOfferableVoices())) {
             /* The engine drops its binding while the reader sits paused with
                the screen off, which is precisely when the next thing to
                happen is a play press from a headset. Rebinding and returning
                threw that press away: on screen there is at least a spinner to
                explain it, but from an earbud the button simply did nothing
-               and the user pressed it again. Remember the ask and honour it
-               when the engine comes back. */
+               and the user pressed it again. The same wait covers a bind that
+               succeeded with an empty voice list — connected is not ready.
+               Remember the ask and honour it when a voice is actually there. */
             pendingPlayUntil = android.os.SystemClock.elapsedRealtime() + PLAY_WAIT_MS
-            initTts()
+            if (!ttsReady && !ttsConnecting) initTts()
+            else {
+                voiceRestoreTicks = 0
+                ensureSavedVoice()
+            }
             updatePlayBtn()
             return
         }
@@ -1767,13 +1804,16 @@ class ReaderActivity : AppCompatActivity() {
        font on many devices even with the text-presentation selector, so it
        would render in a different style and color than the play triangle */
     private fun updatePlayBtn() {
-        /* engine still binding \u2192 the play button is an indeterminate spinner;
-           the triangle/bars come back the moment TTS is ready */
+        /* engine still binding, or bound with no voices yet \u2192 spinner;
+           triangle/bars only once TTS can actually speak (or is already) */
+        val face = TtsPlay.face(speaking, ttsReady, hasOfferableVoices())
         findViewById<android.widget.ProgressBar>(R.id.ttsSpinner)?.visibility =
-            if (ttsReady) android.view.View.GONE else android.view.View.VISIBLE
+            if (face == TtsPlay.Face.SPINNER) android.view.View.VISIBLE else android.view.View.GONE
         findViewById<TextView>(R.id.ttsPlayBtn)?.apply {
-            visibility = if (ttsReady) android.view.View.VISIBLE else android.view.View.INVISIBLE
-            text = if (speaking) "\u275a\u275a" else "\u25b6\ufe0e"
+            visibility =
+                if (face == TtsPlay.Face.SPINNER) android.view.View.INVISIBLE
+                else android.view.View.VISIBLE
+            text = if (face == TtsPlay.Face.PAUSE) "\u275a\u275a" else "\u25b6\ufe0e"
         }
         updateMediaSessionState()
     }
@@ -2348,6 +2388,7 @@ class ReaderActivity : AppCompatActivity() {
                         try { tts?.shutdown() } catch (e: Exception) {}
                         tts = null
                         ttsReady = false
+                        updatePlayBtn()
                         try {
                             startActivity(
                                 android.content.Intent(
@@ -2390,6 +2431,8 @@ class ReaderActivity : AppCompatActivity() {
                     fillSpinner()
                     applyTtsConfig(lang)   // voices arrived → apply the saved voice now
                     diag.text = ""
+                    updatePlayBtn()
+                    honorPendingPlay()
                     return
                 }
                 tick++
