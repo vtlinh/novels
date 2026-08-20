@@ -32,12 +32,15 @@ class DocumentEditActivity : AppCompatActivity() {
     private var replacing: String? = null
     private var currentTitle: String = ""
     private var saving = false
+    private var bodyReady = false
+    private lateinit var saveBtn: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_document_edit)
         titleView = findViewById(R.id.docTitle)
         body = findViewById(R.id.docBody)
+        saveBtn = findViewById(R.id.saveBtn)
 
         replacing = intent.getStringExtra(Documents.EXTRA_FILE)
         isNew = replacing == null
@@ -52,15 +55,31 @@ class DocumentEditActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.closeBtn).setOnClickListener { finish() }
         titleView.setOnClickListener { showTitleDialog { applyTitle(it) } }
-        findViewById<Button>(R.id.saveBtn).setOnClickListener { onSaveClicked() }
+        saveBtn.setOnClickListener { onSaveClicked() }
 
-        if (savedInstanceState == null && replacing != null) loadExisting()
+        /* Rotation (or process death) must not skip the read: the editor
+           starts empty, and Save of that empty string would replace the
+           file. Restore the body only when the previous instance had
+           actually loaded it. */
+        val restoredReady = savedInstanceState?.getBoolean(STATE_BODY_READY) == true
+        if (isNew) {
+            bodyReady = true
+            savedInstanceState?.getString(STATE_BODY)?.let { body.setText(it) }
+        } else if (restoredReady) {
+            body.setText(savedInstanceState?.getString(STATE_BODY) ?: "")
+            bodyReady = true
+        } else {
+            saveBtn.isEnabled = false
+            loadExisting()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(STATE_TITLE, currentTitle)
         outState.putString(STATE_DEFAULT, defaultTitle)
+        outState.putString(STATE_BODY, body.text?.toString() ?: "")
+        outState.putBoolean(STATE_BODY_READY, bodyReady)
     }
 
     private fun applyTitle(title: String) {
@@ -75,16 +94,21 @@ class DocumentEditActivity : AppCompatActivity() {
             val text = withContext(Dispatchers.IO) {
                 try { DocumentFiles.read(this@DocumentEditActivity, Uri.parse(tree), file) } catch (e: Exception) { null }
             }
+            if (isFinishing) return@launch
             if (text == null) {
                 Toast.makeText(this@DocumentEditActivity, "Could not read that document", Toast.LENGTH_LONG).show()
                 return@launch
             }
-            if (body.text.isNullOrEmpty()) body.setText(text)
+            /* Always fill from the file on first arrival. Keystrokes into the
+               empty editor while it was loading are not the document. */
+            if (!bodyReady) body.setText(text)
+            bodyReady = true
+            saveBtn.isEnabled = true
         }
     }
 
     private fun onSaveClicked() {
-        if (saving) return
+        if (saving || !Documents.maySave(isNew, bodyReady)) return
         /* A new document still wearing the date stamp has not been named yet
            — ask before writing, so the folder is not full of Document 2026-08-20. */
         if (isNew && currentTitle == defaultTitle) {
@@ -95,14 +119,14 @@ class DocumentEditActivity : AppCompatActivity() {
     }
 
     private fun save() {
-        if (saving) return
+        if (saving || !Documents.maySave(isNew, bodyReady)) return
         val tree = prefs.getString("tree", null)
         if (tree == null) {
             Toast.makeText(this, "Pick a download folder first — it's in Settings", Toast.LENGTH_LONG).show()
             return
         }
         saving = true
-        findViewById<Button>(R.id.saveBtn).isEnabled = false
+        saveBtn.isEnabled = false
         val title = Documents.displayTitle(currentTitle)
         applyTitle(title)
         val text = body.text?.toString() ?: ""
@@ -115,7 +139,7 @@ class DocumentEditActivity : AppCompatActivity() {
             }
             if (written == null) {
                 saving = false
-                findViewById<Button>(R.id.saveBtn).isEnabled = true
+                saveBtn.isEnabled = true
                 Toast.makeText(this@DocumentEditActivity, "Could not save that document", Toast.LENGTH_LONG).show()
                 return@launch
             }
@@ -163,5 +187,7 @@ class DocumentEditActivity : AppCompatActivity() {
     companion object {
         private const val STATE_TITLE = "title"
         private const val STATE_DEFAULT = "defaultTitle"
+        private const val STATE_BODY = "body"
+        private const val STATE_BODY_READY = "bodyReady"
     }
 }
