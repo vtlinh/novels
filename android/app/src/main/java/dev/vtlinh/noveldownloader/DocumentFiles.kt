@@ -94,11 +94,11 @@ object DocumentFiles {
         val compress = compressOn(ctx)
         val same = name == replacing || currentStem == stem
         return try {
-            writeFile(cr, treeUri, dir, name, text, compress, replace = same)
-            if (replacing != null && replacing != name) {
+            val written = writeFile(cr, treeUri, dir, name, text, compress, replace = same)
+            if (replacing != null && replacing != written) {
                 deleteNamed(cr, treeUri, dir.docId, replacing)
             }
-            name
+            written
         } catch (e: Exception) {
             null
         }
@@ -162,7 +162,12 @@ object DocumentFiles {
 
     /* Same write-under-a-part-name-then-rename protection as a chapter.
        A kill mid-write must not leave a truncated file that the next open
-       treats as the whole document. */
+       treats as the whole document.
+
+       Same-name replace writes a sidecar first. Deleting the original
+       before the new bytes were down meant a failed create/open/rename
+       (or a kill between the delete and the write) erased the only copy
+       and then told the user the save had failed. */
     private fun writeFile(
         cr: ContentResolver,
         treeUri: Uri,
@@ -171,7 +176,7 @@ object DocumentFiles {
         text: String,
         compress: Boolean,
         replace: Boolean,
-    ) {
+    ): String {
         val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, dir.docId)
         fun find(n: String): Saf.Entry? = try {
             Saf.children(cr, treeUri, dir.docId, includeSize = false)
@@ -184,44 +189,85 @@ object DocumentFiles {
             if (ok) return
             if (find(n) != null) throw RuntimeException("could not replace $n")
         }
-        if (replace) {
+        fun writeFresh(dest: String) {
+            if (compress) {
+                Zips.writeGzDoc(cr, parentUri, "$dest.gz", text)?.let { return }
+                val squatterEmpty = listOf(dest, "$dest.gz").any { n ->
+                    val f = find(n) ?: return@any false
+                    val bytes = try {
+                        Saf.readBytes(cr, treeUri, f.docId)
+                    } catch (e: Exception) { null }
+                    bytes != null && bytes.isEmpty()
+                }
+                if (squatterEmpty) {
+                    try { clear(dest); clear("$dest.gz") } catch (e: Exception) {}
+                    Zips.writeGzDoc(cr, parentUri, "$dest.gz", text)?.let { return }
+                }
+            }
+            val tmp = Zips.partName(dest)
+            val u = try {
+                DocumentsContract.createDocument(cr, parentUri, "text/plain", tmp)
+            } catch (e: Exception) { null }
+                ?: throw RuntimeException("could not create $dest")
+            try {
+                cr.openOutputStream(u).use { os ->
+                    if (os == null) throw java.io.IOException("could not open $dest")
+                    os.write(text.toByteArray(Charsets.UTF_8))
+                }
+                val done = DocumentsContract.renameDocument(cr, u, dest)
+                    ?: throw RuntimeException("could not name $dest")
+                val got = Zips.docName(cr, done)
+                if (got != null && Zips.isMinted(dest, got)) {
+                    try { DocumentsContract.deleteDocument(cr, done) } catch (e2: Exception) {}
+                    throw RuntimeException("$dest is taken")
+                }
+            } catch (e: Exception) {
+                try { DocumentsContract.deleteDocument(cr, u) } catch (e2: Exception) {}
+                throw e
+            }
+        }
+        fun promote(fromPlain: String, toPlain: String) {
+            val src = find("$fromPlain.gz") ?: find(fromPlain)
+                ?: throw RuntimeException("could not find saved $fromPlain")
+            val destName = if (src.name.endsWith(".gz")) "$toPlain.gz" else toPlain
+            val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, src.docId)
+            val done = DocumentsContract.renameDocument(cr, uri, destName)
+                ?: throw RuntimeException("could not name $toPlain")
+            val got = Zips.docName(cr, done)
+            /* Leave the bytes where they landed. Deleting a minted rename
+               after the original was already cleared would drop the only
+               copy of the edit. */
+            if (got != null && Zips.isMinted(destName, got)) {
+                val back = if (src.name.endsWith(".gz")) "$fromPlain.gz" else fromPlain
+                try { DocumentsContract.renameDocument(cr, done, back) } catch (e: Exception) {}
+                throw RuntimeException("$toPlain is taken")
+            }
+        }
+        if (!replace) {
+            writeFresh(name)
+            return name
+        }
+        val taken = try {
+            Saf.children(cr, treeUri, dir.docId, includeSize = false).map { it.name }.toSet()
+        } catch (e: Exception) {
+            emptySet()
+        }
+        val sidecar = Documents.savingPlainName(name, taken)
+        writeFresh(sidecar)
+        var originalGone = false
+        try {
             clear(name)
             clear("$name.gz")
-        }
-        if (compress) {
-            Zips.writeGzDoc(cr, parentUri, "$name.gz", text)?.let { return }
-            val squatterEmpty = listOf(name, "$name.gz").any { n ->
-                val f = find(n) ?: return@any false
-                val bytes = try {
-                    Saf.readBytes(cr, treeUri, f.docId)
-                } catch (e: Exception) { null }
-                bytes != null && bytes.isEmpty()
-            }
-            if (squatterEmpty) {
-                try { clear(name); clear("$name.gz") } catch (e: Exception) {}
-                Zips.writeGzDoc(cr, parentUri, "$name.gz", text)?.let { return }
-            }
-        }
-        val tmp = Zips.partName(name)
-        val u = try {
-            DocumentsContract.createDocument(cr, parentUri, "text/plain", tmp)
-        } catch (e: Exception) { null }
-            ?: throw RuntimeException("could not create $name")
-        try {
-            cr.openOutputStream(u).use { os ->
-                if (os == null) throw java.io.IOException("could not open $name")
-                os.write(text.toByteArray(Charsets.UTF_8))
-            }
-            val done = DocumentsContract.renameDocument(cr, u, name)
-                ?: throw RuntimeException("could not name $name")
-            val got = Zips.docName(cr, done)
-            if (got != null && Zips.isMinted(name, got)) {
-                try { DocumentsContract.deleteDocument(cr, done) } catch (e2: Exception) {}
-                throw RuntimeException("$name is taken")
-            }
+            originalGone = true
+            promote(sidecar, name)
+            return name
         } catch (e: Exception) {
-            try { DocumentsContract.deleteDocument(cr, u) } catch (e2: Exception) {}
-            throw e
+            if (!originalGone) {
+                try { clear(sidecar); clear("$sidecar.gz") } catch (e2: Exception) {}
+                throw e
+            }
+            /* Original is gone; the sidecar still holds the new text. */
+            return sidecar
         }
     }
 }

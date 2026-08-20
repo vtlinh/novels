@@ -51,6 +51,19 @@ object Documents {
         return "$base ($n)"
     }
 
+    /* An existing document's Save must not run while the editor is still
+       empty waiting for the file. That empty string would replace the only
+       copy. A new document has no original to protect. */
+    fun maySave(isNew: Boolean, bodyReady: Boolean): Boolean = isNew || bodyReady
+
+    /* Same-name replace writes here first so a failed write cannot erase
+       the original. The stem is never the one being replaced. */
+    fun savingPlainName(plainName: String, takenNames: Set<String>): String {
+        val stem = stemOf(plainName) ?: UNTITLED
+        val taken = takenNames.mapNotNull { stemOf(it) }.toSet()
+        return plainName(uniqueStem("$stem.saving", taken))
+    }
+
     data class Item(
         val title: String,
         val plainName: String,
