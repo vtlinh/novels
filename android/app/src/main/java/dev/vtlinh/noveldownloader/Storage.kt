@@ -44,6 +44,9 @@ object Storage {
         var acc = Total(0L, 0, 0)
         for (dir in root) {
             if (!dir.isDir) continue
+            /* pasted documents live here; they are not a novel, even when a
+               file happens to be named like a chapter */
+            if (Documents.isReservedDir(dir.name)) continue
             val kids = childrenOf(dir.ref)
             acc += of(kids)
             val translated = kids.firstOrNull { it.isDir && it.name == "translated" }

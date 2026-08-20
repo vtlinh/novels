@@ -50,6 +50,16 @@
             android:exported="false" />
 
         <activity
+            android:name=".DocumentListActivity"
+            android:exported="false"
+            android:launchMode="singleTop" />
+
+        <activity
+            android:name=".DocumentEditActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ChapterListActivity"
             android:exported="false" />
 

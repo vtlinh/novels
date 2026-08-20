@@ -50,6 +50,22 @@ class StorageTest {
         assertEquals("0 B", Storage.label(t))
     }
 
+    /* `{root}/documents` holds pasted files, not a novel. A document titled
+       like a chapter must not be counted as one — Settings' storage line is
+       "how much of the download folder is novels". */
+    @Test
+    fun `the documents folder is not counted as a novel`() {
+        val t = total(
+            listOf(dir("documents"), dir("A Novel")),
+            mapOf(
+                "dir:documents" to listOf(f("Chapter 1.txt", 8000L), f("Notes.txt", 500L)),
+                "dir:A Novel" to listOf(f("Chapter 1.txt", 1000L)),
+            ),
+        )
+        assertEquals(1000L, t.bytes)
+        assertEquals(1, t.files)
+    }
+
     @Test
     fun `loose and gzipped chapters in a novel folder are both counted`() {
         val t = total(

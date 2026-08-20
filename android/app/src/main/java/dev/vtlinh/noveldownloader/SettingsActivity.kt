@@ -126,7 +126,7 @@ class SettingsActivity : AppCompatActivity() {
 
         bindHelp(
             R.id.compressHelp, "Compress my novels",
-            "Makes your downloaded novels smaller so they take up less space. You can still read them as usual.",
+            "Makes your downloaded novels and documents smaller so they take up less space. You can still read them as usual.",
         )
         bindHelp(
             R.id.apiKeyHelp, "Anthropic API key",

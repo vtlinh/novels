@@ -92,6 +92,8 @@ class ReaderActivity : AppCompatActivity() {
         return Pair(cur.idx, para)
     }
 
+    private fun asDocument() = intent.getBooleanExtra(Documents.EXTRA_DOCUMENT, false)
+
     /* Which chapter is at the top of the viewport right now. The probe
        point sits slightly BELOW the top edge, so a chapter whose heading is
        at (or within a line of) the top wins — boundary rounding can no
@@ -102,7 +104,14 @@ class ReaderActivity : AppCompatActivity() {
         val y = (scroll.scrollY - text.totalPaddingTop + bias).coerceAtLeast(0)
         val off = layout.getLineStart(layout.getLineForVertical(y))
         val cur = loadedChapters.lastOrNull { it.start <= off } ?: return
-        titleBar.text = cur.heading
+        /* A document has no chapter heading — the first line of pasted text
+           is not its title. Keep the name the user gave it. */
+        val heading = if (asDocument()) {
+            intent.getStringExtra("title") ?: Documents.UNTITLED
+        } else {
+            cur.heading
+        }
+        titleBar.text = heading
         if (cur.idx != currentChapterIdx) {
             currentChapterIdx = cur.idx
             /* While reading aloud, "the chapter I'm on" is the one being
@@ -115,9 +124,9 @@ class ReaderActivity : AppCompatActivity() {
             if (!speaking) saveLastChapter(cur.idx)
         }
         /* keep the reading notification on the current chapter */
-        if (speaking && cur.heading.isNotEmpty() && cur.heading != lastNotifHeading) {
-            lastNotifHeading = cur.heading
-            TtsService.start(this, cur.heading, true, mediaSession?.sessionToken, intent.getStringExtra("slug"))
+        if (speaking && heading.isNotEmpty() && heading != lastNotifHeading) {
+            lastNotifHeading = heading
+            TtsService.start(this, heading, true, mediaSession?.sessionToken, intent.getStringExtra("slug"))
         }
         /* Scroll position is deliberately NOT tracked: the only position worth
            returning to is where TTS stopped (saveTtsPos). Scrolling around a
@@ -447,7 +456,7 @@ class ReaderActivity : AppCompatActivity() {
            and a blank background reads cleaner than a flash of loading text */
 
         /* mark as recently read + load the cover for the media notification */
-        intent.getStringExtra("slug")?.let { slug ->
+        if (!asDocument()) intent.getStringExtra("slug")?.let { slug ->
             lifecycleScope.launch(Dispatchers.IO) {
                 try { store.setLastRead(folder, slug, System.currentTimeMillis()) } catch (e: Exception) {}
                 val cf = DownloadEngine.coverFile(this@ReaderActivity, slug)
@@ -480,13 +489,30 @@ class ReaderActivity : AppCompatActivity() {
                    nothing but a crash on the ordinary act of opening a novel —
                    the resync path already wraps the identical call. */
                 try {
-                    ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order, slug)
+                    if (asDocument()) {
+                        val file = intent.getStringExtra(Documents.EXTRA_FILE) ?: start
+                        DocumentFiles.chapters(this@ReaderActivity, treeUri!!, file)
+                    } else {
+                        ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order, slug)
+                    }
                 } catch (e: Exception) { null }
             }
             val ch = chapters ?: run {
                 titleBar.text = novelTitle
                 android.widget.Toast.makeText(
-                    this@ReaderActivity, "Could not read that novel's folder", android.widget.Toast.LENGTH_LONG,
+                    this@ReaderActivity,
+                    if (asDocument()) "Could not read that document"
+                    else "Could not read that novel's folder",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
+            if (ch.ordered.isEmpty()) {
+                android.widget.Toast.makeText(
+                    this@ReaderActivity,
+                    if (asDocument()) "Could not read that document"
+                    else "Could not read that novel's folder",
+                    android.widget.Toast.LENGTH_LONG,
                 ).show()
                 return@launch
             }
@@ -532,13 +558,15 @@ class ReaderActivity : AppCompatActivity() {
             if (startIdx < 0) startIdx = ch.ordered.indexOfFirst { sameChapter(start, it) }
             if (startIdx < 0) {
                 startIdx = 0
-                spotLost = true
-                android.widget.Toast.makeText(
-                    this@ReaderActivity,
-                    "The chapter you left off at is no longer here — opened at the start. " +
-                        "Pick a chapter to set a new place.",
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
+                if (!asDocument()) {
+                    spotLost = true
+                    android.widget.Toast.makeText(
+                        this@ReaderActivity,
+                        "The chapter you left off at is no longer here — opened at the start. " +
+                            "Pick a chapter to set a new place.",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
             val t = restoreTargetFor(startIdx)
             goTo(startIdx, t.first, t.second)
@@ -733,6 +761,89 @@ class ReaderActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.speechEditsBtn).setOnClickListener {
             startActivity(android.content.Intent(this, SpeechEditsActivity::class.java))
         }
+        if (asDocument()) bindDocumentChrome(drawer)
+    }
+
+    /* Documents have no chapters: ≡ becomes Edit, and the gear / speech-edits
+       buttons collapse into one overflow so Delete has a place to live. */
+    private fun bindDocumentChrome(drawer: DrawerLayout) {
+        drawer.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
+        val chaptersBtn = findViewById<TextView>(R.id.chaptersBtn)
+        chaptersBtn.text = "Edit"
+        chaptersBtn.textSize = 15f
+        chaptersBtn.setOnClickListener { editDocument() }
+        findViewById<TextView>(R.id.speechEditsBtn).visibility = android.view.View.GONE
+        val menuBtn = findViewById<TextView>(R.id.settingsBtn)
+        menuBtn.text = "\u22EE"
+        menuBtn.setOnClickListener { showDocumentMenu(menuBtn) }
+    }
+
+    private fun editDocument() {
+        if (speaking) pauseTts()
+        val file = intent.getStringExtra(Documents.EXTRA_FILE) ?: return
+        startActivity(
+            android.content.Intent(this, DocumentEditActivity::class.java)
+                .putExtra(Documents.EXTRA_FILE, file)
+                .putExtra("title", intent.getStringExtra("title") ?: Documents.UNTITLED),
+        )
+    }
+
+    private fun showDocumentMenu(anchor: android.view.View) {
+        val menu = android.widget.PopupMenu(this, anchor)
+        menu.menu.add("Reading settings")
+        menu.menu.add("Speech edits")
+        menu.menu.add("Delete")
+        menu.setOnMenuItemClickListener { item ->
+            when (item.title.toString()) {
+                "Reading settings" -> showReaderSettings()
+                "Speech edits" -> startActivity(
+                    android.content.Intent(this, SpeechEditsActivity::class.java),
+                )
+                "Delete" -> confirmDeleteDocument()
+            }
+            true
+        }
+        menu.show()
+    }
+
+    private fun confirmDeleteDocument() {
+        val title = intent.getStringExtra("title") ?: Documents.UNTITLED
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Delete document")
+            .setMessage("\"$title\" will be deleted from your device.")
+            .setPositiveButton("Delete") { _, _ -> deleteDocument() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteDocument() {
+        val tree = prefs.getString("tree", null) ?: return
+        val file = intent.getStringExtra(Documents.EXTRA_FILE) ?: return
+        val slug = intent.getStringExtra("slug")
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try { DocumentFiles.delete(this@ReaderActivity, Uri.parse(tree), file) } catch (e: Exception) { false }
+            }
+            if (!ok) {
+                android.widget.Toast.makeText(
+                    this@ReaderActivity, "Could not delete that document", android.widget.Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
+            if (slug != null) {
+                prefs.edit()
+                    .remove("lastCh:$slug").remove("lastChAt:$slug")
+                    .remove("readPos:$slug").remove("readParaText:$slug")
+                    .remove("ttsPos:$slug").remove("ttsPosAt:$slug").remove("ttsParaText:$slug")
+                    .apply()
+            }
+            if (speaking) stopTts()
+            startActivity(
+                android.content.Intent(this@ReaderActivity, DocumentListActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+            finish()
+        }
     }
 
     /* The chapter list opens the reader with REORDER_TO_FRONT, so picking a
@@ -743,6 +854,13 @@ class ReaderActivity : AppCompatActivity() {
        list isn't loaded yet) → full rebuild via recreate. */
     override fun onNewIntent(newIntent: android.content.Intent) {
         super.onNewIntent(newIntent)
+        /* A save rewrites the file; jumping within the already-loaded buffer
+           would keep showing the old text. Rebuild. */
+        if (newIntent.getBooleanExtra(Documents.EXTRA_DOCUMENT, false) || asDocument()) {
+            setIntent(newIntent)
+            recreate()
+            return
+        }
         val sameNovel = newIntent.getStringExtra("slug") == intent.getStringExtra("slug")
         val start = newIntent.getStringExtra("start")
         val idx = if (sameNovel && start != null) {
@@ -1832,6 +1950,10 @@ class ReaderActivity : AppCompatActivity() {
         o.put("dir", dir)
         o.put("title", intent.getStringExtra("title") ?: dir)
         o.put("slug", slug)
+        if (asDocument()) {
+            o.put(Documents.EXTRA_DOCUMENT, true)
+            o.put(Documents.EXTRA_FILE, intent.getStringExtra(Documents.EXTRA_FILE) ?: "")
+        }
         prefs.edit().putString("lastReading", o.toString()).apply()
 
         /* coming back into the reader: recover the saved TTS voice. If the
@@ -1903,7 +2025,12 @@ class ReaderActivity : AppCompatActivity() {
        continues); otherwise it finishes. */
     private fun leaveReader() {
         val dir = intent.getStringExtra("dir")
-        if (dir != null) {
+        if (asDocument()) {
+            startActivity(
+                android.content.Intent(this, DocumentListActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+        } else if (dir != null) {
             startActivity(
                 android.content.Intent(this, ChapterListActivity::class.java)
                     .putExtra("dir", dir)

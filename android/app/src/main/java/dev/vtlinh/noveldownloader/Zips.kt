@@ -46,14 +46,17 @@ object Zips {
        the sweep still deleted it. What identifies one of ours is not the mark
        alone but what the mark is attached to, so strip it and require a
        chapter name underneath. Nothing else is ours to remove. */
-    fun isPartName(name: String): Boolean {
+    fun isPartName(
+        name: String,
+        ours: (String) -> Boolean = { ChapterName.RE.matches(it) },
+    ): Boolean {
         val base = when {
             name.startsWith(PART_HEAD) -> name.removePrefix(PART_HEAD)
             name.endsWith("$PART.gz") -> name.removeSuffix("$PART.gz")
             name.endsWith(PART) -> name.removeSuffix(PART)
             else -> return false
         }
-        return ChapterName.RE.matches(base.removeSuffix(".gz"))
+        return ours(base.removeSuffix(".gz"))
     }
 
     private const val GZREF = "gz::"
@@ -189,8 +192,14 @@ object Zips {
        nature — chapters downloaded later just get compressed on the next
        pass without touching anything else. Returns true when the dir
        changed. */
-    fun compressDir(context: Context, cr: ContentResolver, treeUri: Uri, d: Saf.Entry): Boolean {
-        val re = ChapterListActivity.CHAPTER_RE
+    fun compressDir(
+        context: Context,
+        cr: ContentResolver,
+        treeUri: Uri,
+        d: Saf.Entry,
+        ours: (String) -> Boolean = { ChapterName.RE.matches(it) },
+        includeTranslated: Boolean = true,
+    ): Boolean {
         var changed = false
 
         /* gz every loose chapter file directly under parentDocId */
@@ -201,7 +210,7 @@ object Zips {
                only thing that would ever remove them; the chapter itself is
                absent from the index, so the next download fetches it again. */
             for (f in kids) {
-                if (!f.isDir && isPartName(f.name) &&
+                if (!f.isDir && isPartName(f.name, ours) &&
                     deleteDoc(cr, docUri(treeUri, f.docId))
                 ) {
                     changed = true
@@ -210,7 +219,7 @@ object Zips {
             val byName = kids.associateBy { it.name }
             val parentUri = docUri(treeUri, parentDocId)
             for (f in kids) {
-                if (f.isDir || isGzName(f.name) || !re.matches(f.name)) continue
+                if (f.isDir || isGzName(f.name) || !ours(f.name)) continue
                 val target = f.name + ".gz"
                 val existing = byName[target]
                 /* a VALID compressed copy must exist before the loose original
@@ -254,16 +263,25 @@ object Zips {
             }
         }
         gzChildren(d.docId)
-        val kids = Saf.children(cr, treeUri, d.docId)
-        var tDocId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
-        tDocId?.let { gzChildren(it) }
+        if (includeTranslated) {
+            val kids = Saf.children(cr, treeUri, d.docId)
+            val tDocId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
+            tDocId?.let { gzChildren(it) }
+        }
 
         return changed
     }
 
     /* the reverse: each "Chapter N.txt.gz" back to a plain .txt, one
        chapter at a time */
-    fun uncompressDir(context: Context, cr: ContentResolver, treeUri: Uri, d: Saf.Entry): Boolean {
+    fun uncompressDir(
+        context: Context,
+        cr: ContentResolver,
+        treeUri: Uri,
+        d: Saf.Entry,
+        ours: (String) -> Boolean = { ChapterName.RE.matches(it) },
+        includeTranslated: Boolean = true,
+    ): Boolean {
         var changed = false
 
         fun unGzChildren(parentDocId: String) {
@@ -273,14 +291,14 @@ object Zips {
                direction sweeps them — this pass is the only one that walks the
                folder when compression is off. */
             for (f in kids) {
-                if (!f.isDir && isPartName(f.name) &&
+                if (!f.isDir && isPartName(f.name, ours) &&
                     deleteDoc(cr, docUri(treeUri, f.docId))
                 ) {
                     changed = true
                 }
             }
             for (f in kids) {
-                if (f.isDir || isPartName(f.name) || !isGzName(f.name)) continue
+                if (f.isDir || isPartName(f.name, ours) || !isGzName(f.name)) continue
                 val target = f.name.removeSuffix(".gz")
                 /* OUR files only. The compress direction has always checked the
                    name against the chapter pattern; this one asked nothing but
@@ -288,7 +306,7 @@ object Zips {
                    picked, one level down, which can be a shared folder they
                    keep other things in. Their own "notes.txt.gz" was
                    decompressed and the original deleted, silently. */
-                if (!ChapterName.RE.matches(target)) continue
+                if (!ours(target)) continue
                 /* bytes, not text: decoding and re-encoding would rewrite
                    anything that isn't valid UTF-8 as replacement characters
                    and then delete the .gz that still held the real thing */
@@ -355,9 +373,11 @@ object Zips {
             }
         }
         unGzChildren(d.docId)
-        val kids = Saf.children(cr, treeUri, d.docId)
-        var tDocId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
-        tDocId?.let { unGzChildren(it) }
+        if (includeTranslated) {
+            val kids = Saf.children(cr, treeUri, d.docId)
+            val tDocId = kids.firstOrNull { it.isDir && it.name == "translated" }?.docId
+            tDocId?.let { unGzChildren(it) }
+        }
 
         return changed
     }

@@ -108,25 +108,7 @@ class NovelListActivity : AppCompatActivity() {
         }
 
         /* navigation drawer */
-        val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
-        findViewById<TextView>(R.id.menuBtn).setOnClickListener {
-            drawer.openDrawer(androidx.core.view.GravityCompat.START)
-        }
-        findViewById<TextView>(R.id.navBrowser).setOnClickListener {
-            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
-            startActivity(Intent(this, BrowserActivity::class.java))
-        }
-        findViewById<TextView>(R.id.navNovels).setOnClickListener {
-            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
-        }
-        findViewById<TextView>(R.id.navSettings).setOnClickListener {
-            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
-        findViewById<TextView>(R.id.navAbout).setOnClickListener {
-            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
-            startActivity(Intent(this, AboutActivity::class.java))
-        }
+        Nav.bindDrawer(this, Nav.Screen.LIBRARY)
 
         ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
 
@@ -183,6 +165,12 @@ class NovelListActivity : AppCompatActivity() {
         val saved = prefs.getString("lastReading", null) ?: return false
         return try {
             val o = org.json.JSONObject(saved)
+            if (o.optBoolean(Documents.EXTRA_DOCUMENT)) {
+                val file = o.optString(Documents.EXTRA_FILE)
+                if (file.isEmpty()) return false
+                DocumentFiles.openReader(this, o.optString("title").ifEmpty { Documents.UNTITLED }, file)
+                return true
+            }
             val slug = o.getString("slug")
             val startCh = ReaderActivity.resumeChapter(this, slug) ?: return false
             startActivity(
@@ -537,7 +525,7 @@ class NovelListActivity : AppCompatActivity() {
                 knownByNorm.putIfAbsent(normKey(slug), NovelRec(slug, "", slug, "", 0L, -1, false, 0, 0L, 0L))
             }
             for ((name, docId) in dirs) {
-                if (name.isEmpty()) continue
+                if (name.isEmpty() || Documents.isReservedDir(name)) continue
                 val slug = slugify(name)
                 if (slug.isEmpty()) continue
                 val rec = known[name] ?: knownByNorm[normKey(slug)]
