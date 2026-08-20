@@ -201,33 +201,7 @@ class ChapterListActivity : AppCompatActivity() {
         }
 
         /* same navigation drawer as the other list screens */
-        val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
-        findViewById<TextView>(R.id.menuBtn).setOnClickListener {
-            drawer.openDrawer(androidx.core.view.GravityCompat.START)
-        }
-        findViewById<TextView>(R.id.navBrowser).setOnClickListener {
-            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
-            startActivity(Intent(this, BrowserActivity::class.java))
-        }
-        findViewById<TextView>(R.id.navNovels).setOnClickListener {
-            /* REORDER_TO_FRONT, not CLEAR_TOP: clearing would destroy the
-               activities above the library — including a reader that's
-               reading aloud. Reordering brings the library forward and
-               leaves TTS alive. */
-            startActivity(
-                Intent(this, NovelListActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-            )
-            finish()
-        }
-        findViewById<TextView>(R.id.navSettings).setOnClickListener {
-            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
-        findViewById<TextView>(R.id.navAbout).setOnClickListener {
-            drawer.closeDrawer(androidx.core.view.GravityCompat.START)
-            startActivity(Intent(this, AboutActivity::class.java))
-        }
+        Nav.bindDrawer(this, Nav.Screen.CHAPTERS)
 
         ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
         onInfoTab = savedInstanceState?.let { state ->

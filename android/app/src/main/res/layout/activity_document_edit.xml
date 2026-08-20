@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@color/card"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/closeBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="14dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="X"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/docTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:padding="10dp"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <Button
+            android:id="@+id/saveBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:minWidth="0dp"
+            android:text="Save"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg"
+            app:backgroundTint="@color/btn_secondary"
+            app:cornerRadius="8dp" />
+    </LinearLayout>
+
+    <EditText
+        android:id="@+id/docBody"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="top|start"
+        android:padding="18dp"
+        android:background="@android:color/transparent"
+        android:textSize="16sp"
+        android:textColor="@color/fg"
+        android:textColorHint="@color/muted"
+        android:hint="Paste or type here"
+        android:inputType="textMultiLine|textCapSentences"
+        android:importantForAutofill="no" />
+</LinearLayout>

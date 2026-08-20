@@ -113,13 +113,17 @@ class CompressService : Service() {
                     } catch (e: Exception) {
                         emptySet<String>()
                     }
-                    val dirs = try {
+                    val allDirs = try {
                         Saf.children(cr, treeUri, Saf.rootId(treeUri))
-                            .filter { it.isDir && (owned.isEmpty() || it.name in owned) }
                     } catch (e: Exception) {
                         emptyList()
                     }
+                    val dirs = allDirs.filter {
+                        it.isDir && !Documents.isReservedDir(it.name) &&
+                            (owned.isEmpty() || it.name in owned)
+                    }
                     var aborted = false
+                    var novelsChanged = false
                     for (d in dirs) {
                         /* Per folder, not just per pass: a pass is a walk of
                            the whole library over SAF, so a download starting
@@ -134,15 +138,45 @@ class CompressService : Service() {
                         }
                         if (changed) {
                             changedAny = true
+                            novelsChanged = true
                             try {
                                 DownloadStore(this@CompressService)
                                     .forgetDiskBytesForDir(treeStr, d.name)
                             } catch (e: Exception) {}
                         }
                     }
+                    /* pasted documents, same setting, their own folder. Not
+                       mixed into the novel walk: that walk's empty-set
+                       fallback used to visit every directory, and a chapter-
+                       shaped filename in documents/ would have been rewritten
+                       as if it were a novel. */
+                    if (!aborted) {
+                        for (d in allDirs.filter { it.isDir && Documents.isReservedDir(it.name) }) {
+                            if (DownloadService.runningFlow.value) { aborted = true; break }
+                            val cur = prefs.getBoolean("compressNovels", true)
+                            val changed = try {
+                                if (cur) {
+                                    Zips.compressDir(
+                                        this@CompressService, cr, treeUri, d,
+                                        ours = Documents::isPlain,
+                                        includeTranslated = false,
+                                    )
+                                } else {
+                                    Zips.uncompressDir(
+                                        this@CompressService, cr, treeUri, d,
+                                        ours = Documents::isPlain,
+                                        includeTranslated = false,
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                false
+                            }
+                            if (changed) changedAny = true
+                        }
+                    }
                     /* refs changed shape (txt <-> gz) → the cached chapter
                        listings are stale across the library */
-                    if (changedAny) {
+                    if (novelsChanged) {
                         try {
                             DownloadStore(this@CompressService).clearAllChapterLists(treeStr)
                         } catch (e: Exception) {}

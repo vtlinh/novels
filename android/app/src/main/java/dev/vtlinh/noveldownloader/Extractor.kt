@@ -324,6 +324,13 @@ object Extractor {
        an empty name is one the provider refuses, so the download died with
        "could not create folder" and no way for the user to intervene, since
        the name is derived rather than entered. */
-    fun folderName(title: String, slug: String): String =
-        sanitize(title).ifEmpty { sanitize(slug) }.ifEmpty { "novel" }
+    fun folderName(title: String, slug: String): String {
+        val name = sanitize(title).ifEmpty { sanitize(slug) }.ifEmpty { "novel" }
+        /* `{root}/documents` is the pasted-documents folder. A novel whose
+           title sanitises to that name would otherwise write its chapters
+           into the same directory, and the two would adopt each other's
+           files. Step aside; the slug keeps the folder unique. */
+        if (!Documents.isReservedDir(name)) return name
+        return sanitize("$name ($slug)").ifEmpty { "novel" }
+    }
 }
