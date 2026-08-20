@@ -45,6 +45,32 @@ class DocumentsTest {
         assertEquals("Notes", Documents.uniqueStem("Notes", taken))
     }
 
+    /* THE DEFECT. Opening an existing document loads the body off the
+       main thread. Save was enabled immediately, so a tap (or a title
+       change, then Save) wrote the still-empty editor over the file. */
+    @Test
+    fun `an existing document cannot be saved until its body has arrived`() {
+        assertFalse(Documents.maySave(isNew = false, bodyReady = false))
+        assertTrue(Documents.maySave(isNew = false, bodyReady = true))
+        assertTrue(
+            "a new document has no original to protect",
+            Documents.maySave(isNew = true, bodyReady = false),
+        )
+    }
+
+    @Test
+    fun `a replacement is written under a sidecar so the original name stays taken`() {
+        val taken = setOf("Notes.txt", "Notes.txt.gz")
+        assertEquals("Notes.saving.txt", Documents.savingPlainName("Notes.txt", taken))
+        assertNotEquals("Notes.txt", Documents.savingPlainName("Notes.txt", taken))
+    }
+
+    @Test
+    fun `a sidecar name already taken is numbered rather than colliding`() {
+        val taken = setOf("Notes.txt", "Notes.saving.txt")
+        assertEquals("Notes.saving (2).txt", Documents.savingPlainName("Notes.txt", taken))
+    }
+
     @Test
     fun `the stem currently being renamed is not treated as taken`() {
         val taken = setOf("Notes (2)")
