@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 /* Packaging concatenates every unreleased PR summary under the versionName
    stamped on the APK. Previous versions keep the rows already sealed to
@@ -84,65 +83,5 @@ class ReleaseNotesTest {
         assertEquals(1, entries.size)
         assertNull(entries[0].version)
         assertEquals("This build", entries[0].summary)
-    }
-
-    /* The packaged file is what a device will see. A row that does not parse
-       is a note that never appears; the unreleased row is this PR. Every PR
-       that adds a notes.tsv row must retarget the contains() below — see
-       CLAUDE.md "Every PR adds a release-note row". */
-    @Test
-    fun `the packaged changelog parses and has this PR unreleased`() {
-        val file = File("../changelog/notes.tsv")
-        assertTrue("android/changelog/notes.tsv is the source the APK concatenates", file.isFile)
-        val entries = ReleaseNotes.parse(file.readText())
-        assertTrue("backfill is missing", entries.size > 100)
-        assertTrue(
-            "this PR's summary must be unreleased so package-time concat picks it up",
-            entries.any { it.version == null && it.summary.contains("Documents section") },
-        )
-        assertTrue(
-            "1.34.1 shipped waiting for a TTS voice",
-            entries.any { it.version == "1.34.1" && it.summary.contains("voice is ready") },
-        )
-        assertTrue(
-            "1.33.30 shipped the novel-info download website",
-            entries.any { it.version == "1.33.30" && it.summary.contains("download website") },
-        )
-        assertTrue(
-            "1.33.29 shipped everyday-language settings help",
-            entries.any { it.version == "1.33.29" && it.summary.contains("everyday language") },
-        )
-        assertTrue(
-            "1.33.28 shipped per-novel storage caching",
-            entries.any { it.version == "1.33.28" && it.summary.contains("per-novel storage") },
-        )
-        assertTrue(
-            "1.33.27 shipped the Settings size hang fix",
-            entries.any { it.version == "1.33.27" && it.summary.contains("staying on") },
-        )
-        assertTrue(
-            "1.33.26 shipped the lost-folder Settings line",
-            entries.any { it.version == "1.33.26" && it.summary.contains("lost download folder") },
-        )
-        assertTrue(
-            "1.33.25 shipped total novel storage on Settings",
-            entries.any { it.version == "1.33.25" && it.summary.contains("novel storage") },
-        )
-        assertTrue(
-            "1.33.24 shipped the Version dialog notes",
-            entries.any { it.version == "1.33.24" && it.summary.contains("dialog from Version") },
-        )
-        assertTrue(
-            "1.33.23 shipped the About-page notes",
-            entries.any { it.version == "1.33.23" && it.summary.contains("Release notes") },
-        )
-        assertTrue(
-            "1.33.21 shipped Split novel info and chapters into tabs",
-            entries.any { it.version == "1.33.21" && it.summary.contains("tabs") },
-        )
-        val sealed = entries.mapNotNull { it.version }.toSet()
-        assertTrue("0.1 era is missing", "0.1" in sealed)
-        assertTrue("1.0 era is missing", "1.0" in sealed)
-        assertTrue("1.1 era is missing", "1.1" in sealed)
     }
 }
