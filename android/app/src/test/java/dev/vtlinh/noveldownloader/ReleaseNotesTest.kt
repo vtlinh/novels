@@ -87,7 +87,9 @@ class ReleaseNotesTest {
     }
 
     /* The packaged file is what a device will see. A row that does not parse
-       is a note that never appears; the unreleased row is this PR. */
+       is a note that never appears; the unreleased row is this PR. Every PR
+       that adds a notes.tsv row must retarget the contains() below — see
+       CLAUDE.md "Every PR adds a release-note row". */
     @Test
     fun `the packaged changelog parses and has this PR unreleased`() {
         val file = File("../changelog/notes.tsv")

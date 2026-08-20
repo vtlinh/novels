@@ -179,7 +179,11 @@
   dialog from Version; packaging concatenates blank rows under this
   build's `versionName`. If any rows are still blank, they shipped in the
   current android-latest build — stamp them first so the next APK does not
-  swallow them: `python3 tools/seal-changelog.py`.
+  swallow them: `python3 tools/seal-changelog.py`. Then point
+  `ReleaseNotesTest`'s unreleased-row check at this PR's summary (the
+  substring it `contains`), and move the previous unreleased string onto
+  the version `seal-changelog.py` just stamped. Leaving the old string in
+  place is a red `testReleaseUnitTest` on the next PR.
 
 ## Release notes
 
@@ -194,4 +198,6 @@ Rows already given a version stay under it.
 ```
 python3 tools/seal-changelog.py          # fills blank rows from android-latest
 # then add the new blank-version row at the top of android/changelog/notes.tsv
+# and in ReleaseNotesTest: unreleased contains() = this row's summary;
+# the row just sealed gets a versioned assert (same substring as before).
 ```
