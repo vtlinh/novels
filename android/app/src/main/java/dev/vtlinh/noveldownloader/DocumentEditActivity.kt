@@ -18,8 +18,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/* New or existing document. X discards; Save writes under `{root}/documents`
-   (gzipped when that setting is on) and opens reading mode. */
+/* New or existing document. X discards; Save writes under the pasted-text
+   folder (gzipped when that setting is on) and opens reading mode. */
 class DocumentEditActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }

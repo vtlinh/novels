@@ -326,10 +326,10 @@ object Extractor {
        the name is derived rather than entered. */
     fun folderName(title: String, slug: String): String {
         val name = sanitize(title).ifEmpty { sanitize(slug) }.ifEmpty { "novel" }
-        /* `{root}/documents` is the pasted-documents folder. A novel whose
-           title sanitises to that name would otherwise write its chapters
-           into the same directory, and the two would adopt each other's
-           files. Step aside; the slug keeps the folder unique. */
+        /* `{root}/novel-documents` is the pasted-documents folder, and
+           `{root}/Documents` is often the user's. A novel whose title
+           sanitises to either would otherwise write its chapters into
+           that directory. Step aside; the slug keeps the folder unique. */
         if (!Documents.isReservedDir(name)) return name
         return sanitize("$name ($slug)").ifEmpty { "novel" }
     }
