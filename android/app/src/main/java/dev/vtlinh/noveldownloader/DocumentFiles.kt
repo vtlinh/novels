@@ -139,7 +139,10 @@ object DocumentFiles {
         } catch (e: Exception) {
             emptyList()
         }
-        kids.firstOrNull { it.isDir && Documents.isReservedDir(it.name) }?.let { return it }
+        /* Prefer the current store name. Fall back only to an exact
+           "documents" leftover — not "Documents", which is the user's. */
+        kids.firstOrNull { it.isDir && it.name.equals(Documents.DIR, ignoreCase = true) }?.let { return it }
+        kids.firstOrNull { it.isDir && it.name == Documents.LEGACY_DIR }?.let { return it }
         if (!create) return null
         val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, Saf.rootId(treeUri))
         val made = try {
@@ -150,10 +153,9 @@ object DocumentFiles {
         val id = try { DocumentsContract.getDocumentId(made) } catch (e: Exception) { null }
             ?: return null
         val got = try { Zips.docName(cr, made) } catch (e: Exception) { null }
-        /* A taken name is minted, not refused. If something that is not our
-           reserved folder already owns "documents", do not write into the
-           minted sibling. */
-        if (got != null && !Documents.isReservedDir(got)) {
+        /* A taken name is minted, not refused. If something else already
+           owns "novel-documents", do not write into the minted sibling. */
+        if (got != null && !got.equals(Documents.DIR, ignoreCase = true)) {
             try { DocumentsContract.deleteDocument(cr, made) } catch (e: Exception) {}
             return null
         }

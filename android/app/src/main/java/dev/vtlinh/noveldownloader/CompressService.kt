@@ -149,9 +149,12 @@ class CompressService : Service() {
                        mixed into the novel walk: that walk's empty-set
                        fallback used to visit every directory, and a chapter-
                        shaped filename in documents/ would have been rewritten
-                       as if it were a novel. */
+                       as if it were a novel. isStoreDir, not isReservedDir:
+                       the latter also matches Android's Documents folder in
+                       a shared tree, and gzipping that deletes the user's
+                       own .txt files. */
                     if (!aborted) {
-                        for (d in allDirs.filter { it.isDir && Documents.isReservedDir(it.name) }) {
+                        for (d in allDirs.filter { it.isDir && Documents.isStoreDir(it.name) }) {
                             if (DownloadService.runningFlow.value) { aborted = true; break }
                             val cur = prefs.getBoolean("compressNovels", true)
                             val changed = try {

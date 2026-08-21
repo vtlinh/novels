@@ -1,18 +1,34 @@
 package dev.vtlinh.noveldownloader
 
-/* Pasted-text documents live in `{root}/documents`, one file each. The rules
-   that decide a file's title, whether it is one of ours, and which copy wins
+/* Pasted-text documents live in `{root}/novel-documents` (or a leftover
+   `{root}/documents` from the first builds), one file each. The rules that
+   decide a file's title, whether it is one of ours, and which copy wins
    when a loose .txt sits beside its .gz are here so they can be tested
    without SAF. DocumentFiles does the walking. */
 object Documents {
 
-    const val DIR = "documents"
+    /* Not "documents": that is Android's standard Documents folder, and the
+       download tree can be a shared parent that already has one. Gzipping
+       every .txt in there deletes the originals. */
+    const val DIR = "novel-documents"
+    /* First Documents-feature builds wrote here. Keep using it when the
+       display name is exactly this — not "Documents", which is the user's. */
+    const val LEGACY_DIR = "documents"
     const val UNTITLED = "Untitled"
 
     const val EXTRA_DOCUMENT = "document"
     const val EXTRA_FILE = "file"
 
-    fun isReservedDir(name: String) = name.equals(DIR, ignoreCase = true)
+    /* Names a novel must not take, and the compress pass must not treat as
+       a novel folder. Broader than the pasted-text store: a novel titled
+       Documents would otherwise write into the user's Documents directory. */
+    fun isReservedDir(name: String) =
+        name.equals(DIR, ignoreCase = true) || name.equals(LEGACY_DIR, ignoreCase = true)
+
+    /* Folders we will list, write, gzip and delete in. Android's Documents
+       directory matches isReservedDir but is not ours. */
+    fun isStoreDir(name: String) =
+        name.equals(DIR, ignoreCase = true) || name == LEGACY_DIR
 
     fun defaultTitle(date: String) = "Document $date"
 
