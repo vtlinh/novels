@@ -45,7 +45,9 @@ object Storage {
         for (dir in root) {
             if (!dir.isDir) continue
             /* pasted documents live here; they are not a novel, even when a
-               file happens to be named like a chapter */
+               file happens to be named like a chapter. Android's Documents
+               folder is skipped too — it is reserved so a novel does not
+               land there, and it is not a novel. */
             if (Documents.isReservedDir(dir.name)) continue
             val kids = childrenOf(dir.ref)
             acc += of(kids)

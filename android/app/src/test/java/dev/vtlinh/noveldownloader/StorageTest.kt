@@ -50,15 +50,18 @@ class StorageTest {
         assertEquals("0 B", Storage.label(t))
     }
 
-    /* `{root}/documents` holds pasted files, not a novel. A document titled
-       like a chapter must not be counted as one — Settings' storage line is
-       "how much of the download folder is novels". */
+    /* Pasted-text folders are not a novel. A document titled like a chapter
+       must not be counted as one — Settings' storage line is "how much of
+       the download folder is novels". Android's Documents directory is
+       skipped too: reserved so a novel does not land there. */
     @Test
     fun `the documents folder is not counted as a novel`() {
         val t = total(
-            listOf(dir("documents"), dir("A Novel")),
+            listOf(dir("documents"), dir("Documents"), dir(Documents.DIR), dir("A Novel")),
             mapOf(
                 "dir:documents" to listOf(f("Chapter 1.txt", 8000L), f("Notes.txt", 500L)),
+                "dir:Documents" to listOf(f("Chapter 1.txt", 9000L)),
+                "dir:${Documents.DIR}" to listOf(f("Chapter 1.txt", 7000L)),
                 "dir:A Novel" to listOf(f("Chapter 1.txt", 1000L)),
             ),
         )

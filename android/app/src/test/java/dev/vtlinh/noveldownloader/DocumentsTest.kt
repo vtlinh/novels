@@ -102,18 +102,45 @@ class DocumentsTest {
         assertTrue(Documents.isReservedDir("documents"))
         assertTrue(Documents.isReservedDir("Documents"))
         assertTrue(Documents.isReservedDir("DOCUMENTS"))
+        assertTrue(Documents.isReservedDir(Documents.DIR))
         assertFalse(Documents.isReservedDir("document"))
         assertFalse(Documents.isReservedDir("my documents"))
     }
 
+    /* THE DEFECT. isReservedDir is also true of Android's Documents folder,
+       so the compress pass and the writer treated that directory as the
+       pasted-text store. A shared download tree that already had one —
+       notes, schoolwork, exports — had every .txt gzipped and the original
+       deleted. The store is only the folder we create, plus an exact
+       "documents" leftover from the first builds. */
+    @Test
+    fun `Android Documents is not the pasted-text store`() {
+        assertFalse(Documents.isStoreDir("Documents"))
+        assertFalse(Documents.isStoreDir("DOCUMENTS"))
+        assertFalse(Documents.isStoreDir("document"))
+        assertTrue(Documents.isStoreDir("documents"))
+        assertTrue(Documents.isStoreDir(Documents.DIR))
+        assertTrue(Documents.isStoreDir("Novel-Documents"))
+        assertNotEquals(
+            "the store name is not Android's Documents folder",
+            "documents",
+            Documents.DIR.lowercase(),
+        )
+    }
+
     /* A novel whose title sanitises to our folder would otherwise write its
        chapters into the documents directory — and every pasted file would
-       then look like that novel's. The novel steps aside. */
+       then look like that novel's. The novel steps aside. Same for Android's
+       Documents folder in a shared tree. */
     @Test
     fun `a novel is not given the documents folder name`() {
         val name = Extractor.folderName("documents", "my-book")
         assertNotEquals("documents", name.lowercase())
         assertFalse(Documents.isReservedDir(name))
+        val androidDocs = Extractor.folderName("Documents", "my-book")
+        assertFalse(Documents.isReservedDir(androidDocs))
+        val store = Extractor.folderName(Documents.DIR, "my-book")
+        assertFalse(Documents.isReservedDir(store))
     }
 
     @Test
