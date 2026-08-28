@@ -80,7 +80,7 @@ class SettingsActivity : AppCompatActivity() {
            new downloads, off → uncompress everything and download plain. The
            background service converts the library to match either way. */
         val compressCheck = findViewById<CheckBox>(R.id.compressCheck)
-        compressCheck.isChecked = prefs.getBoolean("compressNovels", prefs.getBoolean("zipDownloads", true))
+        compressCheck.isChecked = Compression.enabled(this)
         compressCheck.setOnCheckedChangeListener { _, checked ->
             prefs.edit()
                 .putBoolean("compressNovels", checked)

@@ -46,10 +46,6 @@ class DownloadEngine(
         const val FETCH_BATCH = 50
         /* a differing heading shifts a chapter's size by only a few bytes */
         private const val HEADING_SLACK = 96L
-        /* how many chapters a listing may drop before we stop believing the
-           listing instead of the files: below this it reads as ordinary site
-           housekeeping, above it only a proportional check will do */
-        private const val MAX_QUIET_DROPS = 10
         /* a listing page that wouldn't load is usually throttling, so give it
            room rather than spending all three retries inside one busy second */
         private const val LIST_RETRY_MS = 7_000
@@ -71,7 +67,7 @@ class DownloadEngine(
            on a raw string compare those never match — leaving the guard
            permanently off for exactly the libraries most likely to be
            renumbered. Same rule the Library uses to reconcile the two. */
-        private fun epochKey(slug: String) = slug.lowercase().filter { it.isLetterOrDigit() }
+        private fun epochKey(slug: String) = Ownership.normKey(slug)
 
         fun renameEpochOf(slug: String): Long = renameEpochs[epochKey(slug)] ?: 0L
 
@@ -524,7 +520,7 @@ class DownloadEngine(
     ): Int {
         val cr = context.contentResolver
         val dirId = try { DocumentsContract.getDocumentId(dir.uri) } catch (e: Exception) { return 0 }
-        val re = ChapterListActivity.CHAPTER_RE
+        val re = ChapterName.RE
 
         class OnDisk(val name: String, val base: String, val docId: String, val size: Long)
         val chapterFiles = ArrayList<OnDisk>()
@@ -1187,7 +1183,7 @@ class DownloadEngine(
            that was holding their locations. Reading the listing costs nothing;
            acting on a stale answer costs chapters. */
         val busy = try {
-            DownloadService.isBusy(slug.lowercase().filter { it.isLetterOrDigit() })
+            DownloadService.isBusy(Ownership.normKey(slug))
         } catch (e: Exception) { false }
         if (dir != null && !busy) {
             renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
@@ -1951,8 +1947,7 @@ class DownloadEngine(
 
         /* the same preference the post-download pass reads — taken once here
            so each chapter is written in its final form rather than rewritten */
-        val compressOn = context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
-            .let { it.getBoolean("compressNovels", it.getBoolean("zipDownloads", true)) }
+        val compressOn = Compression.enabled(context)
 
         /* Sitting at a chapter's number is not the same as being that chapter.
            When a rename couldn't be applied — its target held by a file
@@ -2242,14 +2237,11 @@ class DownloadEngine(
             try { store.clearChapterList(folderKey, slug) } catch (e: Exception) {}
         }
         /* "Compress my novels" on → gzip this novel's chapters after download */
-        if (!stopRequested &&
-            context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
-                .let { it.getBoolean("compressNovels", it.getBoolean("zipDownloads", true)) }
-        ) {
+        if (!stopRequested && Compression.enabled(context)) {
             status("Compressing chapters…")
             try {
                 val docId = DocumentsContract.getDocumentId(dir.uri)
-                if (Zips.compressDir(context, context.contentResolver, treeUri, Saf.Entry(docId, folderName, true))) {
+                if (Zips.compressDir(context.contentResolver, treeUri, Saf.Entry(docId, folderName, true))) {
                     log("Chapters compressed")
                     /* Leftover loose files just became .gz. store.add already
                        forgot the download, but Settings can measure between

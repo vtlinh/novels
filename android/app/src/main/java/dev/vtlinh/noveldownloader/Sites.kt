@@ -50,8 +50,8 @@ object Sites {
         val slug = try {
             forUrl(url)?.normalize(url)?.second?.ifEmpty { null }
         } catch (e: Exception) { null }
-        return (
-            slug ?: url.trimEnd('/').substringAfterLast('/').removeSuffix(".html")
-            ).lowercase().filter { it.isLetterOrDigit() }
+        return Ownership.normKey(
+            slug ?: url.trimEnd('/').substringAfterLast('/').removeSuffix(".html"),
+        )
     }
 }

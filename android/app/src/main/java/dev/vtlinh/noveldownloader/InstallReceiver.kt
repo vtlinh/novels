@@ -56,7 +56,6 @@ class InstallReceiver : BroadcastReceiver() {
 
     private fun describe(status: Int, msg: String?): String {
         val what = when (status) {
-            PackageInstaller.STATUS_FAILURE_ABORTED -> "The install was cancelled."
             PackageInstaller.STATUS_FAILURE_BLOCKED -> "The system blocked the install."
             PackageInstaller.STATUS_FAILURE_CONFLICT ->
                 "It conflicts with the copy already installed — the signing key may differ."

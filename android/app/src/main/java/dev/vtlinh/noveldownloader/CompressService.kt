@@ -131,8 +131,8 @@ class CompressService : Service() {
                         if (DownloadService.runningFlow.value) { aborted = true; break }
                         val cur = prefs.getBoolean("compressNovels", true)
                         val changed = try {
-                            if (cur) Zips.compressDir(this@CompressService, cr, treeUri, d)
-                            else Zips.uncompressDir(this@CompressService, cr, treeUri, d)
+                            if (cur) Zips.compressDir(cr, treeUri, d)
+                            else Zips.uncompressDir(cr, treeUri, d)
                         } catch (e: Exception) {
                             false
                         }
@@ -157,13 +157,13 @@ class CompressService : Service() {
                             val changed = try {
                                 if (cur) {
                                     Zips.compressDir(
-                                        this@CompressService, cr, treeUri, d,
+                                        cr, treeUri, d,
                                         ours = Documents::isPlain,
                                         includeTranslated = false,
                                     )
                                 } else {
                                     Zips.uncompressDir(
-                                        this@CompressService, cr, treeUri, d,
+                                        cr, treeUri, d,
                                         ours = Documents::isPlain,
                                         includeTranslated = false,
                                     )

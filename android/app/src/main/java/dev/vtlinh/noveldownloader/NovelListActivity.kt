@@ -43,11 +43,6 @@ class NovelListActivity : AppCompatActivity() {
         const val GARBAGE_KEY = "garbageSlugs"
 
         const val EXTRA_SHARE_URL = "shareUrl"
-
-        /* the rule lives in Sites.slugKey — which says why it must go through
-           the site's own normalize() — so it can be tested without loading an
-           Activity; kept here because every call site already reads it here */
-        fun slugKeyFromUrl(url: String): String = Sites.slugKey(url)
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -231,7 +226,7 @@ class NovelListActivity : AppCompatActivity() {
             base
         } catch (e: Exception) { typed }
         prefs.edit().putString("url", url).apply()
-        val slugKey = slugKeyFromUrl(url)
+        val slugKey = Sites.slugKey(url)
         val garbage = garbageSet()
         if (slugKey.isNotEmpty() && slugKey in garbage) {
             androidx.appcompat.app.AlertDialog.Builder(this)
@@ -300,8 +295,6 @@ class NovelListActivity : AppCompatActivity() {
         return Extractor.sanitize(vn).lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
     }
 
-    private val chapterFileRe = Regex("Chapter \\d+.*\\.txt(\\.gz)?")
-
     /* Slug equality must survive punctuation drift: "Heaven's Path" is slug
        "library-of-heavens-path" on the site but the sanitized folder name
        slugifies to "library-of-heaven-s-path". Letters+digits only.
@@ -310,8 +303,6 @@ class NovelListActivity : AppCompatActivity() {
        decide whether a claimed folder is this novel's own, and had its own
        exact-string comparison until the two dropping out of step was the bug
        that sent a scan-adopted novel into a second folder. */
-    private fun normKey(s: String) = Ownership.normKey(s)
-
     /* set by rows(): how many entries each source contributed + any error,
        so an unexpectedly empty list can explain itself */
     @Volatile private var sourceInfo = ""
@@ -356,7 +347,7 @@ class NovelListActivity : AppCompatActivity() {
             (if (r.complete) 2 else 0) + (if (r.started > 0) 1 else 0)
         val byNorm = LinkedHashMap<String, NovelRec>()
         for (rec in all.values) {
-            val k = normKey(rec.slug)
+            val k = Ownership.normKey(rec.slug)
             val prev = byNorm[k]
             if (prev == null) { byNorm[k] = rec; continue }
             val win = if (score(rec) >= score(prev)) rec else prev
@@ -440,7 +431,7 @@ class NovelListActivity : AppCompatActivity() {
             (if (err.isNotEmpty()) " · errors:$err" else "")
 
         val garbage = garbageSet()
-        return byNorm.values.filter { normKey(it.slug) !in garbage }.map { rec ->
+        return byNorm.values.filter { Ownership.normKey(it.slug) !in garbage }.map { rec ->
             Row(
                 rec,
                 Extractor.stripAuthor(
@@ -511,7 +502,7 @@ class NovelListActivity : AppCompatActivity() {
             return " folder-access-lost(${e.message})"
         }
         fun countIn(docId: String): Int = try {
-            children(docId).count { !it.third && chapterFileRe.matches(it.second) }
+            children(docId).count { !it.third && ChapterName.isStored(it.second) }
         } catch (e: Exception) { 0 }
 
         try {
@@ -520,15 +511,18 @@ class NovelListActivity : AppCompatActivity() {
             /* match by punctuation-insensitive key, so "Heaven s Path" folders
                find their "heavens-path" site slug (chapter index included) */
             val knownByNorm = HashMap<String, NovelRec>()
-            for (r in recs) knownByNorm[normKey(r.slug)] = r
+            for (r in recs) knownByNorm[Ownership.normKey(r.slug)] = r
             for (slug in store.chapterSlugs(folder)) {
-                knownByNorm.putIfAbsent(normKey(slug), NovelRec(slug, "", slug, "", 0L, -1, false, 0, 0L, 0L))
+                knownByNorm.putIfAbsent(
+                    Ownership.normKey(slug),
+                    NovelRec(slug, "", slug, "", 0L, -1, false, 0, 0L, 0L),
+                )
             }
             for ((name, docId) in dirs) {
                 if (name.isEmpty() || Documents.isReservedDir(name)) continue
                 val slug = slugify(name)
                 if (slug.isEmpty()) continue
-                val rec = known[name] ?: knownByNorm[normKey(slug)]
+                val rec = known[name] ?: knownByNorm[Ownership.normKey(slug)]
                 if (rec != null) {
                     /* known novel: refresh its on-disk count once if unindexed */
                     if (store.chapterCount(folder, rec.slug) == 0 && rec.diskCount == 0) {
@@ -799,7 +793,7 @@ class NovelListActivity : AppCompatActivity() {
         } else if (row.rec.url.isNotEmpty()) {   // includes finished-but-incomplete
             /* already downloading (or waiting its turn) → say so and go dead,
                so a second job can't be started for the same novel */
-            val key = normKey(row.rec.slug)
+            val key = Ownership.normKey(row.rec.slug)
             val busy = DownloadService.isBusy(key)
             line.addView(
                 MaterialButton(ctx).apply {
@@ -898,7 +892,7 @@ class NovelListActivity : AppCompatActivity() {
            started minutes later by the queue, re-downloading in full the
            thing just thrown away, into a folder the Library now filters out
            for good. */
-        if (DownloadService.isBusy(normKey(slug))) {
+        if (DownloadService.isBusy(Ownership.normKey(slug))) {
             Toast.makeText(
                 this,
                 "That novel is downloading — stop it first",
@@ -909,7 +903,7 @@ class NovelListActivity : AppCompatActivity() {
         status.text = "Removing…"
         /* remember first, so the novel stays gone even if deletion hiccups */
         prefs.edit()
-            .putStringSet(GARBAGE_KEY, garbageSet() + normKey(slug))
+            .putStringSet(GARBAGE_KEY, garbageSet() + Ownership.normKey(slug))
             .remove("novelHot:$slug").remove("novelRead:$slug")
             .remove("lastCh:$slug").remove("readPos:$slug").remove("readParaText:$slug")
             .remove("ttsPos:$slug").remove("ttsParaText:$slug")
@@ -967,7 +961,9 @@ class NovelListActivity : AppCompatActivity() {
                    directory of chapters nothing in the app could name, list or
                    remove — so keep the novel, say so, and let the user try
                    again. */
-                prefs.edit().putStringSet(GARBAGE_KEY, garbageSet() - normKey(slug)).apply()
+                prefs.edit().putStringSet(
+                    GARBAGE_KEY, garbageSet() - Ownership.normKey(slug),
+                ).apply()
                 withContext(Dispatchers.Main) {
                     Toast.makeText(
                         this@NovelListActivity,
@@ -1051,7 +1047,7 @@ class NovelListActivity : AppCompatActivity() {
                        counts they each save contradict each other. Leave a
                        busy novel to its download — it renames on the way out
                        anyway. */
-                    !DownloadService.isBusy(normKey(it.rec.slug)) &&
+                    !DownloadService.isBusy(Ownership.normKey(it.rec.slug)) &&
                         (!done || store.chapterOrderCount(folder, it.rec.slug) == 0)
                 }.map { NovelCheck.Target(it.rec, it.display, it.local) }
             } } catch (e: Exception) {

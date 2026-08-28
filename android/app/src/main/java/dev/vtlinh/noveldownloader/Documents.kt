@@ -41,7 +41,7 @@ object Documents {
     }
 
     fun isPlain(name: String): Boolean =
-        stemOf(name) != null && name.endsWith(".txt") && !name.endsWith(".gz")
+        stemOf(name) != null && name.endsWith(".txt")
 
     fun uniqueStem(wanted: String, taken: Set<String>): String {
         val base = wanted.ifEmpty { UNTITLED }

@@ -1,7 +1,6 @@
 package dev.vtlinh.noveldownloader
 
 import android.content.ContentResolver
-import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 
@@ -137,9 +136,6 @@ object Zips {
         }
     }
 
-    fun writeGz(cr: ContentResolver, parentDocUri: Uri, name: String, text: String): Boolean =
-        writeGzDoc(cr, parentDocUri, name, text) != null
-
     /* gzip bytes exactly as given, for the compress pass — it is moving a
        file, not authoring one, so it must not reinterpret the encoding */
     fun writeGzBytes(cr: ContentResolver, parentDocUri: Uri, name: String, bytes: ByteArray): Boolean =
@@ -170,12 +166,6 @@ object Zips {
         }
     } catch (e: Exception) { null }
 
-    fun docSize(cr: ContentResolver, uri: Uri): Long = try {
-        cr.query(uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use {
-            if (it.moveToFirst()) it.getLong(0) else -1L
-        } ?: -1L
-    } catch (e: Exception) { -1L }
-
     private fun docUri(treeUri: Uri, docId: String) =
         DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
 
@@ -193,7 +183,6 @@ object Zips {
        pass without touching anything else. Returns true when the dir
        changed. */
     fun compressDir(
-        context: Context,
         cr: ContentResolver,
         treeUri: Uri,
         d: Saf.Entry,
@@ -275,7 +264,6 @@ object Zips {
     /* the reverse: each "Chapter N.txt.gz" back to a plain .txt, one
        chapter at a time */
     fun uncompressDir(
-        context: Context,
         cr: ContentResolver,
         treeUri: Uri,
         d: Saf.Entry,

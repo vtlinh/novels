@@ -18,8 +18,7 @@ object Storage {
 
     fun isCounted(name: String): Boolean {
         if (Zips.isPartName(name)) return true
-        val base = if (Zips.isGzName(name)) name.removeSuffix(".gz") else name
-        return ChapterName.RE.matches(base)
+        return ChapterName.isStored(name)
     }
 
     /* One directory listing — files only. Directory sizes are ignored even

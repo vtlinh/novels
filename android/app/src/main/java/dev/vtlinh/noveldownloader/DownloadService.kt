@@ -78,7 +78,7 @@ class DownloadService : Service() {
             val out = LinkedHashSet<String>()
             for (i in 0 until arr.length()) {
                 val u = arr.optJSONObject(i)?.optString("url") ?: continue
-                if (u.isNotEmpty()) out.add(NovelListActivity.slugKeyFromUrl(u))
+                if (u.isNotEmpty()) out.add(Sites.slugKey(u))
             }
             queuedSlugsFlow.value = out
         }
@@ -265,7 +265,7 @@ class DownloadService : Service() {
             try {
             while (true) {
                 currentUrl = curUrl
-                activeSlugFlow.value = NovelListActivity.slugKeyFromUrl(curUrl)
+                activeSlugFlow.value = Sites.slugKey(curUrl)
                 val eng = DownloadEngine(
                     applicationContext,
                     log = { line -> appendLog(line) },
