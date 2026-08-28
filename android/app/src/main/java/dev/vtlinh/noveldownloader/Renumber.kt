@@ -13,13 +13,15 @@ package dev.vtlinh.noveldownloader
    meant touching it loaded the Activity and pulled in appcompat — so the one
    pattern that decides whether a file is visible to the reader, the dedupe
    and the surplus sweep could not be unit-tested at all. It is plain Kotlin
-   here; ChapterListActivity.CHAPTER_RE still points at it. */
+   here and every caller reads it directly. */
 object ChapterName {
 
     /* accepts "Chapter 70.txt", "Chapter 70-71.txt" AND legacy names with a
        title suffix like "Chapter 70 - Hoan chinh van.txt". Deliberately does
        NOT accept a ".part" name — a half-written file must stay invisible. */
     val RE = Regex("Chapter (\\d+)(?:-(\\d+))?.*\\.txt")
+
+    fun isStored(name: String) = RE.matches(name.removeSuffix(".gz"))
 }
 
 object Listing {

@@ -36,10 +36,6 @@ class TtsService : Service() {
            whichever of the two the reader is not doing. */
         const val ACTION_TOGGLE = "dev.vtlinh.noveldownloader.TTS_TOGGLE"
 
-        /* true while a reading session is active — the auto-updater checks
-           this so it never kills the process mid-read */
-        @Volatile var isRunning = false
-
         fun start(ctx: Context, title: String, speaking: Boolean, token: MediaSessionCompat.Token?, slug: String?) {
             ctx.startForegroundService(
                 Intent(ctx, TtsService::class.java)
@@ -60,7 +56,6 @@ class TtsService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        isRunning = true
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Read aloud", NotificationManager.IMPORTANCE_LOW),
         )
@@ -151,7 +146,6 @@ class TtsService : Service() {
     }
 
     override fun onDestroy() {
-        isRunning = false
         try { wakeLock?.release() } catch (e: Exception) {}
         wakeLock = null
         super.onDestroy()

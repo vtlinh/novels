@@ -472,7 +472,7 @@ class NovelSettingsActivity : AppCompatActivity() {
         for (kid in kids) {
             /* the chapters, their compressed forms, and translated/ whole —
                a partly-emptied novel is worse than either end of this */
-            val isChapter = ChapterName.RE.matches(kid.name.removeSuffix(".gz"))
+            val isChapter = ChapterName.isStored(kid.name)
             if (!isChapter && !(kid.isDir && kid.name == "translated")) continue
             val ok = try {
                 DocumentsContract.deleteDocument(

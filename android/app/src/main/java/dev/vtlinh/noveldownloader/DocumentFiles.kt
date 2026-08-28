@@ -9,10 +9,6 @@ import android.provider.DocumentsContract
 /* SAF I/O for the documents folder. The naming rules live in Documents. */
 object DocumentFiles {
 
-    fun compressOn(ctx: Context): Boolean =
-        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-            .let { it.getBoolean("compressNovels", it.getBoolean("zipDownloads", true)) }
-
     fun openReader(ctx: Context, title: String, plainName: String) {
         ctx.startActivity(
             Intent(ctx, ReaderActivity::class.java)
@@ -91,7 +87,7 @@ object DocumentFiles {
         }
         val stem = Documents.uniqueStem(Documents.stem(title), taken)
         val name = Documents.plainName(stem)
-        val compress = compressOn(ctx)
+        val compress = Compression.enabled(ctx)
         val same = name == replacing || currentStem == stem
         return try {
             writeFile(cr, treeUri, dir, name, text, compress, replace = same)

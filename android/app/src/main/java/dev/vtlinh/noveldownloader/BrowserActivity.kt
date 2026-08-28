@@ -383,7 +383,7 @@ class BrowserActivity : AppCompatActivity() {
         val site = Sites.forUrl(url) ?: return ""
         return try {
             val (base, slug) = site.normalize(url)
-            if (slug.isEmpty()) "" else NovelListActivity.slugKeyFromUrl(base)
+            if (slug.isEmpty()) "" else Sites.slugKey(base)
         } catch (e: Exception) { "" }
     }
 
@@ -482,7 +482,7 @@ class BrowserActivity : AppCompatActivity() {
         /* the button is disabled while this novel is in flight; re-check
            anyway so a stale tap (or the folder-picker resume) can't queue it
            a second time */
-        if (DownloadService.isBusy(NovelListActivity.slugKeyFromUrl(url))) {
+        if (DownloadService.isBusy(Sites.slugKey(url))) {
             refreshDownloadButton()
             return
         }
@@ -492,7 +492,7 @@ class BrowserActivity : AppCompatActivity() {
             pickFolder.launch(null)
             return
         }
-        val slugKey = NovelListActivity.slugKeyFromUrl(url)
+        val slugKey = Sites.slugKey(url)
         val garbage = prefs.getStringSet(NovelListActivity.GARBAGE_KEY, emptySet()) ?: emptySet()
         if (slugKey.isNotEmpty() && slugKey in garbage) {
             AlertDialog.Builder(this)
@@ -579,7 +579,7 @@ class BrowserActivity : AppCompatActivity() {
         val folder = prefs.getString("tree", null) ?: return
         val (base, slug) = try { site.normalize(url) } catch (e: Exception) { return }
         if (slug.isEmpty()) return                       // a listing page, not a novel
-        val slugKey = NovelListActivity.slugKeyFromUrl(base)
+        val slugKey = Sites.slugKey(base)
         if (slugKey.isEmpty()) return
         /* garbage-marked novels aren't in the list, so don't advertise them —
            though one being downloaded right now still earns its banner */
@@ -590,7 +590,7 @@ class BrowserActivity : AppCompatActivity() {
             val found = withContext(Dispatchers.IO) {
                 try {
                     val rec = store.novels(folder).firstOrNull {
-                        it.slug.lowercase().filter { c -> c.isLetterOrDigit() } == slugKey
+                        Ownership.normKey(it.slug) == slugKey
                     } ?: return@withContext null
                     val dir = store.dirNameOrGuess(folder, rec.slug, rec.title)
                     Triple(rec, dir, store.chapterCount(folder, rec.slug))

@@ -309,8 +309,7 @@ class Translator(
     } catch (e: Exception) { null }
 
     private val compressOn: Boolean
-        get() = context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
-            .let { it.getBoolean("compressNovels", it.getBoolean("zipDownloads", true)) }
+        get() = Compression.enabled(context)
 
     private fun writeTranslated(tdir: DocumentFile, name: String, text: String): Boolean {
         return try {

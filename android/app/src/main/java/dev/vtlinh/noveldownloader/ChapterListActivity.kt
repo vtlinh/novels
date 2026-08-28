@@ -18,12 +18,6 @@ import kotlinx.coroutines.withContext
 class ChapterListActivity : AppCompatActivity() {
 
     companion object {
-        /* accepts "Chapter 70.txt", "Chapter 70-71.txt" AND legacy names
-           with a title suffix like "Chapter 70 - Hoan chinh van.txt" */
-        /* lives in ChapterName so it can be unit-tested without loading an
-           Activity; kept here because every call site already reads it here */
-        val CHAPTER_RE = ChapterName.RE
-
         /* how many places in a cached listing to spot-check before trusting it */
         private const val CACHE_PROBES = 5
 
@@ -62,7 +56,6 @@ class ChapterListActivity : AppCompatActivity() {
 
         /* is this cached ref still backed by something on disk? */
         private fun refUsable(
-            context: android.content.Context,
             cr: android.content.ContentResolver,
             treeUri: Uri,
             ref: String,
@@ -119,7 +112,7 @@ class ChapterListActivity : AppCompatActivity() {
                         Folder.folderUnchanged(cached.stamp, here) &&
                         Folder.cacheValid(
                             cached.ordered, cached.source, CACHE_PROBES,
-                        ) { ref -> refUsable(context, cr, treeUri, ref) }
+                        ) { ref -> refUsable(cr, treeUri, ref) }
                     if (ok) return Chapters(cached.ordered, cached.source, cached.translated)
                     try { store.clearChapterList(folder, slug) } catch (e: Exception) {}
                 }
@@ -544,7 +537,7 @@ class ChapterListActivity : AppCompatActivity() {
        running, and one final pass once the download stops. */
     private fun startLiveRefresh() {
         val slug = intent.getStringExtra("slug") ?: return
-        val key = slug.lowercase().filter { it.isLetterOrDigit() }
+        val key = Ownership.normKey(slug)
         liveJob?.cancel()
         liveJob = lifecycleScope.launch {
             var wasBusy = DownloadService.isBusy(key)
