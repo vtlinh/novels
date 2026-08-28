@@ -1506,16 +1506,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun skipParagraph(forward: Boolean) {
         val body = text.text.toString()
         if (body.isEmpty()) return
-        /* the sentence being/last spoken; before any reading, the top of the
-           viewport — the same place the play button would start from */
-        val anchor = if (resumeCursor >= 0) {
-            resumeCursor
-        } else {
-            val layout = text.layout ?: return
-            layout.getLineStart(
-                layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
-            )
-        }
+        val anchor = ttsAnchor() ?: return
         /* blank lines and the ⁂ chapter separator are not paragraphs — skips
            step over them, landing on a chapter heading like any other line */
         fun isBreak(c: Char) = c == '\n' || c == ' ' || c == '⁂'
@@ -1538,15 +1529,17 @@ class ReaderActivity : AppCompatActivity() {
                 target = paraStartOf(i)
             }
         }
-        if (speaking) {
-            startTtsFrom(target)
-            return
-        }
-        resumeCursor = sentStartOf(target)
-        nextSentence(body, resumeCursor)?.let { setHighlight(it.first, it.second) }
-        scroll.smoothScrollTo(0, navScrollY(resumeCursor, fifth = true))
-        saveTtsPos(resumeCursor)
-        updateMediaSessionState()
+        moveTo(target)
+    }
+
+    /* the sentence being/last spoken; before any reading, the top of the
+       viewport — the same place the play button would start from */
+    private fun ttsAnchor(): Int? {
+        if (resumeCursor >= 0) return resumeCursor
+        val layout = text.layout ?: return null
+        return layout.getLineStart(
+            layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
+        )
     }
 
     /* HOLDING ❮/❯: move a CHAPTER at a time. ❯ goes to the top of the next
@@ -1563,34 +1556,26 @@ class ReaderActivity : AppCompatActivity() {
         val ch = chapters ?: return
         val body = text.text.toString()
         if (body.isEmpty()) return
-        /* the sentence being/last spoken; before any reading, the top of the
-           viewport — the same anchor the paragraph skip uses */
-        val anchor = if (resumeCursor >= 0) {
-            resumeCursor
-        } else {
-            val layout = text.layout ?: return
-            layout.getLineStart(
-                layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
-            )
-        }
+        val anchor = ttsAnchor() ?: return
         val cur = loadedChapters.lastOrNull { it.start <= anchor } ?: return
         /* Neighbours by buffer POSITION, not by idx ± 1: an unreadable
            chapter is skipped when the buffer loads, so the chapter next to
            this one on screen — the one a skip should land on — may not be
            the next index in the listing. */
-        if (forward) {
-            val next = loadedChapters.firstOrNull { it.start > cur.start }
-            if (next != null) return moveTo(next.start)
-            if (cur.idx + 1 >= ch.ordered.size) return   // last chapter — nowhere to go
-            reopenAt(cur.idx + 1)
-        } else {
+        if (!forward) {
             val firstSent = nextSentence(body, cur.start)?.first ?: cur.start
             if (anchor > firstSent) return moveTo(cur.start)   // mid-chapter → its top
-            val prev = loadedChapters.lastOrNull { it.start < cur.start }
-            if (prev != null) return moveTo(prev.start)
-            if (cur.idx <= 0) return   // top of the novel, at its top
-            reopenAt(cur.idx - 1)
         }
+        val neighbour = if (forward) {
+            loadedChapters.firstOrNull { it.start > cur.start }
+        } else {
+            loadedChapters.lastOrNull { it.start < cur.start }
+        }
+        if (neighbour != null) return moveTo(neighbour.start)
+
+        val targetIdx = cur.idx + if (forward) 1 else -1
+        if (targetIdx !in ch.ordered.indices) return
+        reopenAt(targetIdx)
     }
 
     /* land a chapter skip on `off` in the loaded buffer — the same move a
