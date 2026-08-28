@@ -630,8 +630,14 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
-        findViewById<TextView>(R.id.ttsPrevBtn).setOnClickListener { skipParagraph(forward = false) }
-        findViewById<TextView>(R.id.ttsNextBtn).setOnClickListener { skipParagraph(forward = true) }
+        findViewById<TextView>(R.id.ttsPrevBtn).apply {
+            setOnClickListener { skipParagraph(forward = false) }
+            setOnLongClickListener { skipChapter(forward = false); true }
+        }
+        findViewById<TextView>(R.id.ttsNextBtn).apply {
+            setOnClickListener { skipParagraph(forward = true) }
+            setOnLongClickListener { skipChapter(forward = true); true }
+        }
         findViewById<android.view.View>(R.id.ttsSettingsBtn).setOnClickListener { showTtsSettings() }
         /* the not-ready spinner doubles as a retry button once a bind gave up
            or voices never arrived */
@@ -1541,6 +1547,78 @@ class ReaderActivity : AppCompatActivity() {
         scroll.smoothScrollTo(0, navScrollY(resumeCursor, fifth = true))
         saveTtsPos(resumeCursor)
         updateMediaSessionState()
+    }
+
+    /* HOLDING ❮/❯: move a CHAPTER at a time. ❯ goes to the top of the next
+       chapter; ❮ back to the top of the one being read when it is
+       mid-chapter, and to the previous chapter when already at a top — the
+       same convention the short press applies to paragraphs.
+
+       A target inside the loaded buffer moves exactly like a paragraph skip:
+       speaking continues from the new spot, paused moves the resume point.
+       One outside it rebuilds the window there — speech rides through on
+       pendingSpeakAfterOpen, the same way the play button resumes into a
+       chapter that is not loaded. */
+    private fun skipChapter(forward: Boolean) {
+        val ch = chapters ?: return
+        val body = text.text.toString()
+        if (body.isEmpty()) return
+        /* the sentence being/last spoken; before any reading, the top of the
+           viewport — the same anchor the paragraph skip uses */
+        val anchor = if (resumeCursor >= 0) {
+            resumeCursor
+        } else {
+            val layout = text.layout ?: return
+            layout.getLineStart(
+                layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
+            )
+        }
+        val cur = loadedChapters.lastOrNull { it.start <= anchor } ?: return
+        /* Neighbours by buffer POSITION, not by idx ± 1: an unreadable
+           chapter is skipped when the buffer loads, so the chapter next to
+           this one on screen — the one a skip should land on — may not be
+           the next index in the listing. */
+        if (forward) {
+            val next = loadedChapters.firstOrNull { it.start > cur.start }
+            if (next != null) return moveTo(next.start)
+            if (cur.idx + 1 >= ch.ordered.size) return   // last chapter — nowhere to go
+            reopenAt(cur.idx + 1)
+        } else {
+            val firstSent = nextSentence(body, cur.start)?.first ?: cur.start
+            if (anchor > firstSent) return moveTo(cur.start)   // mid-chapter → its top
+            val prev = loadedChapters.lastOrNull { it.start < cur.start }
+            if (prev != null) return moveTo(prev.start)
+            if (cur.idx <= 0) return   // top of the novel, at its top
+            reopenAt(cur.idx - 1)
+        }
+    }
+
+    /* land a chapter skip on `off` in the loaded buffer — the same move a
+       paragraph skip makes: keep speaking from it, or shift the paused
+       resume point there */
+    private fun moveTo(off: Int) {
+        if (speaking) {
+            startTtsFrom(off)
+            return
+        }
+        resumeCursor = sentStartOf(off)
+        nextSentence(text.text.toString(), resumeCursor)?.let { setHighlight(it.first, it.second) }
+        scroll.smoothScrollTo(0, navScrollY(resumeCursor, fifth = true))
+        saveTtsPos(resumeCursor)
+        updateMediaSessionState()
+    }
+
+    /* land a chapter skip past the buffer's edge — behind it while speaking
+       (prepends never run during speech), either edge paused. openAt refuses
+       while a load is in flight, so a hold during one does nothing; holding
+       again works. */
+    private fun reopenAt(idx: Int) {
+        if (speaking) {
+            pendingSpeakAfterOpen = true
+            openAt(idx)
+        } else {
+            goTo(idx, 0)
+        }
     }
 
     /* speak the next sentence: auto-detect its language (switching the whole
