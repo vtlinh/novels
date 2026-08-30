@@ -1550,8 +1550,8 @@ class ReaderActivity : AppCompatActivity() {
        A target inside the loaded buffer moves exactly like a paragraph skip:
        speaking continues from the new spot, paused moves the resume point.
        One outside it rebuilds the window there — speech rides through on
-       pendingSpeakAfterOpen, the same way the play button resumes into a
-       chapter that is not loaded. */
+       pendingSpeakAfterOpen; paused persists the landing as the resume
+       point, the same way an in-buffer skip does. */
     private fun skipChapter(forward: Boolean) {
         val ch = chapters ?: return
         val body = text.text.toString()
@@ -1586,9 +1586,16 @@ class ReaderActivity : AppCompatActivity() {
             startTtsFrom(off)
             return
         }
+        markPausedSkip(off)
+        scroll.smoothScrollTo(0, navScrollY(resumeCursor, fifth = true))
+    }
+
+    /* paused skip / reopen: Play reads resumeCursor, then ttsPos. Clearing
+       the cursor without writing ttsPos sent Play back to the previous
+       listen chapter. */
+    private fun markPausedSkip(off: Int) {
         resumeCursor = sentStartOf(off)
         nextSentence(text.text.toString(), resumeCursor)?.let { setHighlight(it.first, it.second) }
-        scroll.smoothScrollTo(0, navScrollY(resumeCursor, fifth = true))
         saveTtsPos(resumeCursor)
         updateMediaSessionState()
     }
@@ -1602,7 +1609,9 @@ class ReaderActivity : AppCompatActivity() {
             pendingSpeakAfterOpen = true
             openAt(idx)
         } else {
-            goTo(idx, 0)
+            /* goTo/openAt otherwise reset resumeCursor and only write lastCh,
+               so Play (which prefers ttsPos over lastCh) jumped back */
+            goTo(idx, 0, saveTts = true)
         }
     }
 
@@ -2681,7 +2690,12 @@ class ReaderActivity : AppCompatActivity() {
     /* Jump within the ALREADY-LOADED buffer: scroll straight to the chapter
        (and its saved paragraph) without reloading anything. Returns false
        when the chapter isn't loaded — caller falls back to openAt. */
-    private fun jumpToLoaded(pos: Int, targetPara: Int, anchor: String? = null): Boolean {
+    private fun jumpToLoaded(
+        pos: Int,
+        targetPara: Int,
+        anchor: String? = null,
+        saveTts: Boolean = false,
+    ): Boolean {
         if (loading) return false
         val lc = loadedChapters.firstOrNull { it.idx == pos } ?: return false
         val layout = text.layout ?: return false
@@ -2700,7 +2714,7 @@ class ReaderActivity : AppCompatActivity() {
         prependArmed = false   // jumped to this chapter; not a scroll-up-to-top
         scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
         currentChapterIdx = lc.idx
-        saveLastChapter(lc.idx)
+        if (saveTts) markPausedSkip(off) else saveLastChapter(lc.idx)
         /* placeAt, not a bare scrollTo: jumping deep into the LAST loaded
            chapter would otherwise be clamped by the page end and stay there */
         setTextFocusable(false)
@@ -2729,7 +2743,12 @@ class ReaderActivity : AppCompatActivity() {
        chapter is already loaded) or rebuild the window. Used for both the
        app-restart restore and chapter-list picks (including re-picking the
        current chapter to return to where we left off). */
-    private fun goTo(pos: Int, targetPara: Int, anchor: String? = null) {
+    private fun goTo(
+        pos: Int,
+        targetPara: Int,
+        anchor: String? = null,
+        saveTts: Boolean = false,
+    ) {
         /* picking the chapter TTS is already reading → keep reading (nothing new
            to load); just bring the spoken line back into view */
         if (speaking) {
@@ -2744,7 +2763,9 @@ class ReaderActivity : AppCompatActivity() {
         gotoJob = lifecycleScope.launch {
             var waited = 0
             while (loading && waited < 120) { kotlinx.coroutines.delay(50); waited++ }
-            if (!jumpToLoaded(pos, targetPara, anchor)) openAt(pos, targetPara, anchor)
+            if (!jumpToLoaded(pos, targetPara, anchor, saveTts)) {
+                openAt(pos, targetPara, anchor, saveTts)
+            }
         }
     }
 
@@ -2762,7 +2783,12 @@ class ReaderActivity : AppCompatActivity() {
        place to scroll to is its own start plus the paragraph within it — the
        one thing the old "target is just its paragraph" shortcut got for
        free. */
-    private fun openAt(pos: Int, targetPara: Int = 0, anchor: String? = null) {
+    private fun openAt(
+        pos: Int,
+        targetPara: Int = 0,
+        anchor: String? = null,
+        saveTts: Boolean = false,
+    ) {
         /* Both early returns disarm the Play flag. It is set right before the
            call at the Play button, and nothing else ever cleared it — so a
            Play pressed while a load was in flight did nothing visible and left
@@ -2868,6 +2894,8 @@ class ReaderActivity : AppCompatActivity() {
                         pendingSpeakAfterOpen = false
                         /* TTS extends its own runway from here (speakNext) */
                         startTtsFrom(targetOff)
+                    } else if (saveTts && !spotLost && targetBodyLen > 0) {
+                        markPausedSkip(targetOff)
                     }
                 }
             }
