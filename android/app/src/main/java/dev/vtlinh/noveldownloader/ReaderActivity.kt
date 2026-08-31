@@ -82,14 +82,20 @@ class ReaderActivity : AppCompatActivity() {
     private var currentChapterIdx = -1
     private var drawerAdapter: ArrayAdapter<String>? = null
 
-    /* (chapter index, paragraph within it) at the top of the viewport */
+    /* (chapter index, paragraph within it) a language reload should keep.
+       The listen spot when there is one, otherwise the viewport — and the
+       same two-line bias updateHeader uses, so a heading at the top of the
+       screen is not rounded back to the previous chapter. */
     private fun currentPosition(): Pair<Int, Int>? {
         val layout = text.layout ?: return null
-        val y = (scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)
-        val off = layout.getLineStart(layout.getLineForVertical(y))
-        val cur = loadedChapters.lastOrNull { it.start <= off } ?: return null
-        val para = text.text.subSequence(cur.start, off.coerceAtLeast(cur.start)).count { it == '\n' }
-        return Pair(cur.idx, para)
+        val bias = (fontSp * 2f * resources.displayMetrics.scaledDensity).toInt()
+        val y = (scroll.scrollY - text.totalPaddingTop + bias).coerceAtLeast(0)
+        val viewOff = layout.getLineStart(layout.getLineForVertical(y))
+        val off = ReaderPos.reloadOffset(resumeCursor, viewOff)
+        val starts = loadedChapters.map { it.start }
+        val pos = ReaderPos.positionAt(starts, text.text, off) ?: return null
+        val idx = loadedChapters.getOrNull(pos.first)?.idx ?: return null
+        return Pair(idx, pos.second)
     }
 
     private fun asDocument() = intent.getBooleanExtra(Documents.EXTRA_DOCUMENT, false)

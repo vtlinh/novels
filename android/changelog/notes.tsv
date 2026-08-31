@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Simplify shared identity rules and remove dead code
+	Keep the listen chapter when switching EN/VI
+1.35.3	Simplify shared identity rules and remove dead code
 1.35.2	Simplify TTS skip navigation without changing behavior
 1.35.1	Hold ❮/❯ while listening to jump a whole chapter
 1.34.2	Add a Documents section for pasted text
