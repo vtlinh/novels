@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Keep the listen chapter when switching EN/VI
 	Don't gzip other folders when no novels are on record
 	Don't drop the listen spot when a Library delete fails
 	Don't bind a second TTS engine when the reader opens
