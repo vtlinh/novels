@@ -104,6 +104,10 @@ class DocumentsTest {
         assertTrue(Documents.isReservedDir("DOCUMENTS"))
         assertFalse(Documents.isReservedDir("document"))
         assertFalse(Documents.isReservedDir("my documents"))
+        /* CompressWalk inlines the same name so it can be tested without
+           Android; a rename of DIR must fail here until that copy matches. */
+        assertEquals("documents", Documents.DIR)
+        assertFalse(CompressWalk.includeNovelDir(Documents.DIR, setOf(Documents.DIR)))
     }
 
     /* A novel whose title sanitises to our folder would otherwise write its
