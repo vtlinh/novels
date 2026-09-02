@@ -1739,13 +1739,13 @@ class ReaderActivity : AppCompatActivity() {
         t.speak(toSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, Utterance.id(++speechGen))
     }
 
-    /* Speech edits (managed on the Speech-edits screen) applied to every
-       English sentence before it is spoken: user rules then the built-in
-       defaults. Only the copy handed to the engine is rewritten, so on-screen
-       text and s0/s1 offsets are untouched. Reloaded on resume so edits made
-       on that screen take effect immediately. */
-    private var speechRules: List<Pair<Regex, String>> = emptyList()
-    private val collapseWs = Regex("\\s+")
+    /* Speech edits (managed on the Speech-edits screen) applied before a
+       sentence is spoken. User rules always; the English abbreviation
+       defaults only on an English chapter — a Vietnamese chapter used to
+       skip the user's own edits too, so a quote→empty rule never reached
+       the engine. Reloaded on resume so edits take effect immediately. */
+    private var userSpeechRules: List<Pair<Regex, String>> = emptyList()
+    private var defaultSpeechRules: List<Pair<Regex, String>> = emptyList()
 
     /* generous for any sane rule on one sentence, far short of a stall the
        user would notice between two spoken lines */
@@ -1758,8 +1758,18 @@ class ReaderActivity : AppCompatActivity() {
     private var rulesTooSlow = false
 
     private fun reloadSpeechRules() {
-        if (rulesTooSlow) { speechRules = emptyList(); return }
-        speechRules = try { SpeechEdits.enabledRules(this) } catch (e: Exception) { emptyList() }
+        if (rulesTooSlow) {
+            userSpeechRules = emptyList()
+            defaultSpeechRules = emptyList()
+            return
+        }
+        try {
+            userSpeechRules = SpeechEdits.enabledUserRules(this)
+            defaultSpeechRules = SpeechEdits.enabledDefaultRules(this)
+        } catch (e: Exception) {
+            userSpeechRules = emptyList()
+            defaultSpeechRules = emptyList()
+        }
     }
 
     /* Speech rules are arbitrary user-authored regexes, imported wholesale
@@ -1775,20 +1785,15 @@ class ReaderActivity : AppCompatActivity() {
        drop the rule set for the rest of the session rather than abandon a
        fresh runaway thread on every sentence. */
     private fun cleanForSpeech(sentence: String, lang: String): String {
-        if (lang != "en" || speechRules.isEmpty()) return sentence
-        val rules = speechRules
+        val rules = if (lang == "en") userSpeechRules + defaultSpeechRules else userSpeechRules
+        if (rules.isEmpty()) return sentence
         val out = SpeechEdits.within(RULE_BUDGET_MS) {
-            var s = "$sentence "   // trailing space so end-anchored rules fire
-            for ((re, rep) in rules) {
-                /* one bad rule (e.g. a replacement with an out-of-range $group)
-                   must never crash the read — skip it and keep going */
-                s = try { re.replace(s, rep) } catch (e: Exception) { s }
-            }
-            s.replace(collapseWs, " ").trim()
+            SpeechText.apply(rules, sentence)
         }
         if (out == null) {
             rulesTooSlow = true
-            speechRules = emptyList()
+            userSpeechRules = emptyList()
+            defaultSpeechRules = emptyList()
             android.widget.Toast.makeText(
                 this, "A speech-edit rule is too slow — rules turned off for now", android.widget.Toast.LENGTH_LONG,
             ).show()

@@ -609,17 +609,7 @@ class SpeechEditsActivity : AppCompatActivity() {
             val rules = if (applyAll.isChecked) allActiveRules(compiled) else listOf(compiled)
             val done = SpeechEdits.within(300L) {
                 try {
-                    if (applyAll.isChecked) {
-                        /* mirror the reader's cleanForSpeech: trailing space so
-                           end-anchored rules fire, one bad rule skipped not fatal */
-                        var s = "$input "
-                        for ((re, rep) in rules) {
-                            s = try { re.replace(s, rep) } catch (e: Exception) { s }
-                        }
-                        s.replace(Regex("\\s+"), " ").trim()
-                    } else {
-                        compiled.first.replace(input, compiled.second)
-                    }
+                    SpeechText.apply(rules, input)
                 } catch (e: Exception) {
                     "Invalid pattern"
                 }

@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Add pause duration between TTS sentences, paragraphs, and chapters
+	Silence leading quotes and ellipses that TTS reads aloud
+1.36.1	Add pause duration between TTS sentences, paragraphs, and chapters
 1.35.3	Simplify shared identity rules and remove dead code
 1.35.2	Simplify TTS skip navigation without changing behavior
 1.35.1	Hold ❮/❯ while listening to jump a whole chapter
