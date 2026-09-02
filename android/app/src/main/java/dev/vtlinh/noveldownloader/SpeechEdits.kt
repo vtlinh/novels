@@ -23,8 +23,7 @@ data class SpeechEdit(
 ) {
     /* compiled (regex, replacement) or null if the pattern doesn't compile */
     fun compiled(): Pair<Regex, String>? = try {
-        var p = if (type == 2) pattern else Regex.escape(pattern)
-        if (wholeWord) p = "\\b(?:$p)\\b"
+        val p = if (type == 2) pattern else SpeechText.literalPattern(pattern, wholeWord)
         val opts = if (type == 0) setOf(RegexOption.IGNORE_CASE) else emptySet()
         Regex(p, opts) to replace
     } catch (e: Exception) {
@@ -77,7 +76,7 @@ object SpeechEdits {
         listOf(
             d("Silence links", "(([\\w-]+://?|www[.])[^\\s()<>]+(?:\\([\\w\\d]+\\)|([^\\p{Punct}\\s]|/)))", ""),
             d("Silence emojis", EMOJI, ""),
-            d("Remove ellipsis at start", "^\\s*\\u2026", ""),
+            d("Remove ellipsis at start", SpeechText.LEADING_ELLIPSIS, ""),
             d("", "(?i)\\b(no\\.)(\\s+[0-9])", "number$2"),
             d("", "(?i)\\b((no)\\.)(\\s+[^0-9]|\\s*$)", "$2; $3"),
             d("", "\\bMr\\.\\s", "Mister "),
@@ -90,6 +89,9 @@ object SpeechEdits {
             d("", "\\bGen\\.\\s", "General "),
             d("", "\\b([A-Z])\\.(?=\\s)", "$1"),
             d("", "\\bSt\\.\\s+([A-Z][a-z]+)\\b", "Saint $1"),
+            /* appended so existing default ids (and any overrides) stay put */
+            d("Silence ellipsis", SpeechText.ELLIPSIS, ""),
+            d("Silence standalone quotes", SpeechText.STANDALONE_QUOTES, ""),
         )
     }
 
@@ -159,12 +161,20 @@ object SpeechEdits {
     /* compiled enabled rules for the reader: user rules first, then the
        built-in defaults (each possibly overridden, and skippable when its
        override disables it) */
-    fun enabledRules(ctx: Context): List<Pair<Regex, String>> {
+    fun enabledUserRules(ctx: Context): List<Pair<Regex, String>> {
         val out = ArrayList<Pair<Regex, String>>()
         user(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
+        return out
+    }
+
+    fun enabledDefaultRules(ctx: Context): List<Pair<Regex, String>> {
+        val out = ArrayList<Pair<Regex, String>>()
         effectiveDefaults(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
         return out
     }
+
+    fun enabledRules(ctx: Context): List<Pair<Regex, String>> =
+        enabledUserRules(ctx) + enabledDefaultRules(ctx)
 
     /* ── @Voice Aloud Reader replacement-file format ── */
 
