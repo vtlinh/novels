@@ -368,6 +368,9 @@ class ReaderActivity : AppCompatActivity() {
     private var resumeCursor = -1      // start of the sentence being/last spoken
     private var pendingSpeakContinue = false
     private var pendingSpeakAfterOpen = false
+    /* true while playSilentUtterance is the current utterance: its onDone
+       must speak the next sentence, not insert another pause. */
+    private var awaitingSilence = false
     private var curTtsLang = ""        // language profile currently applied ("en"/"vi")
     private var curSentStart = -1
     private var curSentEnd = -1
@@ -1011,11 +1014,11 @@ class ReaderActivity : AppCompatActivity() {
         t.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
-                runOnUiThread { if (speaking && Utterance.isCurrent(utteranceId, speechGen)) speakNext() }
+                runOnUiThread { if (speaking && Utterance.isCurrent(utteranceId, speechGen)) afterUtterance() }
             }
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-                runOnUiThread { if (speaking && Utterance.isCurrent(utteranceId, speechGen)) speakNext() }
+                runOnUiThread { if (speaking && Utterance.isCurrent(utteranceId, speechGen)) afterUtterance() }
             }
         })
         tts = t
@@ -1475,6 +1478,10 @@ class ReaderActivity : AppCompatActivity() {
             return
         }
         pendingPlayUntil = 0L
+        awaitingSilence = false
+        /* retire any in-flight sentence or silence so its report cannot
+           advance us after this new start (a skip mid-pause, a replay) */
+        speechGen++
         speakCursor = sentStartOf(off)
         speaking = true
         clearTextSelection()  // remove the start-tap cursor so it can't yank later
@@ -1603,6 +1610,49 @@ class ReaderActivity : AppCompatActivity() {
             openAt(idx)
         } else {
             goTo(idx, 0)
+        }
+    }
+
+    /* A spoken sentence finished: stay silent for the pause the gap to the
+       next one asks for, then continue. A silent utterance finishing just
+       continues — another pause here would stack them.
+
+       playSilentUtterance inserts that silence in the engine. speaking
+       stays true and the session stays live; the voice just says nothing.
+       A Handler delay would drop the engine out of the speaking session. */
+    private fun afterUtterance() {
+        if (awaitingSilence) {
+            awaitingSilence = false
+            speakNext()
+            return
+        }
+        playBoundaryPauseOrSpeak()
+    }
+
+    private fun playBoundaryPauseOrSpeak() {
+        val t = tts ?: run { speakNext(); return }
+        val body = text.text.toString()
+        val next = nextSentence(body, speakCursor) ?: run { speakNext(); return }
+        val from = speakCursor.coerceIn(0, next.first)
+        val gap = body.subSequence(from, next.first)
+        val starts = loadedChapters.map { it.start }
+        val level = TtsPause.level(gap, TtsPause.crossesChapter(from, next.first, starts))
+        val ms = TtsPause.millis(prefs.getFloat(TtsPause.key(level), 0f))
+        if (ms <= 0L) {
+            speakNext()
+            return
+        }
+        awaitingSilence = true
+        val ok = try {
+            t.playSilentUtterance(
+                ms,
+                android.speech.tts.TextToSpeech.QUEUE_FLUSH,
+                Utterance.id(++speechGen),
+            ) == android.speech.tts.TextToSpeech.SUCCESS
+        } catch (e: Exception) { false }
+        if (!ok) {
+            awaitingSilence = false
+            speakNext()
         }
     }
 
@@ -1849,6 +1899,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun pauseTts() {
         speaking = false
         pendingPlayUntil = 0L
+        awaitingSilence = false
         silence.stop()
         cancelAutoScroll()
         cancelSleepTimer()
@@ -1874,6 +1925,7 @@ class ReaderActivity : AppCompatActivity() {
            before this stop must not start speaking when the watchdog's next
            rebind succeeds */
         pendingPlayUntil = 0L
+        awaitingSilence = false
         silence.stop()
         cancelAutoScroll()
         cancelSleepTimer()
@@ -2251,6 +2303,49 @@ class ReaderActivity : AppCompatActivity() {
         fontRow.addView(fontBtn("+", +1f))
         disp.addView(fontRow)
         disp.addView(fontSample)
+
+        /* ── Pause duration ── */
+        val pauses = card()
+        cardTitle(pauses, "Pause duration")
+        fun pauseRow(label: String, key: String) {
+            val row = android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, dp(10), 0, 0)
+            }
+            row.addView(
+                TextView(ctx).apply {
+                    text = label; textSize = 15f; setTextColor(getColor(R.color.fg))
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                    )
+                },
+            )
+            val valTv = TextView(ctx).apply {
+                text = TtsPause.format(prefs.getFloat(key, 0f))
+                textSize = 15f; setTextColor(getColor(R.color.fg))
+                minWidth = dp(44); gravity = android.view.Gravity.CENTER
+            }
+            fun nudge(delta: Float) {
+                val next = TtsPause.step(prefs.getFloat(key, 0f), delta)
+                prefs.edit().putFloat(key, next).apply()
+                valTv.text = TtsPause.format(next)
+            }
+            fun pauseBtn(t: String, d: Float) = TextView(ctx).apply {
+                text = t; textSize = 22f; setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(getColor(R.color.accent)); setPadding(dp(16), dp(2), dp(16), dp(2))
+                isClickable = true; isFocusable = true
+                setOnClickListener { nudge(d) }
+            }
+            row.addView(pauseBtn("−", -TtsPause.STEP))
+            row.addView(valTv)
+            row.addView(pauseBtn("+", +TtsPause.STEP))
+            pauses.addView(row)
+        }
+        pauseRow("Between sentences", TtsPause.SENTENCE_KEY)
+        pauseRow("Between paragraphs", TtsPause.PARAGRAPH_KEY)
+        pauseRow("Between chapters", TtsPause.CHAPTER_KEY)
+        hint(pauses, "Seconds of silence after each sentence, paragraph, or chapter. The voice keeps going — it just says nothing for that long.")
 
         var stopShakeTest: () -> Unit = {}
 
