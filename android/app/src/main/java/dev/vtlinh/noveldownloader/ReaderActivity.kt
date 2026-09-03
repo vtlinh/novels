@@ -1786,7 +1786,9 @@ class ReaderActivity : AppCompatActivity() {
        fresh runaway thread on every sentence. */
     private fun cleanForSpeech(sentence: String, lang: String): String {
         val rules = if (lang == "en") userSpeechRules + defaultSpeechRules else userSpeechRules
-        if (rules.isEmpty()) return sentence
+        /* Folding has to happen even with no rules — Google still shouts
+           an all-caps sentence, and a timeout must not put the shout back. */
+        if (rules.isEmpty()) return SpeechText.foldAllCaps(sentence)
         val out = SpeechEdits.within(RULE_BUDGET_MS) {
             SpeechText.apply(rules, sentence)
         }
@@ -1797,7 +1799,7 @@ class ReaderActivity : AppCompatActivity() {
             android.widget.Toast.makeText(
                 this, "A speech-edit rule is too slow — rules turned off for now", android.widget.Toast.LENGTH_LONG,
             ).show()
-            return sentence
+            return SpeechText.foldAllCaps(sentence)
         }
         return out
     }

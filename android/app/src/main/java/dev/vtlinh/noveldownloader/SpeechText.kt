@@ -8,6 +8,26 @@ package dev.vtlinh.noveldownloader
    dot dot dot". */
 object SpeechText {
 
+    /* Google TTS shouts a sentence written in full caps, and a
+       case-sensitive replacement written the way the words are spoken
+       never sees them. If every letter is already uppercase, fold the
+       sentence to lowercase first — the on-screen text is untouched;
+       only the spoken copy and the text the rules match against change.
+       A sentence with no letters, a lone letter ("I.", "A."), or any
+       lowercase letter is left alone. lowercase() with no locale folds
+       by Locale.ROOT, same as Voices.sortKey: a Turkish default fold
+       would turn I into ı. */
+    fun foldAllCaps(text: String): String {
+        var letters = 0
+        for (c in text) {
+            if (!c.isLetter()) continue
+            if (c.isLowerCase()) return text
+            letters++
+        }
+        if (letters < 2) return text
+        return text.lowercase()
+    }
+
     /* Quote marks Google TTS reads aloud as "single quote" / "quote".
        Opening ‘ and closing ’ are different characters; a rule that
        matches only the one that was typed leaves the other standing. */
@@ -49,10 +69,11 @@ object SpeechText {
 
     private val WS = Regex("\\s+")
 
-    /* The same rewrite the reader hands to the engine: trailing space so
+    /* The same rewrite the reader hands to the engine: all-caps folded
+       so shouting and replacements see lowercase, trailing space so
        end-anchored rules fire, one bad rule skipped, whitespace collapsed. */
     fun apply(rules: List<Pair<Regex, String>>, text: String): String {
-        var s = "$text "
+        var s = "${foldAllCaps(text)} "
         for ((re, rep) in rules) {
             s = try { re.replace(s, rep) } catch (e: Exception) { s }
         }
