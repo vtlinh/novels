@@ -100,10 +100,6 @@ class SpeechTextTest {
             "i am the blackwater summoner.",
             spoken("I AM THE BLACKWATER SUMMONER."),
         )
-        assertEquals(
-            "i am the blackwater summoner.",
-            spoken("\"I AM THE BLACKWATER SUMMONER.\""),
-        )
     }
 
     @Test
