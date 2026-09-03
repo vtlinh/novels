@@ -8,6 +8,11 @@ package dev.vtlinh.noveldownloader
    dot dot dot". */
 object SpeechText {
 
+    /* Reading settings → All-caps sentences. On by default so shouted
+       dialogue is spoken as ordinary text; the checkbox turns it off. */
+    const val FOLD_ALL_CAPS_KEY = "ttsFoldAllCaps"
+    const val FOLD_ALL_CAPS_DEFAULT = true
+
     /* Google TTS shouts a sentence written in full caps, and a
        case-sensitive replacement written the way the words are spoken
        never sees them. If every letter is already uppercase, fold the
@@ -70,10 +75,14 @@ object SpeechText {
     private val WS = Regex("\\s+")
 
     /* The same rewrite the reader hands to the engine: all-caps folded
-       so shouting and replacements see lowercase, trailing space so
-       end-anchored rules fire, one bad rule skipped, whitespace collapsed. */
-    fun apply(rules: List<Pair<Regex, String>>, text: String): String {
-        var s = "${foldAllCaps(text)} "
+       when the Reading setting is on, trailing space so end-anchored
+       rules fire, one bad rule skipped, whitespace collapsed. */
+    fun apply(
+        rules: List<Pair<Regex, String>>,
+        text: String,
+        foldCaps: Boolean = FOLD_ALL_CAPS_DEFAULT,
+    ): String {
+        var s = "${if (foldCaps) foldAllCaps(text) else text} "
         for ((re, rep) in rules) {
             s = try { re.replace(s, rep) } catch (e: Exception) { s }
         }

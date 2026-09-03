@@ -2,6 +2,7 @@ package dev.vtlinh.noveldownloader
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /* What is stripped from a sentence before TTS speaks it.
@@ -130,5 +131,26 @@ class SpeechTextTest {
     fun `a sentence with no letters is left alone`() {
         assertEquals("...", SpeechText.foldAllCaps("..."))
         assertEquals("7565.", SpeechText.foldAllCaps("7565."))
+    }
+
+    /* The Reading-settings checkbox. Off must leave the shout standing,
+       including for a replacement that would have matched the fold. */
+    @Test
+    fun `folding can be turned off`() {
+        assertEquals(
+            "I AM THE BLACKWATER SUMMONER.",
+            SpeechText.apply(emptyList(), "I AM THE BLACKWATER SUMMONER.", foldCaps = false),
+        )
+        val rule = Regex("blackwater") to "Black Water"
+        assertEquals(
+            "I AM THE BLACKWATER SUMMONER.",
+            SpeechText.apply(listOf(rule), "I AM THE BLACKWATER SUMMONER.", foldCaps = false),
+        )
+    }
+
+    @Test
+    fun `the reading-settings key is the one the reader stores`() {
+        assertEquals("ttsFoldAllCaps", SpeechText.FOLD_ALL_CAPS_KEY)
+        assertTrue(SpeechText.FOLD_ALL_CAPS_DEFAULT)
     }
 }
