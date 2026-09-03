@@ -1786,9 +1786,12 @@ class ReaderActivity : AppCompatActivity() {
        fresh runaway thread on every sentence. */
     private fun cleanForSpeech(sentence: String, lang: String): String {
         val rules = if (lang == "en") userSpeechRules + defaultSpeechRules else userSpeechRules
-        if (rules.isEmpty()) return sentence
+        val fold = prefs.getBoolean(SpeechText.FOLD_ALL_CAPS_KEY, SpeechText.FOLD_ALL_CAPS_DEFAULT)
+        /* Folding has to happen even with no rules — Google still shouts
+           an all-caps sentence, and a timeout must not put the shout back. */
+        if (rules.isEmpty()) return if (fold) SpeechText.foldAllCaps(sentence) else sentence
         val out = SpeechEdits.within(RULE_BUDGET_MS) {
-            SpeechText.apply(rules, sentence)
+            SpeechText.apply(rules, sentence, fold)
         }
         if (out == null) {
             rulesTooSlow = true
@@ -1797,7 +1800,7 @@ class ReaderActivity : AppCompatActivity() {
             android.widget.Toast.makeText(
                 this, "A speech-edit rule is too slow — rules turned off for now", android.widget.Toast.LENGTH_LONG,
             ).show()
-            return sentence
+            return if (fold) SpeechText.foldAllCaps(sentence) else sentence
         }
         return out
     }
@@ -2351,6 +2354,21 @@ class ReaderActivity : AppCompatActivity() {
         pauseRow("Between paragraphs", TtsPause.PARAGRAPH_KEY)
         pauseRow("Between chapters", TtsPause.CHAPTER_KEY)
         hint(pauses, "Seconds of silence after each sentence, paragraph, or chapter. The voice keeps going — it just says nothing for that long.")
+
+        /* ── All-caps sentences ── */
+        val caps = card()
+        cardTitle(caps, "All-caps sentences")
+        val capsCheck = android.widget.CheckBox(ctx).apply {
+            text = "Read them as lowercase"
+            textSize = 14f; setTextColor(getColor(R.color.fg))
+            setPadding(dp(6), dp(10), 0, 0)
+            isChecked = prefs.getBoolean(SpeechText.FOLD_ALL_CAPS_KEY, SpeechText.FOLD_ALL_CAPS_DEFAULT)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean(SpeechText.FOLD_ALL_CAPS_KEY, checked).apply()
+            }
+        }
+        caps.addView(capsCheck)
+        hint(caps, "A sentence written in full capitals is spoken as ordinary text, and speech-edit replacements see the lowercase form. The page on screen does not change.")
 
         var stopShakeTest: () -> Unit = {}
 

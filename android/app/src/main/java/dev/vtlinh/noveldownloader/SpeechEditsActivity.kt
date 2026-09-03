@@ -607,9 +607,11 @@ class SpeechEditsActivity : AppCompatActivity() {
                back says so instead. */
             val input = testInput.text.toString()
             val rules = if (applyAll.isChecked) allActiveRules(compiled) else listOf(compiled)
+            val fold = getSharedPreferences("app", MODE_PRIVATE)
+                .getBoolean(SpeechText.FOLD_ALL_CAPS_KEY, SpeechText.FOLD_ALL_CAPS_DEFAULT)
             val done = SpeechEdits.within(300L) {
                 try {
-                    SpeechText.apply(rules, input)
+                    SpeechText.apply(rules, input, fold)
                 } catch (e: Exception) {
                     "Invalid pattern"
                 }

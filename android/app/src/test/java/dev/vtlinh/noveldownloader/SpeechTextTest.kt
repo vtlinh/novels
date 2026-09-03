@@ -2,6 +2,7 @@ package dev.vtlinh.noveldownloader
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /* What is stripped from a sentence before TTS speaks it.
@@ -84,5 +85,72 @@ class SpeechTextTest {
         val p = SpeechText.literalPattern("a+b", false)
         assertFalse("the plus must stay a literal", Regex(p).containsMatchIn("aab"))
         assertEquals("a+b", Regex(p).find("xa+by")!!.value)
+    }
+
+    /* THE DEFECT. A chapter of shouted dialogue arrives as a sentence
+       of only uppercase letters. Google TTS reads that as a shout, and
+       a case-sensitive replacement written the way the words are spoken
+       never matches. */
+    @Test
+    fun `an all-caps sentence is spoken in lowercase`() {
+        assertEquals(
+            "i am the blackwater summoner.",
+            SpeechText.apply(emptyList(), "I AM THE BLACKWATER SUMMONER."),
+        )
+        assertEquals(
+            "i am the blackwater summoner.",
+            spoken("I AM THE BLACKWATER SUMMONER."),
+        )
+    }
+
+    @Test
+    fun `an all-caps sentence is matched as lowercase`() {
+        val rule = Regex("blackwater") to "Black Water"
+        assertEquals(
+            "i am the Black Water summoner.",
+            SpeechText.apply(listOf(rule), "I AM THE BLACKWATER SUMMONER."),
+        )
+    }
+
+    @Test
+    fun `a mixed-case sentence is left alone`() {
+        assertEquals(
+            "I am the Blackwater Summoner.",
+            SpeechText.apply(emptyList(), "I am the Blackwater Summoner."),
+        )
+        assertEquals("don't shout", SpeechText.foldAllCaps("don't shout"))
+    }
+
+    @Test
+    fun `a lone capital letter is not folded`() {
+        assertEquals("I.", SpeechText.foldAllCaps("I."))
+        assertEquals("A.", SpeechText.foldAllCaps("A."))
+    }
+
+    @Test
+    fun `a sentence with no letters is left alone`() {
+        assertEquals("...", SpeechText.foldAllCaps("..."))
+        assertEquals("7565.", SpeechText.foldAllCaps("7565."))
+    }
+
+    /* The Reading-settings checkbox. Off must leave the shout standing,
+       including for a replacement that would have matched the fold. */
+    @Test
+    fun `folding can be turned off`() {
+        assertEquals(
+            "I AM THE BLACKWATER SUMMONER.",
+            SpeechText.apply(emptyList(), "I AM THE BLACKWATER SUMMONER.", foldCaps = false),
+        )
+        val rule = Regex("blackwater") to "Black Water"
+        assertEquals(
+            "I AM THE BLACKWATER SUMMONER.",
+            SpeechText.apply(listOf(rule), "I AM THE BLACKWATER SUMMONER.", foldCaps = false),
+        )
+    }
+
+    @Test
+    fun `the reading-settings key is the one the reader stores`() {
+        assertEquals("ttsFoldAllCaps", SpeechText.FOLD_ALL_CAPS_KEY)
+        assertTrue(SpeechText.FOLD_ALL_CAPS_DEFAULT)
     }
 }
