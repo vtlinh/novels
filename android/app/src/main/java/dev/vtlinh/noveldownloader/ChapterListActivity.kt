@@ -180,7 +180,7 @@ class ChapterListActivity : AppCompatActivity() {
 
         /* Settings and info both key off the slug — a folder-scanned row
            opened by directory name alone has nothing to look up. */
-        val settingsBtn = findViewById<TextView>(R.id.novelSettingsBtn)
+        val settingsBtn = findViewById<ImageView>(R.id.novelSettingsBtn)
         val infoBtn = findViewById<ImageView>(R.id.novelInfoBtn)
         val slugForSettings = intent.getStringExtra("slug")
         if (slugForSettings.isNullOrEmpty()) {
@@ -201,7 +201,7 @@ class ChapterListActivity : AppCompatActivity() {
            leaves, and the hamburger drawer stays locked. */
         findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
             .setDrawerLockMode(androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
-        findViewById<TextView>(R.id.backBtn).setOnClickListener { goBack() }
+        findViewById<ImageView>(R.id.backBtn).setOnClickListener { goBack() }
 
         ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
         onInfoTab = savedInstanceState?.let { state ->
@@ -715,9 +715,9 @@ class ChapterListActivity : AppCompatActivity() {
         /* ⇅ flips between reading order and newest-first (kept per novel) */
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
         val descKey = "chSortDesc:${slug ?: dirName}"
-        val sortBtn = findViewById<TextView>(R.id.sortBtn)
+        val sortBtn = findViewById<ImageView>(R.id.sortBtn)
         val newestFirst = prefs.getBoolean(descKey, false)
-        sortBtn.setTextColor(getColor(if (newestFirst) R.color.accent else R.color.fg))
+        sortBtn.setColorFilter(getColor(if (newestFirst) R.color.accent else R.color.fg))
         sortBtn.contentDescription =
             if (newestFirst) "Show oldest first" else "Show newest first"
         sortBtn.setOnClickListener {

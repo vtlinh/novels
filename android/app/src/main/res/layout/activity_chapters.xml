@@ -21,14 +21,14 @@
             android:paddingTop="8dp"
             android:paddingBottom="8dp">
 
-            <TextView
+            <ImageView
                 android:id="@+id/backBtn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:gravity="center"
-                android:text="←"
-                android:textSize="22sp"
-                android:textColor="@color/fg"
+                android:padding="8dp"
+                android:src="@drawable/ic_back"
+                android:tint="@color/fg"
+                android:scaleType="centerInside"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
                 android:focusable="true"
@@ -56,20 +56,21 @@
                 android:padding="8dp"
                 android:src="@drawable/ic_info"
                 android:tint="@color/fg"
+                android:scaleType="centerInside"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
                 android:focusable="true"
                 android:contentDescription="Novel info" />
 
             <!-- this novel's own settings (auto-download, translation, recheck) -->
-            <TextView
+            <ImageView
                 android:id="@+id/novelSettingsBtn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:gravity="center"
-                android:text="⚙"
-                android:textSize="20sp"
-                android:textColor="@color/fg"
+                android:padding="8dp"
+                android:src="@drawable/ic_settings"
+                android:tint="@color/fg"
+                android:scaleType="centerInside"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
                 android:focusable="true"
@@ -77,14 +78,14 @@
 
             <!-- flips the chapter order (ascending/descending), per novel.
                  Hidden while info is open — it only applies to the list. -->
-            <TextView
+            <ImageView
                 android:id="@+id/sortBtn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:gravity="center"
-                android:text="⇅"
-                android:textSize="20sp"
-                android:textColor="@color/fg"
+                android:padding="8dp"
+                android:src="@drawable/ic_sort"
+                android:tint="@color/fg"
+                android:scaleType="centerInside"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
                 android:focusable="true"
