@@ -663,11 +663,7 @@ class NovelListActivity : AppCompatActivity() {
             }
             val kind = if (showingShorts) "short" else "novel"
             if (shown.isEmpty()) {
-                status.text = finalStatus ?: if (showingShorts) {
-                    "No shorts — novels with ${LibrarySort.SHORT_MAX} or fewer chapters appear here."
-                } else {
-                    "No novels with more than ${LibrarySort.SHORT_MAX} chapters."
-                }
+                status.text = finalStatus ?: if (showingShorts) "No shorts" else "No novels"
                 return@launch
             }
             status.text = finalStatus ?: "${shown.size} $kind(s)"
