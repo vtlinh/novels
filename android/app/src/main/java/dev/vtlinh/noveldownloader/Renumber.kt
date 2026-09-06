@@ -89,7 +89,16 @@ object Listing {
         }
         val scope = d.selectFirst(site.listScope)
         val inScope = if (scope == null) emptyList() else scan(scope, inList = true)
-        if (inScope.isNotEmpty()) return Found(inScope, false)
+        /* Discovery order names every file, and on a site whose listing runs
+           newest-first the DOCUMENT's order is the novel backwards — so the
+           site says so (Site.listDescending) and the flip happens here, in
+           the one place every consumer already reads the listing through.
+           Everything downstream (positions, the resume splice, the surplus
+           sweep) then sees the same oldest-first order the other sites
+           serve natively. */
+        if (inScope.isNotEmpty()) {
+            return Found(if (site.listDescending) inScope.reversed() else inScope, false)
+        }
         val loose = scan(d, inList = false)
         return Found(loose, loose.isNotEmpty())
     }

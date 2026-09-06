@@ -1,0 +1,41 @@
+# Chapter pages from vivutruyen2.net, unedited, spread across 30 DIFFERENT
+# novels — first chapters, middle ones and last ones, from the 4-chapter
+# books and the 8-chapter ones, including the slug-suffixed urls and the
+# two novels that are not finished.
+# columns: site  file  url  novel  which  heading_number  content_chars
+#          novel_max_page  novel_completed
+# content_chars is the visible text of the site's own div.reading container
+# and heading_number the number printed in .chap-header h2 — both measured
+# with bs4/lxml rather than by Extractor, so the tests cross-check the
+# parser instead of echoing it. Some headings print ALL CAPS ("CHƯƠNG 1");
+# the number is still the number.
+vivutruyen2	vivutruyen2/chapters/10-nam-gap-lai__chuong-1.html	https://vivutruyen2.net/10-nam-gap-lai/chuong-1/	10-nam-gap-lai	first	1	4810	1	true
+vivutruyen2	vivutruyen2/chapters/10-nam-tim-lai-nhau__chuong-1.html	https://vivutruyen2.net/10-nam-tim-lai-nhau/chuong-1/	10-nam-tim-lai-nhau	first	1	5124	1	true
+vivutruyen2	vivutruyen2/chapters/chiec-ao-mac-nguoc-va-cuoc-hon-nhan-dung-sai__chuong-1.html	https://vivutruyen2.net/chiec-ao-mac-nguoc-va-cuoc-hon-nhan-dung-sai/chuong-1/	chiec-ao-mac-nguoc-va-cuoc-hon-nhan-dung-sai	first	1	3374	1	true
+vivutruyen2	vivutruyen2/chapters/chong-toi-co-hai-mat__chuong-5.html	https://vivutruyen2.net/chong-toi-co-hai-mat/chuong-5/	chong-toi-co-hai-mat	last	5	4916	1	true
+vivutruyen2	vivutruyen2/chapters/co-con-gai-bi-thay-the__chuong-3.html	https://vivutruyen2.net/co-con-gai-bi-thay-the/chuong-3/	co-con-gai-bi-thay-the	mid	3	4465	1	true
+vivutruyen2	vivutruyen2/chapters/co-vo-nu-vuong-cua-hai-gioi__chuong-5.html	https://vivutruyen2.net/co-vo-nu-vuong-cua-hai-gioi/chuong-5/	co-vo-nu-vuong-cua-hai-gioi	last	5	3845	1	true
+vivutruyen2	vivutruyen2/chapters/cuu-tiet-tien-khai-sat-gioi__chuong-3.html	https://vivutruyen2.net/cuu-tiet-tien-khai-sat-gioi/chuong-3/	cuu-tiet-tien-khai-sat-gioi	mid	3	3599	1	false
+vivutruyen2	vivutruyen2/chapters/di-chuc-khong-co-con__chuong-3.html	https://vivutruyen2.net/di-chuc-khong-co-con/chuong-3/	di-chuc-khong-co-con	mid	3	4851	1	true
+vivutruyen2	vivutruyen2/chapters/dieu-bi-an__chuong-1.html	https://vivutruyen2.net/dieu-bi-an/chuong-1-dieu-bi-an/	dieu-bi-an	first	1	6785	1	true
+vivutruyen2	vivutruyen2/chapters/giai-thoat-chinh-minh__chuong-5.html	https://vivutruyen2.net/giai-thoat-chinh-minh/chuong-5-giai-thoat-chinh-minh/	giai-thoat-chinh-minh	mid	5	8555	1	true
+vivutruyen2	vivutruyen2/chapters/hoa-ly-kinh-thanh-phu-quan-tuong-ta-lam-quan-co__chuong-5.html	https://vivutruyen2.net/hoa-ly-kinh-thanh-phu-quan-tuong-ta-lam-quan-co/chuong-5/	hoa-ly-kinh-thanh-phu-quan-tuong-ta-lam-quan-co	last	5	3691	1	true
+vivutruyen2	vivutruyen2/chapters/hung-thu-khong-ky-uc__chuong-1.html	https://vivutruyen2.net/hung-thu-khong-ky-uc/chuong-1/	hung-thu-khong-ky-uc	first	1	6839	1	true
+vivutruyen2	vivutruyen2/chapters/khong-co-tinh-yeu-nao-mai-mai__chuong-6.html	https://vivutruyen2.net/khong-co-tinh-yeu-nao-mai-mai/chuong-6/	khong-co-tinh-yeu-nao-mai-mai	last	6	4777	1	true
+vivutruyen2	vivutruyen2/chapters/khong-the-sua-lai-chiec-vay-cuoi-do__chuong-4.html	https://vivutruyen2.net/khong-the-sua-lai-chiec-vay-cuoi-do/chuong-4-khong-the-sua-lai-chiec-vay-cuoi-do/	khong-the-sua-lai-chiec-vay-cuoi-do	mid	4	7621	1	true
+vivutruyen2	vivutruyen2/chapters/khong-the-tha-thu__chuong-6.html	https://vivutruyen2.net/khong-the-tha-thu/chuong-6-khong-the-tha-thu/	khong-the-tha-thu	last	6	9061	1	true
+vivutruyen2	vivutruyen2/chapters/kim-bai-khong-giu-duoc-long__chuong-3.html	https://vivutruyen2.net/kim-bai-khong-giu-duoc-long/chuong-3/	kim-bai-khong-giu-duoc-long	mid	3	4734	1	true
+vivutruyen2	vivutruyen2/chapters/loi-noi-doi-cua-tinh-yeu__chuong-4.html	https://vivutruyen2.net/loi-noi-doi-cua-tinh-yeu/chuong-4/	loi-noi-doi-cua-tinh-yeu	last	4	7321	1	true
+vivutruyen2	vivutruyen2/chapters/muoi-ba-nam-gia-ngoc__chuong-3.html	https://vivutruyen2.net/muoi-ba-nam-gia-ngoc/chuong-3/	muoi-ba-nam-gia-ngoc	mid	3	4824	1	true
+vivutruyen2	vivutruyen2/chapters/nam-lan-mat-con__chuong-1.html	https://vivutruyen2.net/nam-lan-mat-con/chuong-1/	nam-lan-mat-con	first	1	10769	1	true
+vivutruyen2	vivutruyen2/chapters/nguoi-chong-da-ch-e-c-tro-ve-sau-5-nam__chuong-5.html	https://vivutruyen2.net/nguoi-chong-da-ch-e-c-tro-ve-sau-5-nam/chuong-5/	nguoi-chong-da-ch-e-c-tro-ve-sau-5-nam	last	5	3714	1	true
+vivutruyen2	vivutruyen2/chapters/nguoi-giup-viec-tu-xung-la-nguoi-cong-luoc__chuong-1.html	https://vivutruyen2.net/nguoi-giup-viec-tu-xung-la-nguoi-cong-luoc/chuong-1/	nguoi-giup-viec-tu-xung-la-nguoi-cong-luoc	first	1	4763	1	true
+vivutruyen2	vivutruyen2/chapters/nha-cua-crush-pha-san__chuong-5.html	https://vivutruyen2.net/nha-cua-crush-pha-san/chuong-5/	nha-cua-crush-pha-san	last	5	5639	1	true
+vivutruyen2	vivutruyen2/chapters/on-ninh-giang-dieu__chuong-1.html	https://vivutruyen2.net/on-ninh-giang-dieu/chuong-1-on-ninh-giang-dieu/	on-ninh-giang-dieu	first	1	7986	1	true
+vivutruyen2	vivutruyen2/chapters/rung-sau-khong-biet-duong-ve__chuong-1.html	https://vivutruyen2.net/rung-sau-khong-biet-duong-ve/chuong-1/	rung-sau-khong-biet-duong-ve	first	1	8098	1	true
+vivutruyen2	vivutruyen2/chapters/sinh-le-phu-kin-thuong-thu-phu__chuong-3.html	https://vivutruyen2.net/sinh-le-phu-kin-thuong-thu-phu/chuong-3/	sinh-le-phu-kin-thuong-thu-phu	mid	3	4899	1	true
+vivutruyen2	vivutruyen2/chapters/so-tien-giau-trong-tin-nhan__chuong-3.html	https://vivutruyen2.net/so-tien-giau-trong-tin-nhan/chuong-3/	so-tien-giau-trong-tin-nhan	mid	3	3599	1	true
+vivutruyen2	vivutruyen2/chapters/thap-nien-70-toi-khong-lam-me-ke-nua__chuong-8.html	https://vivutruyen2.net/thap-nien-70-toi-khong-lam-me-ke-nua/chuong-8/	thap-nien-70-toi-khong-lam-me-ke-nua	last	8	16188	1	true
+vivutruyen2	vivutruyen2/chapters/thoat-khoi-be-kho-toi-song-cuoc-song-moi__chuong-1.html	https://vivutruyen2.net/thoat-khoi-be-kho-toi-song-cuoc-song-moi/chuong-1-thoat-khoi-be-kho-toi-song-cuoc-song-moi/	thoat-khoi-be-kho-toi-song-cuoc-song-moi	first	1	7512	1	true
+vivutruyen2	vivutruyen2/chapters/vo-kich-thong-gia-gia__chuong-5.html	https://vivutruyen2.net/vo-kich-thong-gia-gia/chuong-5/	vo-kich-thong-gia-gia	last	5	3681	1	false
+vivutruyen2	vivutruyen2/chapters/xem-mat-gap-ke-quyt-tien__chuong-3.html	https://vivutruyen2.net/xem-mat-gap-ke-quyt-tien/chuong-3/	xem-mat-gap-ke-quyt-tien	mid	3	4874	1	true

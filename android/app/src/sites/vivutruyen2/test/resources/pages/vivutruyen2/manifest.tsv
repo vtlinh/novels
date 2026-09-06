@@ -1,0 +1,131 @@
+# Real vivutruyen2.net pages, unedited, fetched directly — this host answers
+# a plain request, so no Worker was needed. One row per captured page.
+# capture_url is where the bytes came from; app_url is the URL the app uses.
+# They are the same here: one host serves the catalogue, and www. 301s to the
+# https apex rather than serving a second copy of it.
+# columns: site  file  capture_url  app_url  kind  completed  chapters  max_page
+# `chapters` is the DISTINCT chapter links inside the first .list and
+# `max_page` is always 1 — this host never paginates a chapter list (every
+# captured novel is 4–8 chapters, all on the novel page). Both measured at
+# capture time with bs4/lxml, NOT with this app's parser, so the tests
+# cross-check the two readings rather than echoing one back.
+# The 116 were picked across the post sitemaps (oldest catalogue through
+# newest) plus a handful of must-have shapes (suffixed chapter urls, the
+# mixed full-chuong-N list, the two novels that are not Hoàn thành) rather
+# than taken in crawl order.
+vivutruyen2	vivutruyen2/10-nam-gap-lai.html	https://vivutruyen2.net/10-nam-gap-lai/	https://vivutruyen2.net/10-nam-gap-lai/	novel	true	5	1
+vivutruyen2	vivutruyen2/10-nam-tim-lai-nhau.html	https://vivutruyen2.net/10-nam-tim-lai-nhau/	https://vivutruyen2.net/10-nam-tim-lai-nhau/	novel	true	5	1
+vivutruyen2	vivutruyen2/an-tinh-va-su-tra-thu.html	https://vivutruyen2.net/an-tinh-va-su-tra-thu/	https://vivutruyen2.net/an-tinh-va-su-tra-thu/	novel	true	5	1
+vivutruyen2	vivutruyen2/anh-sang-cua-tinh-yeu.html	https://vivutruyen2.net/anh-sang-cua-tinh-yeu/	https://vivutruyen2.net/anh-sang-cua-tinh-yeu/	novel	true	5	1
+vivutruyen2	vivutruyen2/anh-sao-dem-he.html	https://vivutruyen2.net/anh-sao-dem-he/	https://vivutruyen2.net/anh-sao-dem-he/	novel	true	4	1
+vivutruyen2	vivutruyen2/ba-dau-gao-doi-chong.html	https://vivutruyen2.net/ba-dau-gao-doi-chong/	https://vivutruyen2.net/ba-dau-gao-doi-chong/	novel	true	5	1
+vivutruyen2	vivutruyen2/ban-cung-ban-tham-thuong-toi.html	https://vivutruyen2.net/ban-cung-ban-tham-thuong-toi/	https://vivutruyen2.net/ban-cung-ban-tham-thuong-toi/	novel	true	4	1
+vivutruyen2	vivutruyen2/ban-trai-bi-liet-nhung-van-bi-hieu-lam-la-ngoai-tinh.html	https://vivutruyen2.net/ban-trai-bi-liet-nhung-van-bi-hieu-lam-la-ngoai-tinh/	https://vivutruyen2.net/ban-trai-bi-liet-nhung-van-bi-hieu-lam-la-ngoai-tinh/	novel	true	5	1
+vivutruyen2	vivutruyen2/banh-nep-moi-sang.html	https://vivutruyen2.net/banh-nep-moi-sang/	https://vivutruyen2.net/banh-nep-moi-sang/	novel	true	5	1
+vivutruyen2	vivutruyen2/bao-boi-cuong-chi-dinh-cap.html	https://vivutruyen2.net/bao-boi-cuong-chi-dinh-cap/	https://vivutruyen2.net/bao-boi-cuong-chi-dinh-cap/	novel	true	5	1
+vivutruyen2	vivutruyen2/bao-mau-gia-quet-bay-180-nghin-te.html	https://vivutruyen2.net/bao-mau-gia-quet-bay-180-nghin-te/	https://vivutruyen2.net/bao-mau-gia-quet-bay-180-nghin-te/	novel	true	5	1
+vivutruyen2	vivutruyen2/bao-mau-muon-cuop-nha.html	https://vivutruyen2.net/bao-mau-muon-cuop-nha/	https://vivutruyen2.net/bao-mau-muon-cuop-nha/	novel	true	5	1
+vivutruyen2	vivutruyen2/bay-nam-troi-qua-chung-toi-khong-con-tinh-yeu-nua.html	https://vivutruyen2.net/bay-nam-troi-qua-chung-toi-khong-con-tinh-yeu-nua/	https://vivutruyen2.net/bay-nam-troi-qua-chung-toi-khong-con-tinh-yeu-nua/	novel	true	5	1
+vivutruyen2	vivutruyen2/bi-ban-trai-chia-tay-vi-nho-goi-yen-sao-la-mien.html	https://vivutruyen2.net/bi-ban-trai-chia-tay-vi-nho-goi-yen-sao-la-mien/	https://vivutruyen2.net/bi-ban-trai-chia-tay-vi-nho-goi-yen-sao-la-mien/	novel	true	5	1
+vivutruyen2	vivutruyen2/bi-ky-luat-vi-mot-hu-dua-muoi.html	https://vivutruyen2.net/bi-ky-luat-vi-mot-hu-dua-muoi/	https://vivutruyen2.net/bi-ky-luat-vi-mot-hu-dua-muoi/	novel	true	5	1
+vivutruyen2	vivutruyen2/bi-thay-the-trong-chinh-cuoc-hon-nhan-cua-minh.html	https://vivutruyen2.net/bi-thay-the-trong-chinh-cuoc-hon-nhan-cua-minh/	https://vivutruyen2.net/bi-thay-the-trong-chinh-cuoc-hon-nhan-cua-minh/	novel	true	5	1
+vivutruyen2	vivutruyen2/buong-tay-de-tim-hanh-phuc-moi.html	https://vivutruyen2.net/buong-tay-de-tim-hanh-phuc-moi/	https://vivutruyen2.net/buong-tay-de-tim-hanh-phuc-moi/	novel	true	5	1
+vivutruyen2	vivutruyen2/ca-mot-doi-an-oan.html	https://vivutruyen2.net/ca-mot-doi-an-oan/	https://vivutruyen2.net/ca-mot-doi-an-oan/	novel	true	5	1
+vivutruyen2	vivutruyen2/chan-thien-kim-tro-ve-ca-hao-mon-lai-chi-sung-ai-minh-toi.html	https://vivutruyen2.net/chan-thien-kim-tro-ve-ca-hao-mon-lai-chi-sung-ai-minh-toi/	https://vivutruyen2.net/chan-thien-kim-tro-ve-ca-hao-mon-lai-chi-sung-ai-minh-toi/	novel	true	5	1
+vivutruyen2	vivutruyen2/chi-dau-mong-manh-bong-hoa-chi-dai.html	https://vivutruyen2.net/chi-dau-mong-manh-bong-hoa-chi-dai/	https://vivutruyen2.net/chi-dau-mong-manh-bong-hoa-chi-dai/	novel	true	5	1
+vivutruyen2	vivutruyen2/chi-dau-trong-mat-em-gai.html	https://vivutruyen2.net/chi-dau-trong-mat-em-gai/	https://vivutruyen2.net/chi-dau-trong-mat-em-gai/	novel	true	5	1
+vivutruyen2	vivutruyen2/chi-gai-che-ban-em-cat-vien-tro.html	https://vivutruyen2.net/chi-gai-che-ban-em-cat-vien-tro/	https://vivutruyen2.net/chi-gai-che-ban-em-cat-vien-tro/	novel	true	5	1
+vivutruyen2	vivutruyen2/chiec-ao-mac-nguoc-va-cuoc-hon-nhan-dung-sai.html	https://vivutruyen2.net/chiec-ao-mac-nguoc-va-cuoc-hon-nhan-dung-sai/	https://vivutruyen2.net/chiec-ao-mac-nguoc-va-cuoc-hon-nhan-dung-sai/	novel	true	5	1
+vivutruyen2	vivutruyen2/chiec-keo-gia-muoi-ngan.html	https://vivutruyen2.net/chiec-keo-gia-muoi-ngan/	https://vivutruyen2.net/chiec-keo-gia-muoi-ngan/	novel	true	5	1
+vivutruyen2	vivutruyen2/chong-toi-co-hai-mat.html	https://vivutruyen2.net/chong-toi-co-hai-mat/	https://vivutruyen2.net/chong-toi-co-hai-mat/	novel	true	5	1
+vivutruyen2	vivutruyen2/co-con-gai-bi-thay-the.html	https://vivutruyen2.net/co-con-gai-bi-thay-the/	https://vivutruyen2.net/co-con-gai-bi-thay-the/	novel	true	5	1
+vivutruyen2	vivutruyen2/co-vo-nu-vuong-cua-hai-gioi.html	https://vivutruyen2.net/co-vo-nu-vuong-cua-hai-gioi/	https://vivutruyen2.net/co-vo-nu-vuong-cua-hai-gioi/	novel	true	5	1
+vivutruyen2	vivutruyen2/con-dau-khong-phai-con-ruot.html	https://vivutruyen2.net/con-dau-khong-phai-con-ruot/	https://vivutruyen2.net/con-dau-khong-phai-con-ruot/	novel	true	5	1
+vivutruyen2	vivutruyen2/cua-hoi-mon-khong-lap-hau-phu.html	https://vivutruyen2.net/cua-hoi-mon-khong-lap-hau-phu/	https://vivutruyen2.net/cua-hoi-mon-khong-lap-hau-phu/	novel	true	5	1
+vivutruyen2	vivutruyen2/cun-con-long-em.html	https://vivutruyen2.net/cun-con-long-em/	https://vivutruyen2.net/cun-con-long-em/	novel	true	5	1
+vivutruyen2	vivutruyen2/cuoc-goi-tu-sau-nam-truoc.html	https://vivutruyen2.net/cuoc-goi-tu-sau-nam-truoc/	https://vivutruyen2.net/cuoc-goi-tu-sau-nam-truoc/	novel	true	5	1
+vivutruyen2	vivutruyen2/cuu-tiet-tien-khai-sat-gioi.html	https://vivutruyen2.net/cuu-tiet-tien-khai-sat-gioi/	https://vivutruyen2.net/cuu-tiet-tien-khai-sat-gioi/	novel	false	5	1
+vivutruyen2	vivutruyen2/dan-tho-vao-hang-soi.html	https://vivutruyen2.net/dan-tho-vao-hang-soi/	https://vivutruyen2.net/dan-tho-vao-hang-soi/	novel	true	6	1
+vivutruyen2	vivutruyen2/di-chuc-khong-co-con.html	https://vivutruyen2.net/di-chuc-khong-co-con/	https://vivutruyen2.net/di-chuc-khong-co-con/	novel	true	5	1
+vivutruyen2	vivutruyen2/dien-dien-khong-quay-dau.html	https://vivutruyen2.net/dien-dien-khong-quay-dau/	https://vivutruyen2.net/dien-dien-khong-quay-dau/	novel	true	5	1
+vivutruyen2	vivutruyen2/dieu-bi-an.html	https://vivutruyen2.net/dieu-bi-an/	https://vivutruyen2.net/dieu-bi-an/	novel	true	7	1
+vivutruyen2	vivutruyen2/du-quay-dau-anh-cung-khong-the-quay-lai.html	https://vivutruyen2.net/du-quay-dau-anh-cung-khong-the-quay-lai/	https://vivutruyen2.net/du-quay-dau-anh-cung-khong-the-quay-lai/	novel	true	5	1
+vivutruyen2	vivutruyen2/gai-hu-hoan-my.html	https://vivutruyen2.net/gai-hu-hoan-my/	https://vivutruyen2.net/gai-hu-hoan-my/	novel	true	5	1
+vivutruyen2	vivutruyen2/gia-phai-tra-cho-su-nhu-nhuoc.html	https://vivutruyen2.net/gia-phai-tra-cho-su-nhu-nhuoc/	https://vivutruyen2.net/gia-phai-tra-cho-su-nhu-nhuoc/	novel	true	5	1
+vivutruyen2	vivutruyen2/giai-thoat-chinh-minh.html	https://vivutruyen2.net/giai-thoat-chinh-minh/	https://vivutruyen2.net/giai-thoat-chinh-minh/	novel	true	8	1
+vivutruyen2	vivutruyen2/giam-doc-moi-duoi-nham-than-tai-cua-cong-ty.html	https://vivutruyen2.net/giam-doc-moi-duoi-nham-than-tai-cua-cong-ty/	https://vivutruyen2.net/giam-doc-moi-duoi-nham-than-tai-cua-cong-ty/	novel	true	5	1
+vivutruyen2	vivutruyen2/hai-cai-o-va-bi-mat-cua-sep.html	https://vivutruyen2.net/hai-cai-o-va-bi-mat-cua-sep/	https://vivutruyen2.net/hai-cai-o-va-bi-mat-cua-sep/	novel	true	5	1
+vivutruyen2	vivutruyen2/hai-doi-khong-tha-thu.html	https://vivutruyen2.net/hai-doi-khong-tha-thu/	https://vivutruyen2.net/hai-doi-khong-tha-thu/	novel	true	5	1
+vivutruyen2	vivutruyen2/hai-trieu-te-va-cuoc-dien-thoai-nua-dem.html	https://vivutruyen2.net/hai-trieu-te-va-cuoc-dien-thoai-nua-dem/	https://vivutruyen2.net/hai-trieu-te-va-cuoc-dien-thoai-nua-dem/	novel	true	5	1
+vivutruyen2	vivutruyen2/hoa-bi-ngan-duoi-am-phu.html	https://vivutruyen2.net/hoa-bi-ngan-duoi-am-phu/	https://vivutruyen2.net/hoa-bi-ngan-duoi-am-phu/	novel	true	5	1
+vivutruyen2	vivutruyen2/hoa-ly-kinh-thanh-phu-quan-tuong-ta-lam-quan-co.html	https://vivutruyen2.net/hoa-ly-kinh-thanh-phu-quan-tuong-ta-lam-quan-co/	https://vivutruyen2.net/hoa-ly-kinh-thanh-phu-quan-tuong-ta-lam-quan-co/	novel	true	5	1
+vivutruyen2	vivutruyen2/hoang-hau-cua-tram-la-nu-vo-si.html	https://vivutruyen2.net/hoang-hau-cua-tram-la-nu-vo-si/	https://vivutruyen2.net/hoang-hau-cua-tram-la-nu-vo-si/	novel	true	5	1
+vivutruyen2	vivutruyen2/hung-thu-khong-ky-uc.html	https://vivutruyen2.net/hung-thu-khong-ky-uc/	https://vivutruyen2.net/hung-thu-khong-ky-uc/	novel	true	5	1
+vivutruyen2	vivutruyen2/huu-thu-vua-ky-ta-thu-lai-ca-hau-phu.html	https://vivutruyen2.net/huu-thu-vua-ky-ta-thu-lai-ca-hau-phu/	https://vivutruyen2.net/huu-thu-vua-ky-ta-thu-lai-ca-hau-phu/	novel	true	5	1
+vivutruyen2	vivutruyen2/ke-gieo-gio-ke-gat-bao.html	https://vivutruyen2.net/ke-gieo-gio-ke-gat-bao/	https://vivutruyen2.net/ke-gieo-gio-ke-gat-bao/	novel	true	5	1
+vivutruyen2	vivutruyen2/ke-thu-khong-doi-troi-chung-doi-toi.html	https://vivutruyen2.net/ke-thu-khong-doi-troi-chung-doi-toi/	https://vivutruyen2.net/ke-thu-khong-doi-troi-chung-doi-toi/	novel	true	4	1
+vivutruyen2	vivutruyen2/ke-tro-m-danh-phan-em-gai.html	https://vivutruyen2.net/ke-tro-m-danh-phan-em-gai/	https://vivutruyen2.net/ke-tro-m-danh-phan-em-gai/	novel	true	5	1
+vivutruyen2	vivutruyen2/ket-thuc-cuoc-tinh-muoi-nam.html	https://vivutruyen2.net/ket-thuc-cuoc-tinh-muoi-nam/	https://vivutruyen2.net/ket-thuc-cuoc-tinh-muoi-nam/	novel	true	6	1
+vivutruyen2	vivutruyen2/ket-trong-buong-ve-sinh-vi-het-giay.html	https://vivutruyen2.net/ket-trong-buong-ve-sinh-vi-het-giay/	https://vivutruyen2.net/ket-trong-buong-ve-sinh-vi-het-giay/	novel	true	5	1
+vivutruyen2	vivutruyen2/khi-anh-nang-hai-thanh-chieu-vao-doi-toi.html	https://vivutruyen2.net/khi-anh-nang-hai-thanh-chieu-vao-doi-toi/	https://vivutruyen2.net/khi-anh-nang-hai-thanh-chieu-vao-doi-toi/	novel	true	5	1
+vivutruyen2	vivutruyen2/khong-co-tinh-yeu-nao-mai-mai.html	https://vivutruyen2.net/khong-co-tinh-yeu-nao-mai-mai/	https://vivutruyen2.net/khong-co-tinh-yeu-nao-mai-mai/	novel	true	6	1
+vivutruyen2	vivutruyen2/khong-nuoi-con-chong-tuong-lai.html	https://vivutruyen2.net/khong-nuoi-con-chong-tuong-lai/	https://vivutruyen2.net/khong-nuoi-con-chong-tuong-lai/	novel	true	5	1
+vivutruyen2	vivutruyen2/khong-the-sua-lai-chiec-vay-cuoi-do.html	https://vivutruyen2.net/khong-the-sua-lai-chiec-vay-cuoi-do/	https://vivutruyen2.net/khong-the-sua-lai-chiec-vay-cuoi-do/	novel	true	6	1
+vivutruyen2	vivutruyen2/khong-the-tha-thu.html	https://vivutruyen2.net/khong-the-tha-thu/	https://vivutruyen2.net/khong-the-tha-thu/	novel	true	6	1
+vivutruyen2	vivutruyen2/kie-nay-toi-roi-xa-anh-mai-mai.html	https://vivutruyen2.net/kie-nay-toi-roi-xa-anh-mai-mai/	https://vivutruyen2.net/kie-nay-toi-roi-xa-anh-mai-mai/	novel	true	5	1
+vivutruyen2	vivutruyen2/kieu-hoa-dung-truoc-vuc-sau.html	https://vivutruyen2.net/kieu-hoa-dung-truoc-vuc-sau/	https://vivutruyen2.net/kieu-hoa-dung-truoc-vuc-sau/	novel	true	5	1
+vivutruyen2	vivutruyen2/kim-bai-khong-giu-duoc-long.html	https://vivutruyen2.net/kim-bai-khong-giu-duoc-long/	https://vivutruyen2.net/kim-bai-khong-giu-duoc-long/	novel	true	5	1
+vivutruyen2	vivutruyen2/loi-bao-bien-cua-ke-ngoai-tinh.html	https://vivutruyen2.net/loi-bao-bien-cua-ke-ngoai-tinh/	https://vivutruyen2.net/loi-bao-bien-cua-ke-ngoai-tinh/	novel	true	6	1
+vivutruyen2	vivutruyen2/loi-noi-doi-cua-tinh-yeu.html	https://vivutruyen2.net/loi-noi-doi-cua-tinh-yeu/	https://vivutruyen2.net/loi-noi-doi-cua-tinh-yeu/	novel	true	4	1
+vivutruyen2	vivutruyen2/loi-the-doan-tuyet.html	https://vivutruyen2.net/loi-the-doan-tuyet/	https://vivutruyen2.net/loi-the-doan-tuyet/	novel	true	8	1
+vivutruyen2	vivutruyen2/luong-huu-8-000-te-chong-muon-quan-luon-ca-cuoc-doi-toi.html	https://vivutruyen2.net/luong-huu-8-000-te-chong-muon-quan-luon-ca-cuoc-doi-toi/	https://vivutruyen2.net/luong-huu-8-000-te-chong-muon-quan-luon-ca-cuoc-doi-toi/	novel	true	5	1
+vivutruyen2	vivutruyen2/luong-huu-bi-cuop.html	https://vivutruyen2.net/luong-huu-bi-cuop/	https://vivutruyen2.net/luong-huu-bi-cuop/	novel	true	5	1
+vivutruyen2	vivutruyen2/ly-hon-xong-toi-om-trung-mo-khoang.html	https://vivutruyen2.net/ly-hon-xong-toi-om-trung-mo-khoang/	https://vivutruyen2.net/ly-hon-xong-toi-om-trung-mo-khoang/	novel	true	5	1
+vivutruyen2	vivutruyen2/meo-hoang-trao-phuong.html	https://vivutruyen2.net/meo-hoang-trao-phuong/	https://vivutruyen2.net/meo-hoang-trao-phuong/	novel	true	5	1
+vivutruyen2	vivutruyen2/mot-to-mach-an-gia.html	https://vivutruyen2.net/mot-to-mach-an-gia/	https://vivutruyen2.net/mot-to-mach-an-gia/	novel	true	5	1
+vivutruyen2	vivutruyen2/mot-tram-lan-hoan-cuoi.html	https://vivutruyen2.net/mot-tram-lan-hoan-cuoi/	https://vivutruyen2.net/mot-tram-lan-hoan-cuoi/	novel	true	5	1
+vivutruyen2	vivutruyen2/muoi-ba-nam-gia-ngoc.html	https://vivutruyen2.net/muoi-ba-nam-gia-ngoc/	https://vivutruyen2.net/muoi-ba-nam-gia-ngoc/	novel	true	5	1
+vivutruyen2	vivutruyen2/nam-lan-mat-con.html	https://vivutruyen2.net/nam-lan-mat-con/	https://vivutruyen2.net/nam-lan-mat-con/	novel	true	5	1
+vivutruyen2	vivutruyen2/nam-nam-sau-toi-day-con-gai-cua-chong-cu.html	https://vivutruyen2.net/nam-nam-sau-toi-day-con-gai-cua-chong-cu/	https://vivutruyen2.net/nam-nam-sau-toi-day-con-gai-cua-chong-cu/	novel	true	5	1
+vivutruyen2	vivutruyen2/ngay-toi-bi-bo-lai-he-thong-chon-toi.html	https://vivutruyen2.net/ngay-toi-bi-bo-lai-he-thong-chon-toi/	https://vivutruyen2.net/ngay-toi-bi-bo-lai-he-thong-chon-toi/	novel	true	5	1
+vivutruyen2	vivutruyen2/nguoi-chong-da-ch-e-c-tro-ve-sau-5-nam.html	https://vivutruyen2.net/nguoi-chong-da-ch-e-c-tro-ve-sau-5-nam/	https://vivutruyen2.net/nguoi-chong-da-ch-e-c-tro-ve-sau-5-nam/	novel	true	5	1
+vivutruyen2	vivutruyen2/nguoi-con-gai-bi-bo-roi.html	https://vivutruyen2.net/nguoi-con-gai-bi-bo-roi/	https://vivutruyen2.net/nguoi-con-gai-bi-bo-roi/	novel	true	5	1
+vivutruyen2	vivutruyen2/nguoi-giup-viec-tu-xung-la-nguoi-cong-luoc.html	https://vivutruyen2.net/nguoi-giup-viec-tu-xung-la-nguoi-cong-luoc/	https://vivutruyen2.net/nguoi-giup-viec-tu-xung-la-nguoi-cong-luoc/	novel	true	5	1
+vivutruyen2	vivutruyen2/nguoi-phu-nu-trong-can-bep.html	https://vivutruyen2.net/nguoi-phu-nu-trong-can-bep/	https://vivutruyen2.net/nguoi-phu-nu-trong-can-bep/	novel	true	5	1
+vivutruyen2	vivutruyen2/nguoi-thu-hai-trong-phong.html	https://vivutruyen2.net/nguoi-thu-hai-trong-phong/	https://vivutruyen2.net/nguoi-thu-hai-trong-phong/	novel	true	5	1
+vivutruyen2	vivutruyen2/nguoi-trang-diem-tu-thi.html	https://vivutruyen2.net/nguoi-trang-diem-tu-thi/	https://vivutruyen2.net/nguoi-trang-diem-tu-thi/	novel	true	5	1
+vivutruyen2	vivutruyen2/nha-cua-crush-pha-san.html	https://vivutruyen2.net/nha-cua-crush-pha-san/	https://vivutruyen2.net/nha-cua-crush-pha-san/	novel	true	5	1
+vivutruyen2	vivutruyen2/noi-dau-trong-tim-full.html	https://vivutruyen2.net/noi-dau-trong-tim-full/	https://vivutruyen2.net/noi-dau-trong-tim-full/	novel	true	5	1
+vivutruyen2	vivutruyen2/nop-thue-260-trieu-van-bi-chan-o-cua-len-may-bay.html	https://vivutruyen2.net/nop-thue-260-trieu-van-bi-chan-o-cua-len-may-bay/	https://vivutruyen2.net/nop-thue-260-trieu-van-bi-chan-o-cua-len-may-bay/	novel	true	5	1
+vivutruyen2	vivutruyen2/nu-sinh-ngheo-gia-tao.html	https://vivutruyen2.net/nu-sinh-ngheo-gia-tao/	https://vivutruyen2.net/nu-sinh-ngheo-gia-tao/	novel	true	5	1
+vivutruyen2	vivutruyen2/on-ninh-giang-dieu.html	https://vivutruyen2.net/on-ninh-giang-dieu/	https://vivutruyen2.net/on-ninh-giang-dieu/	novel	true	6	1
+vivutruyen2	vivutruyen2/phan-cong-cua-nguoi-vo-noi-tro.html	https://vivutruyen2.net/phan-cong-cua-nguoi-vo-noi-tro/	https://vivutruyen2.net/phan-cong-cua-nguoi-vo-noi-tro/	novel	true	5	1
+vivutruyen2	vivutruyen2/quan-chua-ho-do-dai-nhan-mua-chuoc.html	https://vivutruyen2.net/quan-chua-ho-do-dai-nhan-mua-chuoc/	https://vivutruyen2.net/quan-chua-ho-do-dai-nhan-mua-chuoc/	novel	true	5	1
+vivutruyen2	vivutruyen2/rung-sau-khong-biet-duong-ve.html	https://vivutruyen2.net/rung-sau-khong-biet-duong-ve/	https://vivutruyen2.net/rung-sau-khong-biet-duong-ve/	novel	true	5	1
+vivutruyen2	vivutruyen2/sai-lam-doi-toi.html	https://vivutruyen2.net/sai-lam-doi-toi/	https://vivutruyen2.net/sai-lam-doi-toi/	novel	true	7	1
+vivutruyen2	vivutruyen2/sau-khi-trung-sinh-toi-cat-dut-quan-he-voi-con-trai-vi-no-muon-cuoi-con-gai-tieu-tam.html	https://vivutruyen2.net/sau-khi-trung-sinh-toi-cat-dut-quan-he-voi-con-trai-vi-no-muon-cuoi-con-gai-tieu-tam/	https://vivutruyen2.net/sau-khi-trung-sinh-toi-cat-dut-quan-he-voi-con-trai-vi-no-muon-cuoi-con-gai-tieu-tam/	novel	true	5	1
+vivutruyen2	vivutruyen2/sinh-le-phu-kin-thuong-thu-phu.html	https://vivutruyen2.net/sinh-le-phu-kin-thuong-thu-phu/	https://vivutruyen2.net/sinh-le-phu-kin-thuong-thu-phu/	novel	true	5	1
+vivutruyen2	vivutruyen2/so-tien-giau-trong-tin-nhan.html	https://vivutruyen2.net/so-tien-giau-trong-tin-nhan/	https://vivutruyen2.net/so-tien-giau-trong-tin-nhan/	novel	true	5	1
+vivutruyen2	vivutruyen2/tham-hoa-lang-luc-minh-chieu.html	https://vivutruyen2.net/tham-hoa-lang-luc-minh-chieu/	https://vivutruyen2.net/tham-hoa-lang-luc-minh-chieu/	novel	true	5	1
+vivutruyen2	vivutruyen2/thanh-xuan-tuoi-dep.html	https://vivutruyen2.net/thanh-xuan-tuoi-dep/	https://vivutruyen2.net/thanh-xuan-tuoi-dep/	novel	true	4	1
+vivutruyen2	vivutruyen2/thap-nien-70-toi-khong-lam-me-ke-nua.html	https://vivutruyen2.net/thap-nien-70-toi-khong-lam-me-ke-nua/	https://vivutruyen2.net/thap-nien-70-toi-khong-lam-me-ke-nua/	novel	true	7	1
+vivutruyen2	vivutruyen2/the-than-full.html	https://vivutruyen2.net/the-than-full/	https://vivutruyen2.net/the-than-full/	novel	true	5	1
+vivutruyen2	vivutruyen2/thiet-ky-co-nu.html	https://vivutruyen2.net/thiet-ky-co-nu/	https://vivutruyen2.net/thiet-ky-co-nu/	novel	true	5	1
+vivutruyen2	vivutruyen2/thoat-khoi-be-kho-toi-song-cuoc-song-moi.html	https://vivutruyen2.net/thoat-khoi-be-kho-toi-song-cuoc-song-moi/	https://vivutruyen2.net/thoat-khoi-be-kho-toi-song-cuoc-song-moi/	novel	true	7	1
+vivutruyen2	vivutruyen2/tiem-hoa-khong-con-em.html	https://vivutruyen2.net/tiem-hoa-khong-con-em/	https://vivutruyen2.net/tiem-hoa-khong-con-em/	novel	true	5	1
+vivutruyen2	vivutruyen2/tinh-yeu-hoa-no.html	https://vivutruyen2.net/tinh-yeu-hoa-no/	https://vivutruyen2.net/tinh-yeu-hoa-no/	novel	true	5	1
+vivutruyen2	vivutruyen2/toi-ac-ngoi-sao.html	https://vivutruyen2.net/toi-ac-ngoi-sao/	https://vivutruyen2.net/toi-ac-ngoi-sao/	novel	true	5	1
+vivutruyen2	vivutruyen2/toi-thanh-chi-dau-cua-ban-trai-cu.html	https://vivutruyen2.net/toi-thanh-chi-dau-cua-ban-trai-cu/	https://vivutruyen2.net/toi-thanh-chi-dau-cua-ban-trai-cu/	novel	true	5	1
+vivutruyen2	vivutruyen2/tong-chi.html	https://vivutruyen2.net/tong-chi/	https://vivutruyen2.net/tong-chi/	novel	true	5	1
+vivutruyen2	vivutruyen2/tong-giam-doc-co-hu-va-co-vo-ba-dao.html	https://vivutruyen2.net/tong-giam-doc-co-hu-va-co-vo-ba-dao/	https://vivutruyen2.net/tong-giam-doc-co-hu-va-co-vo-ba-dao/	novel	true	5	1
+vivutruyen2	vivutruyen2/tra-xanh-tam-co.html	https://vivutruyen2.net/tra-xanh-tam-co/	https://vivutruyen2.net/tra-xanh-tam-co/	novel	true	4	1
+vivutruyen2	vivutruyen2/tro-ve-tu-coi-u-minh.html	https://vivutruyen2.net/tro-ve-tu-coi-u-minh/	https://vivutruyen2.net/tro-ve-tu-coi-u-minh/	novel	true	5	1
+vivutruyen2	vivutruyen2/truoc-cai-chet-toi-nhan-ra-tat-ca-chi-la-gia-doi.html	https://vivutruyen2.net/truoc-cai-chet-toi-nhan-ra-tat-ca-chi-la-gia-doi/	https://vivutruyen2.net/truoc-cai-chet-toi-nhan-ra-tat-ca-chi-la-gia-doi/	novel	true	5	1
+vivutruyen2	vivutruyen2/tu-tan-nuong-bi-nhuc-den-chu-mau-ba-phu.html	https://vivutruyen2.net/tu-tan-nuong-bi-nhuc-den-chu-mau-ba-phu/	https://vivutruyen2.net/tu-tan-nuong-bi-nhuc-den-chu-mau-ba-phu/	novel	true	5	1
+vivutruyen2	vivutruyen2/vali-toi-khong-cham-vao.html	https://vivutruyen2.net/vali-toi-khong-cham-vao/	https://vivutruyen2.net/vali-toi-khong-cham-vao/	novel	true	5	1
+vivutruyen2	vivutruyen2/van-hoa-lau-doi-no.html	https://vivutruyen2.net/van-hoa-lau-doi-no/	https://vivutruyen2.net/van-hoa-lau-doi-no/	novel	true	5	1
+vivutruyen2	vivutruyen2/vo-kich-dai-nghia-diet-than.html	https://vivutruyen2.net/vo-kich-dai-nghia-diet-than/	https://vivutruyen2.net/vo-kich-dai-nghia-diet-than/	novel	true	5	1
+vivutruyen2	vivutruyen2/vo-kich-thong-gia-gia.html	https://vivutruyen2.net/vo-kich-thong-gia-gia/	https://vivutruyen2.net/vo-kich-thong-gia-gia/	novel	false	5	1
+vivutruyen2	vivutruyen2/vong-tay-dong-xu-1-te.html	https://vivutruyen2.net/vong-tay-dong-xu-1-te/	https://vivutruyen2.net/vong-tay-dong-xu-1-te/	novel	true	5	1
+vivutruyen2	vivutruyen2/xem-mat-gap-ke-quyt-tien.html	https://vivutruyen2.net/xem-mat-gap-ke-quyt-tien/	https://vivutruyen2.net/xem-mat-gap-ke-quyt-tien/	novel	true	5	1
+vivutruyen2	vivutruyen2/y-vi-tinh-than.html	https://vivutruyen2.net/y-vi-tinh-than/	https://vivutruyen2.net/y-vi-tinh-than/	novel	true	5	1
