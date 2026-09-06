@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Read all-caps sentences as lowercase from Reading settings
+	Library Novels/Shorts tabs, chapter list first, back from reader to Library
+1.36.3	Read all-caps sentences as lowercase from Reading settings
 1.36.2	Silence leading quotes and ellipses that TTS reads aloud
 1.36.1	Add pause duration between TTS sentences, paragraphs, and chapters
 1.35.3	Simplify shared identity rules and remove dead code

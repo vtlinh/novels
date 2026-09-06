@@ -34,7 +34,7 @@ class ReaderActivity : AppCompatActivity() {
 
         /* the reader instance currently owning TTS. Opening a new reader
            finishes the old one so two chapters never read at once — but
-           merely leaving to the chapter list (see leaveReader) keeps the
+           merely leaving to the Library (see leaveReader) keeps the
            instance alive so playback continues. */
         @Volatile private var active: ReaderActivity? = null
 
@@ -2135,30 +2135,25 @@ class ReaderActivity : AppCompatActivity() {
         return layout.getLineStart(layout.getLineForVertical(y))
     }
 
-    /* Back / ← : always to this novel's CHAPTER LIST. Two of the reader's
-       entry points skip that screen — the Library's straight-to-reader
-       shortcut for a novel being listened to, and the home screen's
-       resume-reading jump — and a plain finish() from those landed on the
-       Library or home instead, so where back took you depended on how you
-       happened to arrive. Route through the chapter list instead: an
-       instance already beneath is brought forward (same end state as
-       finishing onto it), and one that was skipped is created.
+    /* Back / ← : always to Library (or Documents, for a pasted file).
+       The chapter list used to sit between the two, and Back from reading
+       landed on its Info tab. That screen now finishes when the reader
+       opens, so a plain finish() already reaches Library from the usual
+       path — but the listen-now shortcut and the launcher resume jump
+       skip the chapter list, and arriving from the Browser leaves that
+       screen under us. Bring Library forward so every way out ends there.
 
        While TTS is playing this instance stays ALIVE beneath it (playback
        continues); otherwise it finishes. */
     private fun leaveReader() {
-        val dir = intent.getStringExtra("dir")
         if (asDocument()) {
             startActivity(
                 android.content.Intent(this, DocumentListActivity::class.java)
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
-        } else if (dir != null) {
+        } else {
             startActivity(
-                android.content.Intent(this, ChapterListActivity::class.java)
-                    .putExtra("dir", dir)
-                    .putExtra("title", intent.getStringExtra("title"))
-                    .putExtra("slug", intent.getStringExtra("slug"))
+                android.content.Intent(this, NovelListActivity::class.java)
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
         }
