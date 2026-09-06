@@ -23,10 +23,10 @@ import kotlinx.coroutines.withContext
    ones (scroll position preserved), so reading is seamless in both
    directions.
 
-   The ≡ button opens a right-side drawer with the full chapter list for
-   jumping anywhere. EN/VI switches between the English translation and the
-   Vietnamese source; the ⚙ menu also has the language toggle and Font size
-   +/−. Language and font persist. */
+   The ≡ button opens the novel's chapter list. A right-edge swipe still
+   opens the in-reader drawer for jumping anywhere. EN/VI switches between
+   the English translation and the Vietnamese source; the ⚙ menu also has
+   the language toggle and Font size +/−. Language and font persist. */
 class ReaderActivity : AppCompatActivity() {
 
     companion object {
@@ -746,11 +746,9 @@ class ReaderActivity : AppCompatActivity() {
         updateMediaSessionState()
 
         findViewById<TextView>(R.id.backBtn).setOnClickListener { leaveReader() }
-        findViewById<TextView>(R.id.chaptersBtn).setOnClickListener {
-            drawer.openDrawer(GravityCompat.END)
-        }
-        /* highlight + scroll-to-current runs however the drawer opens —
-           the ≡ button or an edge swipe — as soon as it starts sliding in */
+        findViewById<TextView>(R.id.chaptersBtn).setOnClickListener { openChapterList() }
+        /* highlight + scroll-to-current runs when the drawer opens from
+           an edge swipe, as soon as it starts sliding in */
         drawer.addDrawerListener(object : androidx.drawerlayout.widget.DrawerLayout.SimpleDrawerListener() {
             private var prepared = false
             override fun onDrawerSlide(view: android.view.View, slideOffset: Float) {
@@ -2133,6 +2131,22 @@ class ReaderActivity : AppCompatActivity() {
         val layout = text.layout ?: return 0
         val y = (scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)
         return layout.getLineStart(layout.getLineForVertical(y))
+    }
+
+    /* ≡ : the full chapter list. The right-edge swipe still opens the
+       in-reader drawer; this button leaves so the user can pick a
+       chapter on the novel page. The reader stays alive underneath if
+       TTS is speaking. */
+    private fun openChapterList() {
+        if (asDocument()) return
+        val dir = intent.getStringExtra("dir") ?: return
+        startActivity(
+            android.content.Intent(this, ChapterListActivity::class.java)
+                .putExtra("dir", dir)
+                .putExtra("title", intent.getStringExtra("title"))
+                .putExtra("slug", intent.getStringExtra("slug"))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+        )
     }
 
     /* Back / ← : always to Library (or Documents, for a pasted file).

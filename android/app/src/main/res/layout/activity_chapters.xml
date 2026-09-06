@@ -22,17 +22,17 @@
             android:paddingBottom="8dp">
 
             <TextView
-                android:id="@+id/menuBtn"
+                android:id="@+id/backBtn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:gravity="center"
-                android:text="☰"
+                android:text="←"
                 android:textSize="22sp"
                 android:textColor="@color/fg"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
                 android:focusable="true"
-                android:contentDescription="Menu" />
+                android:contentDescription="Back" />
 
             <TextView
                 android:id="@+id/chapterTitle"
@@ -49,14 +49,13 @@
 
             <!-- synopsis, ranking, cover — used to be a tab; the chapter
                  list is the page now, and this opens the old info view. -->
-            <TextView
+            <ImageView
                 android:id="@+id/novelInfoBtn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:gravity="center"
-                android:text="ℹ&#xFE0E;"
-                android:textSize="20sp"
-                android:textColor="@color/fg"
+                android:padding="8dp"
+                android:src="@drawable/ic_info"
+                android:tint="@color/fg"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
                 android:focusable="true"
