@@ -147,6 +147,10 @@
   merges it once `build` and `worker` report green on the PR, and
   `claude-autofix.yml` takes a swing at the PR first if the android run goes
   red. Waiting is the whole point: nothing merged before CI had seen it.
+  Exception: a change that is only user-facing copy, changelog rows, or
+  comments (no logic, selectors, resources, or workflow edits) merges
+  immediately — squash-merge the PR and stop. Auto-merge is for changes
+  that can break a device; a wording tweak should not wait on Gradle.
   - Label a PR `no-auto-merge` to hold it open for a person.
   - A PR that changes a workflow still has to be merged by hand: `workflow_run`
     always runs the copy of the workflow on the DEFAULT branch, so an edit to
