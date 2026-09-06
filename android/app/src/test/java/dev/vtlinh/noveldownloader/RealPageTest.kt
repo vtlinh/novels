@@ -96,7 +96,27 @@ class RealPageTest {
             assertTrue("$name: some finished", mine.any { it.completed == true })
             assertTrue("$name: some ongoing", mine.any { it.completed == false })
             assertTrue("$name: some short", mine.any { (it.maxPage ?: 1) <= 3 })
-            assertTrue("$name: some very long", mine.any { (it.maxPage ?: 1) >= 30 })
+            /* A corpus owes the site's own shapes, and "long" is not one of
+               them everywhere: vivutruyen2 is a short-story catalogue whose
+               ~17,900 novels top out around eight chapters on one listing
+               page, so a many-page fixture cannot exist for it. The site
+               declares that (Site.paginates), and the declaration is held to
+               the corpus both ways — a paginating site must have been
+               captured with long novels among its pages, and a site claiming
+               it never paginates must never show a fixture that does. */
+            val site = Sites.all.first { it.name == name }
+            if (site.paginates) {
+                assertTrue("$name: some very long", mine.any { (it.maxPage ?: 1) >= 30 })
+            } else {
+                for (f in mine) {
+                    assertEquals(
+                        "${f.file}: the site declares it never paginates, but this " +
+                            "fixture was measured with more than one listing page",
+                        1,
+                        f.maxPage ?: 1,
+                    )
+                }
+            }
         }
     }
 
@@ -407,6 +427,11 @@ class RealChapterTest {
             "Chương trước", "Chương tiếp", "Chương sau",
             "Previous Chapter", "Next Chapter", "Report chapter",
             "Bạn đang đọc truyện tại", "truyenfull.vn",
+            /* vivutruyen2's "read on" pointer, spliced into the prose
+               container as its last paragraph: a heading for the NEXT
+               chapter and a url at the sister host. The bare site name is
+               the marker — no saved chapter has any business naming it. */
+            "ẤN ĐỂ ĐỌC TIẾP", "vivutruyen",
             /* the SEO keyword blob parked at the end of a chapter — 300
                characters naming every rival site, inside the chapter
                container, which TTS reads aloud and a translation pass pays

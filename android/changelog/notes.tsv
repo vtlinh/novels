@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Add vivutruyen2.net as a Vietnamese source
 	Drop the Shorts empty-state explanation
 1.36.5	Move Library Novels/Shorts tabs to the bottom
 1.36.4	Library Novels/Shorts tabs, chapter list first, back from reader to Library

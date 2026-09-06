@@ -70,6 +70,22 @@ interface Site {
        widget whose links must not pollute the chapter order. */
     val listScope: String
 
+    /* Whether this site splits a chapter list over multiple pages at all.
+       Almost every site does; vivutruyen2 is a short-story catalogue whose
+       novels top out around eight chapters, all on the novel page. The
+       corpus sweep uses this to know what shapes a site's fixtures OWE it:
+       a paginating site must be captured with long, many-page novels among
+       them, and a site that declares it never paginates must never show a
+       fixture that does. */
+    val paginates: Boolean get() = true
+
+    /* The listing runs NEWEST-FIRST on this site, so reading it in document
+       order is reading the novel backwards. Positions name files, so this is
+       not cosmetic: chapter 1 would be saved as the last file. Listing.collect
+       flips a descending listing on the way in, so every consumer sees the
+       same oldest-first order the other sites serve natively. */
+    val listDescending: Boolean get() = false
+
     fun maxPage(doc: Document, slug: String): Int
 
     fun isCompleted(doc: Document): Boolean

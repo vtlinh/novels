@@ -107,6 +107,10 @@ class SitesTest {
             "freewebnovel.com",
             Sites.website("https://freewebnovel.com/novel/the-kings-avatar"),
         )
+        assertEquals(
+            "vivutruyen2.net",
+            Sites.website("https://vivutruyen2.net/nam-lan-mat-con/"),
+        )
         /* URI keeps the host's own case; skip lowercasing and www. stays. */
         assertEquals(
             "novelfull.com",
@@ -137,6 +141,7 @@ class SitesTest {
             "https://novelfull.com/the-kings-avatar.html" to "the-kings-avatar",
             "https://readnovel.me/novel3043-gunsoul.html" to "novel3043-gunsoul",
             "https://freewebnovel.com/novel/the-kings-avatar" to "the-kings-avatar",
+            "https://vivutruyen2.net/nam-lan-mat-con/chuong-5/" to "nam-lan-mat-con",
         )
         for ((url, slug) in urls) {
             assertEquals(url, Ownership.normKey(slug), Sites.slugKey(url))
