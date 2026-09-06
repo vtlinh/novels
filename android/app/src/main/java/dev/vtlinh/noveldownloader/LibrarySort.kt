@@ -5,8 +5,22 @@ package dev.vtlinh.noveldownloader
    updated first. "Updated" is the newest of last download, last read, or
    first start — so a chapter arriving and opening the reader both count,
    and a legacy row that only has `started` still has a place. Recently-read
-   pinning is separate (the three latest unfinished stay above this list). */
+   pinning is separate (the three latest unfinished stay above this list).
+
+   Library tabs split the same list: a short is 20 chapters or fewer. The
+   site's total wins when it is known, so a long novel still downloading
+   does not jump into Shorts. */
 object LibrarySort {
+
+    const val SHORT_MAX = 20
+
+    /* Site total when a check has filled it in (total > 0); otherwise the
+       chapters already on disk. total is -1 until the first check. */
+    fun chapterCount(total: Int, local: Int): Int =
+        if (total > 0) total else local.coerceAtLeast(0)
+
+    fun isShort(total: Int, local: Int): Boolean =
+        chapterCount(total, local) <= SHORT_MAX
 
     fun updatedAt(lastDl: Long, lastRead: Long, started: Long): Long =
         maxOf(lastDl, lastRead, started)

@@ -30,7 +30,8 @@ import kotlinx.coroutines.withContext
    a Complete tag instead of a Download button, and an ongoing novel with
    every chapter on disk shows an Up to date tag. ALL NOVELS sorts unfinished
    first (stars, then most recently updated); novels the user marked finished
-   sit at the bottom.
+   sit at the bottom. Two tabs split the list: Shorts is every novel
+   with 20 or fewer chapters (site total when known), Novels is the rest.
 
    Cold start: resume a live reading session when one exists; otherwise open
    the Browser when this list is empty. Console output (formerly the Home
@@ -43,11 +44,17 @@ class NovelListActivity : AppCompatActivity() {
         const val GARBAGE_KEY = "garbageSlugs"
 
         const val EXTRA_SHARE_URL = "shareUrl"
+
+        /* which Library tab is showing — kept so returning to this screen
+           (and a rotate) lands on the same side */
+        private const val PREF_SHORTS_TAB = "libraryShowShorts"
+        private const val STATE_SHORTS_TAB = "libraryShowShorts"
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
     private val store by lazy { DownloadStore(this) }
     private var folderKey: String? = null
+    private var showingShorts = false
 
     /* Novel URL waiting on a download folder being picked (share path). */
     private var pendingShareUrl: String?
@@ -95,6 +102,15 @@ class NovelListActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.statusText).text = "Pick a download folder first."
         }
         findViewById<Button>(R.id.checkBtn).setOnClickListener { checkStatuses() }
+        showingShorts = savedInstanceState?.getBoolean(STATE_SHORTS_TAB)
+            ?: prefs.getBoolean(PREF_SHORTS_TAB, false)
+        findViewById<android.view.View>(R.id.tabNovels).setOnClickListener {
+            showLibraryTab(false)
+        }
+        findViewById<android.view.View>(R.id.tabShorts).setOnClickListener {
+            showLibraryTab(true)
+        }
+        paintLibraryTabs()
 
         /* Cold start from the launcher: resume reading if a session is live,
            otherwise open the Browser when the library has nothing to show. */
@@ -151,6 +167,43 @@ class NovelListActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIncomingShare(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_SHORTS_TAB, showingShorts)
+    }
+
+    private fun showLibraryTab(shorts: Boolean) {
+        if (showingShorts == shorts) return
+        showingShorts = shorts
+        prefs.edit().putBoolean(PREF_SHORTS_TAB, shorts).apply()
+        paintLibraryTabs()
+        render()
+    }
+
+    private fun paintLibraryTabs() {
+        val novels = !showingShorts
+        findViewById<android.view.View>(R.id.tabNovels).isSelected = novels
+        findViewById<android.view.View>(R.id.tabShorts).isSelected = showingShorts
+        findViewById<android.view.View>(R.id.tabNovelsIndicator).setBackgroundColor(
+            if (novels) getColor(R.color.accent) else android.graphics.Color.TRANSPARENT,
+        )
+        findViewById<android.view.View>(R.id.tabShortsIndicator).setBackgroundColor(
+            if (showingShorts) getColor(R.color.accent) else android.graphics.Color.TRANSPARENT,
+        )
+        val novelsLabel = findViewById<TextView>(R.id.tabNovelsLabel)
+        val shortsLabel = findViewById<TextView>(R.id.tabShortsLabel)
+        novelsLabel.setTextColor(getColor(if (novels) R.color.accent else R.color.muted))
+        novelsLabel.setTypeface(
+            null,
+            if (novels) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+        )
+        shortsLabel.setTextColor(getColor(if (showingShorts) R.color.accent else R.color.muted))
+        shortsLabel.setTypeface(
+            null,
+            if (showingShorts) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+        )
     }
 
     /* app opened from the launcher while a reading session was live →
@@ -588,6 +641,7 @@ class NovelListActivity : AppCompatActivity() {
             return
         }
         status.text = "Loading…"
+        val wantShorts = showingShorts
         lifecycleScope.launch {
             val rs = try {
                 withContext(Dispatchers.IO) { rows() }
@@ -595,29 +649,44 @@ class NovelListActivity : AppCompatActivity() {
                 status.text = "List error: ${e.message}"
                 return@launch
             }
+            /* a slower listing finishing after a tab tap would paint the
+               other side's rows under this tab's header */
+            if (showingShorts != wantShorts) return@launch
             list.removeAllViews()
             if (rs.isEmpty()) {
                 /* explain WHICH source came up empty instead of a blank shrug */
                 status.text = "No novels found. ($sourceInfo)"
                 return@launch
             }
-            status.text = finalStatus ?: "${rs.size} novel(s)"
-            /* the 3 most recently READ unfinished novels get their own
-               section on top — a finished mark sends the novel to the
-               bottom of ALL NOVELS instead of pinning it here */
+            val shown = rs.filter {
+                LibrarySort.isShort(it.rec.total, it.local) == showingShorts
+            }
+            val kind = if (showingShorts) "short" else "novel"
+            if (shown.isEmpty()) {
+                status.text = finalStatus ?: if (showingShorts) {
+                    "No shorts — novels with ${LibrarySort.SHORT_MAX} or fewer chapters appear here."
+                } else {
+                    "No novels with more than ${LibrarySort.SHORT_MAX} chapters."
+                }
+                return@launch
+            }
+            status.text = finalStatus ?: "${shown.size} $kind(s)"
+            /* the 3 most recently READ unfinished items on THIS tab get
+               their own section on top — a finished mark sends the novel
+               to the bottom of the all-list instead of pinning it here */
             val recent = LibrarySort.recentlyRead(
-                rs,
+                shown,
                 { it.rec.lastRead },
                 { isRead(it.rec.slug) },
             )
             val recentSlugs = recent.map { it.rec.slug }.toSet()
-            val others = rs.filter { it.rec.slug !in recentSlugs }
+            val others = shown.filter { it.rec.slug !in recentSlugs }
             if (recent.isNotEmpty()) {
                 list.addView(sectionHeader("RECENTLY READ"))
                 for (row in recent) {
                     try { list.addView(buildRow(row)) } catch (e: Exception) {}
                 }
-                list.addView(sectionHeader("ALL NOVELS"))
+                list.addView(sectionHeader(if (showingShorts) "ALL SHORTS" else "ALL NOVELS"))
             }
             for (row in others) {
                 try { list.addView(buildRow(row)) } catch (e: Exception) {}

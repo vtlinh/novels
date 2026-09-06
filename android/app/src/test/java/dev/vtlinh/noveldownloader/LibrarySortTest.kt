@@ -77,6 +77,24 @@ class LibrarySortTest {
     }
 
     @Test
+    fun `twenty chapters is a short, twenty-one is a novel`() {
+        assertEquals(true, LibrarySort.isShort(20, 20))
+        assertEquals(false, LibrarySort.isShort(21, 21))
+    }
+
+    @Test
+    fun `unknown site total falls back to chapters on disk`() {
+        assertEquals(true, LibrarySort.isShort(-1, 8))
+        assertEquals(false, LibrarySort.isShort(-1, 21))
+        assertEquals(true, LibrarySort.isShort(0, 15))
+    }
+
+    @Test
+    fun `a long novel still downloading stays out of Shorts`() {
+        assertEquals(false, LibrarySort.isShort(500, 5))
+    }
+
+    @Test
     fun `recently read skips finished novels and keeps the three latest`() {
         val a = Item(stars = 1, lastRead = 50)
         val b = Item(stars = 1, lastRead = 40)

@@ -12,9 +12,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/* Reading mode, screen 2: one novel. Info tab holds the synopsis (always
-   fully expanded) and a sticky Continue above the tab bar; Chapters tab
-   is the ordered list. Tapping a chapter opens the reader there. */
+/* Reading mode, screen 2: one novel. The chapter list is the page;
+   ℹ opens the synopsis / ranking card that used to be a sibling tab.
+   Tapping a chapter (or Continue) opens the reader and leaves this
+   screen so Back from reading lands on Library. */
 class ChapterListActivity : AppCompatActivity() {
 
     companion object {
@@ -175,13 +176,14 @@ class ChapterListActivity : AppCompatActivity() {
         val title = intent.getStringExtra("title") ?: dirName
         findViewById<TextView>(R.id.chapterTitle).text = title
 
-        /* This novel's own settings. Only reachable with a slug — that is what
-           identifies the novel to the store, and a folder-scanned row opened
-           by directory name alone has nothing to key its settings on. */
+        /* Settings and info both key off the slug — a folder-scanned row
+           opened by directory name alone has nothing to look up. */
         val settingsBtn = findViewById<TextView>(R.id.novelSettingsBtn)
+        val infoBtn = findViewById<TextView>(R.id.novelInfoBtn)
         val slugForSettings = intent.getStringExtra("slug")
         if (slugForSettings.isNullOrEmpty()) {
             settingsBtn.visibility = android.view.View.GONE
+            infoBtn.visibility = android.view.View.GONE
         } else {
             settingsBtn.setOnClickListener {
                 startActivity(
@@ -199,13 +201,24 @@ class ChapterListActivity : AppCompatActivity() {
         ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
         onInfoTab = savedInstanceState?.let { state ->
             if (state.getString(STATE_TAB_SLUG) == intent.getStringExtra("slug")) {
-                state.getBoolean(STATE_ON_INFO_TAB, true)
-            } else true
-        } ?: true
-        findViewById<android.view.View>(R.id.tabInfo).setOnClickListener { showTab(true) }
-        findViewById<android.view.View>(R.id.tabChapters).setOnClickListener { showTab(false) }
-        showTab(onInfoTab)
+                state.getBoolean(STATE_ON_INFO_TAB, false)
+            } else false
+        } ?: false
+        findViewById<android.view.View>(R.id.novelInfoBtn).setOnClickListener {
+            showInfo(!onInfoTab)
+        }
+        showInfo(onInfoTab)
         bindNovelInfo()
+    }
+
+    /* ℹ is a view switch, not a new screen — Back from info returns to
+       the chapter list rather than leaving the novel. */
+    override fun onBackPressed() {
+        if (onInfoTab) {
+            showInfo(false)
+            return
+        }
+        super.onBackPressed()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -214,11 +227,11 @@ class ChapterListActivity : AppCompatActivity() {
         outState.putString(STATE_TAB_SLUG, intent.getStringExtra("slug"))
     }
 
-    /* Info tab first: that's where the synopsis and the sticky Continue
-       live. Chapters is a tap away. Sort only applies to the list, so it
-       hides with that tab. Inactive tab is INVISIBLE so the ListView still
-       lays out and scroll-to-current has a real height. */
-    private fun showTab(info: Boolean) {
+    /* Chapters is the page. Info is a view switch from ℹ. Sort only
+       applies to the list, so it hides with that view. The hidden side
+       is INVISIBLE so the ListView still lays out and scroll-to-current
+       has a real height. */
+    private fun showInfo(info: Boolean) {
         onInfoTab = info
         findViewById<android.view.View>(R.id.infoTab).visibility =
             if (info) android.view.View.VISIBLE else android.view.View.INVISIBLE
@@ -226,24 +239,13 @@ class ChapterListActivity : AppCompatActivity() {
             if (info) android.view.View.INVISIBLE else android.view.View.VISIBLE
         findViewById<android.view.View>(R.id.sortBtn).visibility =
             if (info) android.view.View.GONE else android.view.View.VISIBLE
-        findViewById<android.view.View>(R.id.tabInfo).isSelected = info
-        findViewById<android.view.View>(R.id.tabChapters).isSelected = !info
-        findViewById<android.view.View>(R.id.tabInfoIndicator).setBackgroundColor(
-            if (info) getColor(R.color.accent) else android.graphics.Color.TRANSPARENT,
+        findViewById<TextView>(R.id.novelInfoBtn).setTextColor(
+            getColor(if (info) R.color.accent else R.color.fg),
         )
-        findViewById<android.view.View>(R.id.tabChaptersIndicator).setBackgroundColor(
-            if (info) android.graphics.Color.TRANSPARENT else getColor(R.color.accent),
-        )
-        val infoLabel = findViewById<TextView>(R.id.tabInfoLabel)
-        val chaptersLabel = findViewById<TextView>(R.id.tabChaptersLabel)
-        infoLabel.setTextColor(getColor(if (info) R.color.accent else R.color.muted))
-        infoLabel.setTypeface(null, if (info) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
-        chaptersLabel.setTextColor(getColor(if (info) R.color.muted else R.color.accent))
-        chaptersLabel.setTypeface(null, if (info) android.graphics.Typeface.NORMAL else android.graphics.Typeface.BOLD)
     }
 
-    /* which tab is showing; Info is the default so Continue is on screen */
-    private var onInfoTab = true
+    /* which view is showing; chapters is the default */
+    private var onInfoTab = false
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
 
@@ -263,9 +265,11 @@ class ChapterListActivity : AppCompatActivity() {
                 .putExtra("start", name)
                 .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
         )
+        /* Leave so Back from the reader hits Library, not this screen. */
+        finish()
     }
 
-    /* Novel-page info on the Info tab: cover, ranking, full synopsis.
+    /* Novel-page info behind ℹ: cover, ranking, full synopsis.
        Fills from the store first; if description (or everything) is still
        blank, fetches the novel page once to fill in. */
     private fun bindNovelInfo() {
@@ -479,13 +483,10 @@ class ChapterListActivity : AppCompatActivity() {
         }
     }
 
-    /* The reader leaves by bringing a chapter list forward with
-       REORDER_TO_FRONT, and the instance that comes forward is whichever one
-       is in the stack — which can be another NOVEL's, left there by earlier
-       navigation. Reordering delivers the new intent here rather than
-       recreating, and without adopting it the screen showed the old novel's
-       chapters under the old title, with the ⚙ opening the old novel's
-       settings. onResume follows this and reloads. */
+    /* A new intent can retarget this instance (single-top or
+       REORDER_TO_FRONT). Without adopting it the screen showed the old
+       novel's chapters under the old title, with the ⚙ opening the old
+       novel's settings. onResume follows this and reloads. */
     override fun onNewIntent(newIntent: Intent) {
         super.onNewIntent(newIntent)
         val changed = newIntent.getStringExtra("dir") != intent.getStringExtra("dir") ||
