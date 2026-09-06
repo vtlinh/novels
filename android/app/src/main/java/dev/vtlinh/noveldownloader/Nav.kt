@@ -6,12 +6,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 
-/* The hamburger destinations shared by Library, Documents, and the chapter
-   list. One place so a new section cannot be added to the XML and missed on
-   one of the screens. */
+/* The hamburger destinations shared by Library and Documents. One place
+   so a new section cannot be added to the XML and missed on one of the
+   screens. The chapter list is a drill-in and uses ← instead. */
 object Nav {
 
-    enum class Screen { LIBRARY, DOCUMENTS, CHAPTERS }
+    enum class Screen { LIBRARY, DOCUMENTS }
 
     fun bindDrawer(activity: AppCompatActivity, here: Screen) {
         val drawer = activity.findViewById<DrawerLayout>(R.id.drawerLayout)
@@ -43,7 +43,6 @@ object Nav {
                 Intent(activity, DocumentListActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
-            if (here == Screen.CHAPTERS) activity.finish()
         }
         activity.findViewById<TextView>(R.id.navSettings).setOnClickListener {
             close()

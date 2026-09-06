@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.ArrayAdapter
+import android.widget.ImageView
 import android.widget.ListView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -13,9 +14,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /* Reading mode, screen 2: one novel. The chapter list is the page;
-   ℹ opens the synopsis / ranking card that used to be a sibling tab.
-   Tapping a chapter (or Continue) opens the reader and leaves this
-   screen so Back from reading lands on Library. */
+   the circled-i opens the synopsis / ranking card. ← goes back to
+   Library (or to the list, if info is showing). Tapping a chapter
+   (or Continue) opens the reader and leaves this screen so Back from
+   reading lands on Library. */
 class ChapterListActivity : AppCompatActivity() {
 
     companion object {
@@ -179,7 +181,7 @@ class ChapterListActivity : AppCompatActivity() {
         /* Settings and info both key off the slug — a folder-scanned row
            opened by directory name alone has nothing to look up. */
         val settingsBtn = findViewById<TextView>(R.id.novelSettingsBtn)
-        val infoBtn = findViewById<TextView>(R.id.novelInfoBtn)
+        val infoBtn = findViewById<ImageView>(R.id.novelInfoBtn)
         val slugForSettings = intent.getStringExtra("slug")
         if (slugForSettings.isNullOrEmpty()) {
             settingsBtn.visibility = android.view.View.GONE
@@ -195,8 +197,11 @@ class ChapterListActivity : AppCompatActivity() {
             }
         }
 
-        /* same navigation drawer as the other list screens */
-        Nav.bindDrawer(this, Nav.Screen.CHAPTERS)
+        /* This is a drill-in from Library, not a top-level screen — ←
+           leaves, and the hamburger drawer stays locked. */
+        findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
+            .setDrawerLockMode(androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
+        findViewById<TextView>(R.id.backBtn).setOnClickListener { goBack() }
 
         ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
         onInfoTab = savedInstanceState?.let { state ->
@@ -204,21 +209,23 @@ class ChapterListActivity : AppCompatActivity() {
                 state.getBoolean(STATE_ON_INFO_TAB, false)
             } else false
         } ?: false
-        findViewById<android.view.View>(R.id.novelInfoBtn).setOnClickListener {
-            showInfo(!onInfoTab)
-        }
+        infoBtn.setOnClickListener { showInfo(!onInfoTab) }
         showInfo(onInfoTab)
         bindNovelInfo()
     }
 
-    /* ℹ is a view switch, not a new screen — Back from info returns to
-       the chapter list rather than leaving the novel. */
-    override fun onBackPressed() {
+    /* Info is a view switch, not a new screen — Back from info returns
+       to the chapter list rather than leaving the novel. */
+    private fun goBack() {
         if (onInfoTab) {
             showInfo(false)
             return
         }
-        super.onBackPressed()
+        finish()
+    }
+
+    override fun onBackPressed() {
+        goBack()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -227,7 +234,7 @@ class ChapterListActivity : AppCompatActivity() {
         outState.putString(STATE_TAB_SLUG, intent.getStringExtra("slug"))
     }
 
-    /* Chapters is the page. Info is a view switch from ℹ. Sort only
+    /* Chapters is the page. Info is a view switch from the circled-i. Sort only
        applies to the list, so it hides with that view. The hidden side
        is INVISIBLE so the ListView still lays out and scroll-to-current
        has a real height. */
@@ -239,7 +246,7 @@ class ChapterListActivity : AppCompatActivity() {
             if (info) android.view.View.INVISIBLE else android.view.View.VISIBLE
         findViewById<android.view.View>(R.id.sortBtn).visibility =
             if (info) android.view.View.GONE else android.view.View.VISIBLE
-        findViewById<TextView>(R.id.novelInfoBtn).setTextColor(
+        findViewById<ImageView>(R.id.novelInfoBtn).setColorFilter(
             getColor(if (info) R.color.accent else R.color.fg),
         )
     }

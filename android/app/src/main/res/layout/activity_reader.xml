@@ -52,7 +52,8 @@
                 android:textStyle="bold"
                 android:textColor="@color/fg"
                 android:clickable="true"
-                android:focusable="true" />
+                android:focusable="true"
+                android:contentDescription="Chapter list" />
 
             <TextView
                 android:id="@+id/speechEditsBtn"
