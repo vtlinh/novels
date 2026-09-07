@@ -43,4 +43,14 @@ object TtsPlay {
 
     fun shouldKeepPolling(ticks: Int, hasVoices: Boolean): Boolean =
         !hasVoices && ticks < LOAD_MAX_TICKS
+
+    /* A warmup bind that started before the reader opened must not keep
+       going. OnInit and the poll run after the constructor returns, and
+       ReaderActivity.onCreate calls onBackground() — without this gate a
+       late SUCCESS posts another poll, tick() rebinds at the 4s cadence,
+       and two engines is how a play went silent. generation is the token
+       onBackground bumps so a callback from the shut-down bind is stale
+       even if the reader later closes. */
+    fun shouldContinueWarmup(readerOpen: Boolean, generation: Int, current: Int): Boolean =
+        !readerOpen && generation == current
 }
