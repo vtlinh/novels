@@ -4,8 +4,10 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -17,9 +19,11 @@ import kotlinx.coroutines.withContext
 /* One novel's own settings, reached from the ⚙ on its chapter list.
 
    Two switches that outlive the screen — fetch new chapters without asking,
-   and translate this novel whatever the app-wide switch says — and two actions
-   on the novel itself: check the site for chapters it has gained, and throw
-   the whole thing away and download it again. */
+   and translate this novel whatever the app-wide switch says — a TTS
+   language pin so a novel the detector gets wrong is still read in the
+   right voice, and two actions on the novel itself: check the site for
+   chapters it has gained, and throw the whole thing away and download
+   it again. */
 class NovelSettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -41,6 +45,8 @@ class NovelSettingsActivity : AppCompatActivity() {
         "Automatically download new chapters of this novel when they come out."
     private var translateHelp =
         "Translate this novel into English. This costs money, charged to your Anthropic account."
+    private val ttsLangHelp =
+        "Which language this novel is read aloud in. Auto uses the chapter's own text. Pick English or Vietnamese if that guess is wrong."
     private val recheckHelp =
         "Looks on the website to see if this novel has any new chapters."
     private val redownloadHelp =
@@ -59,6 +65,7 @@ class NovelSettingsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.redownloadBtn).setOnClickListener { confirmRedownload() }
         bindHelp(R.id.autoDownloadHelp, "Auto-download new chapters") { autoDownloadHelp }
         bindHelp(R.id.translateHelp, "Translate to English") { translateHelp }
+        bindHelp(R.id.ttsLangHelp, "TTS language") { ttsLangHelp }
         bindHelp(R.id.recheckHelp, "Check for new chapters") { recheckHelp }
         bindHelp(R.id.redownloadHelp, "Re-download all chapters") { redownloadHelp }
     }
@@ -104,6 +111,7 @@ class NovelSettingsActivity : AppCompatActivity() {
             if (!keepStatus) status(state.summary)
             bindAutoDownload(folder, state)
             bindTranslate(folder, state)
+            bindTtsLang(folder, state)
             findViewById<Button>(R.id.recheckBtn).isEnabled = !busy
             findViewById<Button>(R.id.redownloadBtn).isEnabled = !busy
         }
@@ -252,6 +260,45 @@ class NovelSettingsActivity : AppCompatActivity() {
                 status("Set your Anthropic API key in Settings, or nothing will translate.")
             }
             persist { store.setTranslate(folder, slug, checked) }
+        }
+    }
+
+    /* Auto / English / Vietnamese. Auto is empty in the store, which is
+       also what an upgrade writes — so an existing novel shows Auto and
+       keeps being judged from the chapter until someone picks. */
+    private fun bindTtsLang(folder: String, state: State) {
+        val spinner = findViewById<Spinner>(R.id.ttsLangSpinner)
+        spinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            listOf("Auto (from the text)", "English", "Vietnamese"),
+        )
+        spinner.onItemSelectedListener = null
+        var current = state.rec?.ttsLang
+        spinner.setSelection(
+            when (current) {
+                "en" -> 1
+                "vi" -> 2
+                else -> 0
+            },
+        )
+        spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: android.widget.AdapterView<*>?,
+                view: android.view.View?,
+                pos: Int,
+                id: Long,
+            ) {
+                val lang = when (pos) {
+                    1 -> "en"
+                    2 -> "vi"
+                    else -> null
+                }
+                if (lang == current) return
+                current = lang
+                persist { store.setTtsLang(folder, slug, lang) }
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
     }
 

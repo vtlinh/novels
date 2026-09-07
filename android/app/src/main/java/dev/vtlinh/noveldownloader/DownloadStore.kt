@@ -51,6 +51,8 @@ data class NovelRec(
     val source: String = "",
     val description: String = "",
     val statusLabel: String = "",
+    /* TTS language pin: null follows the chapter text, "en" / "vi" forces it */
+    val ttsLang: String? = null,
 )
 
 /* a cached, fully-resolved chapter listing (DownloadStore.chlist): filenames
@@ -534,6 +536,7 @@ class DownloadStore(context: Context) :
                 "last_dl", "last_read", "auto_dl", "translate",
                 "resume_page", "resume_url", "resume_before",
                 "alt_names", "genres", "source", "description", "status_label",
+                "tts_lang",
             ),
             "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
@@ -559,6 +562,7 @@ class DownloadStore(context: Context) :
                         source = c.getString(17) ?: "",
                         description = c.getString(18) ?: "",
                         statusLabel = c.getString(19) ?: "",
+                        ttsLang = Voices.pin(c.getString(20)),
                     ),
                 )
             }
@@ -606,6 +610,14 @@ class DownloadStore(context: Context) :
        particular novel overrides it. */
     fun translateFor(folder: String, slug: String, appWide: Boolean): Boolean =
         try { novel(folder, slug)?.translate } catch (e: Exception) { null } ?: appWide
+
+    /* null / empty puts the novel back on chapter-text detection */
+    fun setTtsLang(folder: String, slug: String, lang: String?) {
+        writableDatabase.execSQL(
+            "UPDATE novels SET tts_lang=? WHERE folder=? AND slug=?",
+            arrayOf(Voices.pin(lang).orEmpty(), folder, slug),
+        )
+    }
 
     /* ---- listing resume point (see Resume) ---- */
 

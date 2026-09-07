@@ -425,6 +425,9 @@ class NovelListActivity : AppCompatActivity() {
                     if (lose.autoDownload && !win.autoDownload) {
                         store.setAutoDownload(folder, win.slug, true)
                     }
+                    if (lose.ttsLang != null && win.ttsLang == null) {
+                        store.setTtsLang(folder, win.slug, lose.ttsLang)
+                    }
                 } catch (e: Exception) {}
                 /* ...and the reading/read-aloud positions, which live in
                    prefs under the losing SLUG. They are the same novel, and

@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Load TTS on return to the app; per-novel voice language
 1.36.8	Novel page back button, circled info icon, ≡ opens the chapter list
 1.36.8	Add vivutruyen2.net as a Vietnamese source
 1.36.8	Drop the Shorts empty-state explanation

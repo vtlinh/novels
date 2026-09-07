@@ -38,6 +38,10 @@ class ReaderActivity : AppCompatActivity() {
            instance alive so playback continues. */
         @Volatile private var active: ReaderActivity? = null
 
+        /* The process-level TTS warmup stands aside while a reader already
+           owns an engine — two binds at once is how a play went silent. */
+        fun isOpen(): Boolean = active != null
+
         /* Which chapter to reopen for this novel: the one TTS stopped in when
            there is one, else the last chapter the reader showed.
 
@@ -372,6 +376,8 @@ class ReaderActivity : AppCompatActivity() {
        must speak the next sentence, not insert another pause. */
     private var awaitingSilence = false
     private var curTtsLang = ""        // language profile currently applied ("en"/"vi")
+    /* Per-novel pin from NovelSettings. Null is Auto — judge the chapter. */
+    private var novelTtsLang: String? = null
     private var curSentStart = -1
     private var curSentEnd = -1
     private val highlightSpan = android.text.style.BackgroundColorSpan(0x554F8CFF.toInt())
@@ -440,6 +446,7 @@ class ReaderActivity : AppCompatActivity() {
         /* a new reader supersedes any previous one (which stops its TTS) */
         active?.let { if (it !== this) it.finish() }
         active = this
+        TtsWarmup.onBackground()
         setContentView(R.layout.activity_reader)
         val dirName = intent.getStringExtra("dir") ?: return finish()
         val novelTitle = intent.getStringExtra("title") ?: dirName
@@ -588,6 +595,7 @@ class ReaderActivity : AppCompatActivity() {
 
         /* TTS: double-tap anywhere in the text starts reading from there.
            Google TTS only — no other engine is ever used. */
+        loadNovelTtsLang()
         initTts()
         /* Double tap = start TTS, and ONLY that: the second tap is swallowed
            so the selectable TextView never runs its own double-tap
@@ -980,11 +988,19 @@ class ReaderActivity : AppCompatActivity() {
                 /* speak as MEDIA/SPEECH so the system routes and ducks this
                    like any other player (and silences it during a call) */
                 try { tts?.setAudioAttributes(ttsAudioAttributes()) } catch (e: Exception) {}
+                /* Kick voice-data load for both profiles we speak, the same
+                   ask TtsWarmup makes on foreground. applyTtsConfig then
+                   picks the one this chapter wants. */
+                try {
+                    tts?.setLanguage(java.util.Locale.US)
+                    tts?.setLanguage(java.util.Locale("vi", "VN"))
+                } catch (e: Exception) {}
                 curTtsLang = ""   // re-apply the language profile on next speak
                 /* Connected is not ready: voices load after OnInit. Keep the
                    spinner up and honour a pending play only once a voice the
-                   reader would offer is actually there. */
-                voiceRestoreTicks = 0
+                   reader would offer is actually there. A rebind is the same
+                   load — do not zero the tick count here or a broken engine
+                   would rebind forever. */
                 runOnUiThread {
                     updatePlayBtn()
                     ensureSavedVoice()
@@ -1048,7 +1064,36 @@ class ReaderActivity : AppCompatActivity() {
        arrived cannot latch. English is the last resort of a reader with no
        text at all, and the next open asks again. */
     private fun profileLang(): String =
-        curTtsLang.ifEmpty { currentChapterText()?.let { Voices.detect(it) } ?: "en" }
+        curTtsLang.ifEmpty { Voices.langFor(novelTtsLang, currentChapterText()) ?: "en" }
+
+    /* The stored pin for this novel, or null for a document / a miss. */
+    private fun loadNovelTtsLang() {
+        if (asDocument()) {
+            novelTtsLang = null
+            return
+        }
+        val folder = prefs.getString("tree", null) ?: return
+        val slug = intent.getStringExtra("slug") ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val got = try { store.novel(folder, slug)?.ttsLang } catch (e: Exception) { null }
+            runOnUiThread {
+                if (got == novelTtsLang) return@runOnUiThread
+                novelTtsLang = got
+                curTtsLang = ""
+                ensureSavedVoice()
+            }
+        }
+    }
+
+    private fun persistTtsLang(lang: String?) {
+        novelTtsLang = Voices.pin(lang)
+        if (asDocument()) return
+        val folder = prefs.getString("tree", null) ?: return
+        val slug = intent.getStringExtra("slug") ?: return
+        lifecycleScope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+            try { store.setTtsLang(folder, slug, novelTtsLang) } catch (e: Exception) {}
+        }
+    }
 
     /* The locale a language profile speaks in. One definition, because the
        voice filter, the note that explains an empty filter and the fallback
@@ -1165,13 +1210,27 @@ class ReaderActivity : AppCompatActivity() {
     private fun ensureSavedVoice() {
         if (tts == null || !ttsReady) return
         if (!hasOfferableVoices()) {
-            /* Keep polling while a play is waiting, otherwise give up at the
-               same ~12s budget the saved-voice wait uses. The spinner stays
-               either way — canSpeak is still false. */
+            /* Keep polling while a play is waiting, otherwise give up at
+               the load budget. Rebind on the same cadence the settings
+               sheet used — that rebind is what actually loaded voices,
+               and a wait that never rebound left the spinner up until
+               the sheet was opened. */
             val waitingPlay = pendingPlayUntil > android.os.SystemClock.elapsedRealtime()
-            if (waitingPlay || voiceRestoreTicks < 15) {
+            if (waitingPlay || TtsPlay.shouldKeepPolling(voiceRestoreTicks, hasVoices = false)) {
                 if (!waitingPlay) voiceRestoreTicks++
-                android.os.Handler(mainLooper).postDelayed({ ensureSavedVoice() }, 800)
+                if (TtsPlay.shouldRebind(voiceRestoreTicks, hasVoices = false, ttsConnecting) &&
+                    !speaking
+                ) {
+                    try { tts?.shutdown() } catch (e: Exception) {}
+                    tts = null
+                    ttsReady = false
+                    initTts()
+                } else {
+                    android.os.Handler(mainLooper).postDelayed(
+                        { ensureSavedVoice() },
+                        TtsPlay.LOAD_POLL_MS,
+                    )
+                }
             }
             updatePlayBtn()
             return
@@ -1185,7 +1244,7 @@ class ReaderActivity : AppCompatActivity() {
            said "TTS — English" over a Vietnamese chapter for the rest of the
            session. With nothing to judge there is nothing to restore yet, so
            come back when there is; the retry below is already here. */
-        val lang = curTtsLang.ifEmpty { currentChapterText()?.let { Voices.detect(it) } ?: "" }
+        val lang = curTtsLang.ifEmpty { Voices.langFor(novelTtsLang, currentChapterText()) ?: "" }
         if (lang.isEmpty()) {
             if (voiceRestoreTicks < 15) {
                 voiceRestoreTicks++
@@ -1467,7 +1526,10 @@ class ReaderActivity : AppCompatActivity() {
                succeeded with an empty voice list — connected is not ready.
                Remember the ask and honour it when a voice is actually there. */
             pendingPlayUntil = android.os.SystemClock.elapsedRealtime() + PLAY_WAIT_MS
-            if (!ttsReady && !ttsConnecting) initTts()
+            if (!ttsReady && !ttsConnecting) {
+                voiceRestoreTicks = 0
+                initTts()
+            }
             else {
                 voiceRestoreTicks = 0
                 ensureSavedVoice()
@@ -1722,7 +1784,7 @@ class ReaderActivity : AppCompatActivity() {
            there. A chapter is written in one language; ask about that.
            Unjudgeable (still loading, or barely any text) keeps the profile
            already in use rather than forcing one. */
-        val lang = chapterTextAt(s0)?.let { Voices.detect(it) } ?: curTtsLang.ifEmpty { "en" }
+        val lang = Voices.langFor(novelTtsLang, chapterTextAt(s0)) ?: curTtsLang.ifEmpty { "en" }
         if (lang != curTtsLang) applyTtsConfig(lang)
         setHighlight(s0, s1)
         scrollToSpoken(s0)
@@ -2065,6 +2127,7 @@ class ReaderActivity : AppCompatActivity() {
         super.onResume()
         reloadSpeechRules()   // pick up any changes made on the Speech-edits screen
         resyncIfRenamed()     // a rename while we were away must not latch saving off
+        loadNovelTtsLang()    // the novel-settings pin may have changed while away
         val dir = intent.getStringExtra("dir") ?: return
         val slug = intent.getStringExtra("slug") ?: return
         val o = org.json.JSONObject()
@@ -2518,16 +2581,33 @@ class ReaderActivity : AppCompatActivity() {
 
         /* settings are per language; edit the profile of what's being read.
            The language is named once in the header, not on every row. */
-        val lang = profileLang()
-        root.addView(
-            TextView(ctx).apply {
-                text = "TTS — " + if (lang == "vi") "Tiếng Việt" else "English"
-                textSize = 15f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setTextColor(getColor(R.color.fg))
-                setPadding(0, 0, 0, dp(4))
-            },
-        )
+        var lang = profileLang()
+        val heading = TextView(ctx).apply {
+            text = "TTS — " + if (lang == "vi") "Tiếng Việt" else "English"
+            textSize = 15f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(getColor(R.color.fg))
+            setPadding(0, 0, 0, dp(4))
+        }
+        root.addView(heading)
+        fun retitle() {
+            heading.text = "TTS — " + if (lang == "vi") "Tiếng Việt" else "English"
+        }
+        val langSpinner = if (asDocument()) null else android.widget.Spinner(ctx).also { spin ->
+            root.addView(label("Language"))
+            spin.adapter = android.widget.ArrayAdapter(
+                ctx, android.R.layout.simple_spinner_dropdown_item,
+                listOf("Auto (from the text)", "English", "Vietnamese"),
+            )
+            spin.setSelection(
+                when (novelTtsLang) {
+                    "en" -> 1
+                    "vi" -> 2
+                    else -> 0
+                },
+            )
+            root.addView(spin)
+        }
 
         root.addView(label("Voice"))
         /* nothing for this language → show everything rather than nothing,
@@ -2552,6 +2632,37 @@ class ReaderActivity : AppCompatActivity() {
             spinner.setSelection(if (savedIdx >= 0) savedIdx + 1 else 0)
         }
         fillSpinner()
+        langSpinner?.let { spin ->
+            var langPicked = false
+            @Suppress("ClickableViewAccessibility")
+            spin.setOnTouchListener { _, _ -> langPicked = true; false }
+            spin.onItemSelectedListener =
+                object : android.widget.AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(
+                        parent: android.widget.AdapterView<*>?,
+                        view: android.view.View?,
+                        pos: Int,
+                        id: Long,
+                    ) {
+                        if (!langPicked) return
+                        langPicked = false
+                        persistTtsLang(
+                            when (pos) {
+                                1 -> "en"
+                                2 -> "vi"
+                                else -> null
+                            },
+                        )
+                        curTtsLang = ""
+                        lang = profileLang()
+                        retitle()
+                        applyTtsConfig(lang)
+                        voices = voiceList()
+                        fillSpinner()
+                    }
+                    override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                }
+        }
         spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
                 parent: android.widget.AdapterView<*>?,
