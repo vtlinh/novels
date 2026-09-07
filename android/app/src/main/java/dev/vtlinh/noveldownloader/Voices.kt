@@ -27,6 +27,18 @@ object Voices {
     /* The name to say it by, for a reader who has to go and install it. */
     fun nameOf(lang: String): String = if (lang == "vi") "Vietnamese" else "English"
 
+    /* A stored pin is only a language we have a profile for. Anything else
+       — empty, a typo, a leftover — is "no pin", not a third language the
+       rest of the reader has no voice, rate or pitch for. */
+    fun pin(raw: String?): String? =
+        raw?.takeIf { it == "en" || it == "vi" }
+
+    /* Which language a novel should be spoken in: the pin when there is
+       one, otherwise the chapter. Null when there is still nothing to
+       judge — same contract as detect, so the caller can wait. */
+    fun langFor(override: String?, sample: String?): String? =
+        pin(override) ?: detect(sample ?: "")
+
     /* Google's voice names end in how they are synthesised: "en-us-x-iob-local"
        renders on the phone, "en-us-x-iob-network" renders on Google's servers.
 

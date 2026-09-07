@@ -72,4 +72,39 @@ class TtsPlayTest {
             TtsPlay.face(speaking = true, engineReady = false, hasVoices = false),
         )
     }
+
+    /* ---- loading voices without opening the settings sheet ---- */
+
+    @Test
+    fun `voices already there means stop asking`() {
+        assertFalse(TtsPlay.shouldKeepPolling(0, hasVoices = true))
+        assertFalse(TtsPlay.shouldRebind(5, hasVoices = true, connecting = false))
+    }
+
+    @Test
+    fun `a just-started load does not rebind on the first tick`() {
+        assertFalse(
+            "tick 0 is the bind we just did",
+            TtsPlay.shouldRebind(0, hasVoices = false, connecting = false),
+        )
+        assertTrue(TtsPlay.shouldKeepPolling(0, hasVoices = false))
+    }
+
+    @Test
+    fun `an empty list is rebound on the settings-sheet cadence`() {
+        assertTrue(TtsPlay.shouldRebind(5, hasVoices = false, connecting = false))
+        assertTrue(TtsPlay.shouldRebind(10, hasVoices = false, connecting = false))
+        assertFalse("in between is a wait, not another bind",
+            TtsPlay.shouldRebind(6, hasVoices = false, connecting = false))
+        assertFalse(
+            "a bind already in flight is not stacked",
+            TtsPlay.shouldRebind(5, hasVoices = false, connecting = true),
+        )
+    }
+
+    @Test
+    fun `a load that never grows voices is given up`() {
+        assertTrue(TtsPlay.shouldKeepPolling(TtsPlay.LOAD_MAX_TICKS - 1, hasVoices = false))
+        assertFalse(TtsPlay.shouldKeepPolling(TtsPlay.LOAD_MAX_TICKS, hasVoices = false))
+    }
 }

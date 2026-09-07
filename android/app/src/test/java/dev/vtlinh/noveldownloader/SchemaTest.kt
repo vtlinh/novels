@@ -418,6 +418,31 @@ class SchemaTest {
         }
     }
 
+    /* Per-novel TTS language arrives unset: it is a choice, and an upgrade
+       has no choice to copy. A default of "en" would pin every existing
+       Vietnamese novel to an English voice on the first open after upgrade. */
+    @Test
+    fun `an existing novel upgrades with no TTS language override`() {
+        for (v in 5..22) {
+            open().use { c ->
+                at(v, c)
+                c.createStatement().use {
+                    it.execute(
+                        "INSERT INTO novels(folder,slug,url,title,started) " +
+                            "VALUES('f','than-y','https://site/than-y/','Thần Y',1)",
+                    )
+                }
+                Schema.upgrade(Jdbc(c), v)
+                c.createStatement().use { s ->
+                    s.executeQuery("SELECT tts_lang FROM novels WHERE slug='than-y'").use { r ->
+                        assertTrue("upgrading from v$v lost the novel", r.next())
+                        assertEquals("upgrading from v$v: tts_lang must stay Auto", "", r.getString(1))
+                    }
+                }
+            }
+        }
+    }
+
     /* Anything older than v4 is rebuilt rather than migrated, and that is a
        deliberate data loss — it is all cache and index. It has to actually
        leave a working current schema behind, though. */

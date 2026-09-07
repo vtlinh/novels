@@ -29,4 +29,18 @@ object TtsPlay {
         !canSpeak(engineReady, hasVoices) -> Face.SPINNER
         else -> Face.PLAY
     }
+
+    /* How a foreground load keeps asking. Voice data arrives after OnInit,
+       and on some devices not until the engine is bound again — the
+       settings sheet was rebinding every ~4s, which is why opening it was
+       the only thing that loaded voices. */
+    const val LOAD_POLL_MS = 800L
+    const val LOAD_REBIND_EVERY = 5
+    const val LOAD_MAX_TICKS = 30
+
+    fun shouldRebind(ticks: Int, hasVoices: Boolean, connecting: Boolean): Boolean =
+        !hasVoices && !connecting && ticks > 0 && ticks % LOAD_REBIND_EVERY == 0
+
+    fun shouldKeepPolling(ticks: Int, hasVoices: Boolean): Boolean =
+        !hasVoices && ticks < LOAD_MAX_TICKS
 }

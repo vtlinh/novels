@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 22
+    const val VERSION = 23
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -66,6 +66,11 @@ object Schema {
                provider that reports no mtime still remeasures. */
             "disk_bytes INTEGER DEFAULT -1, " +
             "disk_stamp_dir TEXT DEFAULT '', disk_stamp_tr TEXT DEFAULT '', " +
+            /* Which language TTS should speak this novel in. Empty follows
+               the chapter text (Voices.detect); "en" / "vi" pins it. A
+               library is mostly one language per site and the odd novel
+               is the exception — the same shape as `translate`. */
+            "tts_lang TEXT DEFAULT '', " +
             "PRIMARY KEY(folder, slug))"
     /* which novel a folder NAME belongs to, so a second novel that
        sanitises onto the same name is sent elsewhere instead of writing
@@ -254,6 +259,11 @@ object Schema {
             db.soft("ALTER TABLE novels ADD COLUMN disk_bytes INTEGER DEFAULT -1")
             db.soft("ALTER TABLE novels ADD COLUMN disk_stamp_dir TEXT DEFAULT ''")
             db.soft("ALTER TABLE novels ADD COLUMN disk_stamp_tr TEXT DEFAULT ''")
+        }
+        /* Per-novel TTS language. Empty is "as before": judge each chapter.
+           Nothing to seed — a pin is a choice, and there is no choice here. */
+        if (oldVersion < 23) {
+            db.soft("ALTER TABLE novels ADD COLUMN tts_lang TEXT DEFAULT ''")
         }
     }
 }

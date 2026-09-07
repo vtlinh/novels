@@ -250,4 +250,33 @@ class VoicesTest {
         assertNull("one sentence of Vietnamese is still not a chapter",
             Voices.detect("Chương 1: Không chỉ thích một người"))
     }
+
+    /* ---- a novel can pin the language instead of judging ---- */
+
+    @Test
+    fun `only the two profiles are a pin`() {
+        assertEquals("en", Voices.pin("en"))
+        assertEquals("vi", Voices.pin("vi"))
+        assertNull("empty is Auto", Voices.pin(""))
+        assertNull(Voices.pin(null))
+        assertNull("a typo is not a third language", Voices.pin("fr"))
+        assertNull(Voices.pin("EN"))
+    }
+
+    @Test
+    fun `a pin wins over the chapter, and over having no chapter`() {
+        assertEquals("en", Voices.langFor("en", vietnameseChapter))
+        assertEquals("vi", Voices.langFor("vi", englishChapter))
+        assertEquals("vi", Voices.langFor("vi", ""))
+        assertEquals("en", Voices.langFor("en", null))
+    }
+
+    @Test
+    fun `no pin is the same as asking detect`() {
+        assertEquals(Voices.detect(vietnameseChapter), Voices.langFor(null, vietnameseChapter))
+        assertEquals(Voices.detect(englishChapter), Voices.langFor("", englishChapter))
+        assertNull("and still says nothing when there is nothing to judge",
+            Voices.langFor(null, ""))
+        assertNull(Voices.langFor("fr", ""))
+    }
 }
