@@ -979,15 +979,15 @@ class NovelListActivity : AppCompatActivity() {
         }
         status.text = "Removing…"
         /* remember first, so a garbage-marked novel stays gone even if
-           deletion hiccups. Delete skips this — the slug is not banned. */
-        val editor = prefs.edit()
-            .remove("novelHot:$slug").remove("novelRead:$slug")
-            .remove("lastCh:$slug").remove("readPos:$slug").remove("readParaText:$slug")
-            .remove("ttsPos:$slug").remove("ttsParaText:$slug")
+           deletion hiccups. Delete skips this — the slug is not banned.
+           Reading prefs stay until the folder is actually gone: clearing
+           them here is what dropped lastCh / ttsPos when SAF refused,
+           even though the toast said nothing was removed. */
         if (rememberGarbage) {
-            editor.putStringSet(GARBAGE_KEY, garbageSet() + Ownership.normKey(slug))
+            prefs.edit()
+                .putStringSet(GARBAGE_KEY, garbageSet() + Ownership.normKey(slug))
+                .apply()
         }
-        editor.apply()
         lifecycleScope.launch(Dispatchers.IO) {
             val treeUri = Uri.parse(folder)
             /* This recursively deletes a directory, so which one it picks has
@@ -1056,6 +1056,9 @@ class NovelListActivity : AppCompatActivity() {
                 }
                 return@launch
             }
+            prefs.edit().apply {
+                for (k in NovelErase.prefKeysIfDeleted(folderDeleted = true, slug)) remove(k)
+            }.apply()
             try { store.removeNovel(folder, slug) } catch (e: Exception) {}
             try { store.clear(folder, slug) } catch (e: Exception) {}
             try { store.setChapterOrder(folder, slug, emptyList()) } catch (e: Exception) {}
