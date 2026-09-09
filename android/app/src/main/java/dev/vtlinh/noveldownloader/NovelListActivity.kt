@@ -749,7 +749,7 @@ class NovelListActivity : AppCompatActivity() {
                         .putExtra("slug", row.rec.slug),
                 )
             }
-            /* long-press: finished / garbage marks */
+            /* long-press: finished / garbage / delete */
             setOnLongClickListener { showMarkSheet(row); true }
         }
         /* "complete" is the SITE saying the story is finished — it says
@@ -886,7 +886,7 @@ class NovelListActivity : AppCompatActivity() {
         return line
     }
 
-    /* long-press menu: finished / garbage */
+    /* long-press menu: finished / garbage / delete */
     private fun showMarkSheet(row: Row) {
         val slug = row.rec.slug
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
@@ -902,18 +902,20 @@ class NovelListActivity : AppCompatActivity() {
                 setTextColor(getColor(R.color.fg)); setPadding(0, 0, 0, dp(8))
             },
         )
-        fun item(label: String, onTap: () -> Unit) = root.addView(
-            TextView(this).apply {
-                text = label; textSize = 15f; setTextColor(getColor(R.color.fg))
-                setPadding(0, dp(12), 0, dp(12))
-                isClickable = true; isFocusable = true
-                setOnClickListener { sheet.dismiss(); onTap() }
-            },
-        )
+        fun item(label: String, color: Int = getColor(R.color.fg), onTap: () -> Unit) =
+            root.addView(
+                TextView(this).apply {
+                    text = label; textSize = 15f; setTextColor(color)
+                    setPadding(0, dp(12), 0, dp(12))
+                    isClickable = true; isFocusable = true
+                    setOnClickListener { sheet.dismiss(); onTap() }
+                },
+            )
         item(if (isRead(slug)) "Mark as unread" else "Mark as finished") {
             setRead(slug, !isRead(slug)); render()
         }
         item("Mark as garbage…") { confirmGarbage(row) }
+        item("Delete…", getColor(R.color.err)) { confirmDelete(row) }
         sheet.setContentView(root)
         sheet.show()
     }
@@ -927,9 +929,25 @@ class NovelListActivity : AppCompatActivity() {
                 "\"${row.display}\" will be removed from this list and its downloaded " +
                     "chapters deleted from your device. Downloading it again will warn you first.",
             )
-            .setPositiveButton("Mark as garbage") { _, _ -> doGarbage(row) }
+            .setPositiveButton("Mark as garbage") { _, _ -> eraseNovel(row, rememberGarbage = true) }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /* delete: same wipe as garbage, but the slug is not remembered — the
+       novel can be downloaded again later with no warning */
+    private fun confirmDelete(row: Row) {
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Delete novel")
+            .setMessage(
+                "\"${row.display}\" will be removed from this list and its downloaded " +
+                    "chapters deleted from your device.",
+            )
+            .setPositiveButton("Delete") { _, _ -> eraseNovel(row, rememberGarbage = false) }
+            .setNegativeButton("Cancel", null)
+            .show()
+        dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)
+            .setTextColor(getColor(R.color.err))
     }
 
     /* Do this novel's recorded chapters still open? A sample is enough — the
@@ -949,7 +967,7 @@ class NovelListActivity : AppCompatActivity() {
         return false
     }
 
-    private fun doGarbage(row: Row) {
+    private fun eraseNovel(row: Row, rememberGarbage: Boolean) {
         val folder = folderKey ?: return
         val slug = row.rec.slug
         val status = findViewById<TextView>(R.id.statusText)
@@ -969,13 +987,16 @@ class NovelListActivity : AppCompatActivity() {
             return
         }
         status.text = "Removing…"
-        /* remember first, so the novel stays gone even if deletion hiccups */
-        prefs.edit()
-            .putStringSet(GARBAGE_KEY, garbageSet() + Ownership.normKey(slug))
+        /* remember first, so a garbage-marked novel stays gone even if
+           deletion hiccups. Delete skips this — the slug is not banned. */
+        val editor = prefs.edit()
             .remove("novelHot:$slug").remove("novelRead:$slug")
             .remove("lastCh:$slug").remove("readPos:$slug").remove("readParaText:$slug")
             .remove("ttsPos:$slug").remove("ttsParaText:$slug")
-            .apply()
+        if (rememberGarbage) {
+            editor.putStringSet(GARBAGE_KEY, garbageSet() + Ownership.normKey(slug))
+        }
+        editor.apply()
         lifecycleScope.launch(Dispatchers.IO) {
             val treeUri = Uri.parse(folder)
             /* This recursively deletes a directory, so which one it picks has
@@ -1029,9 +1050,11 @@ class NovelListActivity : AppCompatActivity() {
                    directory of chapters nothing in the app could name, list or
                    remove — so keep the novel, say so, and let the user try
                    again. */
-                prefs.edit().putStringSet(
-                    GARBAGE_KEY, garbageSet() - Ownership.normKey(slug),
-                ).apply()
+                if (rememberGarbage) {
+                    prefs.edit().putStringSet(
+                        GARBAGE_KEY, garbageSet() - Ownership.normKey(slug),
+                    ).apply()
+                }
                 withContext(Dispatchers.Main) {
                     Toast.makeText(
                         this@NovelListActivity,
