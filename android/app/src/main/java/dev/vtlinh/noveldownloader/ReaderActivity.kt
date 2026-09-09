@@ -170,26 +170,7 @@ class ReaderActivity : AppCompatActivity() {
         return Pair(0, null)
     }
 
-    /* two chapter filenames denote the same chapter when their Chapter
-       numbers agree (names may carry a title suffix) */
-    private fun sameChapter(a: String, b: String): Boolean {
-        if (a == b) return true
-        val re = ChapterName.RE
-        val ma = re.find(a) ?: return false
-        val mb = re.find(b) ?: return false
-        val na = ma.groupValues.getOrNull(1) ?: return false
-        if (na != mb.groupValues.getOrNull(1)) return false
-        /* Number alone was too loose. The rename pass parks a chapter the site
-           dropped as "Chapter 70 (unlisted).txt" right beside the listed
-           "Chapter 70.txt", and merged files are "Chapter 70-71.txt" — all
-           three share the number while being different text, so the saved spot
-           matched a chapter it never belonged to and restored to a paragraph
-           index in the wrong one. The range and any suffix have to agree too;
-           only a legacy title suffix is allowed to differ. */
-        if (ma.groupValues.getOrNull(2) != mb.groupValues.getOrNull(2)) return false
-        fun marked(s: String) = s.contains("(unlisted")
-        return marked(a) == marked(b)
-    }
+    private fun sameChapter(a: String, b: String): Boolean = ChapterName.same(a, b)
 
     /* The chapter list is read once and never reloaded, so two things can make
        the name at an index no longer the chapter it was. A rename pass moves
@@ -2196,6 +2177,20 @@ class ReaderActivity : AppCompatActivity() {
         return layout.getLineStart(layout.getLineForVertical(y))
     }
 
+    /* The chapter TTS is saying, or last said — that is the one ≡ should
+       land the list on. The viewport top sits a fifth of a page above
+       the spoken line, so currentChapterIdx can still be the previous
+       one for the first screenful of a new chapter. */
+    private fun focusChapterName(): String? {
+        val off = if (resumeCursor >= 0) resumeCursor else -1
+        val idx = if (off >= 0) {
+            loadedChapters.lastOrNull { it.start <= off }?.idx
+        } else {
+            currentChapterIdx.takeIf { it >= 0 }
+        } ?: return null
+        return chapters?.ordered?.getOrNull(idx)
+    }
+
     /* ≡ : the full chapter list. The right-edge swipe still opens the
        in-reader drawer; this button leaves so the user can pick a
        chapter on the novel page. The reader stays alive underneath if
@@ -2203,11 +2198,16 @@ class ReaderActivity : AppCompatActivity() {
     private fun openChapterList() {
         if (asDocument()) return
         val dir = intent.getStringExtra("dir") ?: return
+        /* Persist first so a later return to this page (and Continue)
+           agrees with the chapter we are about to point at. */
+        if (resumeCursor >= 0) saveTtsPos(resumeCursor)
+        else if (currentChapterIdx >= 0 && !speaking) saveLastChapter(currentChapterIdx)
         startActivity(
             android.content.Intent(this, ChapterListActivity::class.java)
                 .putExtra("dir", dir)
                 .putExtra("title", intent.getStringExtra("title"))
                 .putExtra("slug", intent.getStringExtra("slug"))
+                .apply { focusChapterName()?.let { putExtra("current", it) } }
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
         )
     }
