@@ -276,4 +276,12 @@ class ChapterNameTest {
         assertFalse(re.matches("notes.txt"))
     }
 
+    @Test
+    fun `a title suffix is the same chapter, an unlisted or merged neighbour is not`() {
+        assertTrue(ChapterName.same("Chapter 70.txt", "Chapter 70 - Title.txt"))
+        assertFalse(ChapterName.same("Chapter 70.txt", "Chapter 70 (unlisted).txt"))
+        assertFalse(ChapterName.same("Chapter 70.txt", "Chapter 70-71.txt"))
+        assertFalse(ChapterName.same("Chapter 70.txt", "Chapter 71.txt"))
+    }
+
 }

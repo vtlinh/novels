@@ -209,6 +209,11 @@ class ChapterListActivity : AppCompatActivity() {
                 state.getBoolean(STATE_ON_INFO_TAB, false)
             } else false
         } ?: false
+        /* ≡ from the reader is a request for the list, at the spoken
+           chapter — not a restore of the last info/chapters view. */
+        if (savedInstanceState == null && !intent.getStringExtra("current").isNullOrEmpty()) {
+            onInfoTab = false
+        }
         infoBtn.setOnClickListener { showInfo(!onInfoTab) }
         showInfo(onInfoTab)
         bindNovelInfo()
@@ -499,6 +504,9 @@ class ChapterListActivity : AppCompatActivity() {
         val changed = newIntent.getStringExtra("dir") != intent.getStringExtra("dir") ||
             newIntent.getStringExtra("slug") != intent.getStringExtra("slug")
         setIntent(newIntent)
+        if (!newIntent.getStringExtra("current").isNullOrEmpty()) {
+            showInfo(false)
+        }
         if (changed) {
             /* a different novel: forget the old list rather than briefly
                showing it — and recreate so onCreate rewires the ⚙ button,
@@ -537,6 +545,10 @@ class ChapterListActivity : AppCompatActivity() {
     private var winEnd = 0
     private var currentPos = -1
     private var expanding = false
+    /* True from bind until the posted jump onto the current row has
+       landed. onScroll at the top of a fresh window would otherwise
+       grow toward chapter 1 and steal the jump — see ChapterListFocus. */
+    private var settling = false
     private var listAdapter: ArrayAdapter<String>? = null
 
     /* While this novel is downloading, fold newly saved chapters in as they
@@ -624,11 +636,14 @@ class ChapterListActivity : AppCompatActivity() {
         listAdapter = adapter
         listView.adapter = adapter
 
+        settling = scrollToCurrent && relativeCurrent >= 0
         if (preserveScroll) {
             listView.setSelectionFromTop(keepPos, keepTop)
-        } else if (scrollToCurrent && relativeCurrent >= 0) {
+        } else if (settling) {
+            val rel = relativeCurrent
             listView.post {
-                listView.setSelectionFromTop(relativeCurrent, (listView.height * 0.2f).toInt())
+                listView.setSelectionFromTop(rel, (listView.height * 0.2f).toInt())
+                settling = false
             }
         }
 
@@ -644,7 +659,9 @@ class ChapterListActivity : AppCompatActivity() {
                 visibleCount: Int,
                 totalCount: Int,
             ) {
-                if (expanding || allOrdered.isEmpty() || totalCount == 0) return
+                if (expanding || !ChapterListFocus.mayGrow(settling) ||
+                    allOrdered.isEmpty() || totalCount == 0
+                ) return
                 if (firstVisible <= EXPAND_NEAR && winStart > 0) {
                     expandUp(listView)
                 } else if (
@@ -754,13 +771,16 @@ class ChapterListActivity : AppCompatActivity() {
             val lastRenderedCount = renderedCount
             renderedCount = ordered.size
             /* the chapter currently being read: highlighted and scrolled into
-               view (at ~20% of the list height) */
-            val lastName = slug?.let {
-                ReaderActivity.resumeChapter(this@ChapterListActivity, it)
-            }
-            val newCurrent = lastName?.let { ordered.indexOf(it) } ?: -1
+               view (at ~20% of the list height). The reader names the TTS
+               chapter when ≡ opens this page; prefs are everyone else's
+               source — see ChapterListFocus. */
+            val lastName = ChapterListFocus.currentName(
+                intent.getStringExtra("current"),
+                slug?.let { ReaderActivity.resumeChapter(this@ChapterListActivity, it) },
+            )
+            val newCurrent = ChapterListFocus.indexIn(ordered, lastName)
             val continueBtn = findViewById<android.widget.Button>(R.id.continueBtn)
-            val startName = if (newCurrent >= 0) lastName else chapters.ordered.firstOrNull()
+            val startName = if (newCurrent >= 0) ordered[newCurrent] else chapters.ordered.firstOrNull()
             if (!slug.isNullOrEmpty() && startName != null) {
                 val label = labelOf(startName)
                 continueBtn.text =

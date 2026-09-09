@@ -22,6 +22,23 @@ object ChapterName {
     val RE = Regex("Chapter (\\d+)(?:-(\\d+))?.*\\.txt")
 
     fun isStored(name: String) = RE.matches(name.removeSuffix(".gz"))
+
+    /* two filenames are the same chapter when their Chapter numbers
+       agree (names may carry a title suffix). Number alone is too loose:
+       the rename pass parks a dropped chapter as "Chapter 70 (unlisted).txt"
+       beside the listed "Chapter 70.txt", and merged files are
+       "Chapter 70-71.txt" — all three share a number while being different
+       text. The range and any unlisted mark have to agree too. */
+    fun same(a: String, b: String): Boolean {
+        if (a == b) return true
+        val ma = RE.find(a) ?: return false
+        val mb = RE.find(b) ?: return false
+        val na = ma.groupValues.getOrNull(1) ?: return false
+        if (na != mb.groupValues.getOrNull(1)) return false
+        if (ma.groupValues.getOrNull(2) != mb.groupValues.getOrNull(2)) return false
+        fun marked(s: String) = s.contains("(unlisted")
+        return marked(a) == marked(b)
+    }
 }
 
 object Listing {
