@@ -105,9 +105,9 @@ object Schema {
             "PRIMARY KEY(folder, slug, chapter, thread_ts))"
     /* Chapter file → image file under scenes/. Set only when the png
        is on disk, so the reader knows which chapters to draw.
-       `alt` is the Slack file's alt_txt, or its title when that is
-       not just the filename — empty on older rows and on a png
-       adopted from disk with no Slack look. */
+       `alt` is the Slack file's Image description (alt_txt from
+       files.info, or alt_text / a real title) — empty on older
+       rows and on a png adopted from disk with no Slack look. */
     const val CHAPTER_IMAGE_TABLE =
         "CREATE TABLE IF NOT EXISTS chapter_image (" +
             "folder TEXT, slug TEXT, chapter TEXT, image TEXT DEFAULT '', " +

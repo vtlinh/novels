@@ -1,5 +1,6 @@
 package dev.vtlinh.noveldownloader
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -125,6 +126,77 @@ class SlackPosterTest {
         assertEquals("", SlackPoster.fileAlt("$hash.png", "$hash.png", "$hash.png"))
         assertEquals("", SlackPoster.fileAlt("tedair.gif", "tedair.gif", "tedair.gif"))
         assertEquals("", SlackPoster.fileAlt("", "$hash.png", ""))
+    }
+
+    /* files.info example from docs.slack.dev — alt_txt is present
+       and equals the filename when there is no Image description. */
+    @Test
+    fun `files info filename placeholder counts as empty`() {
+        val info = JSONObject(
+            """{"id":"F0S43PZDF","name":"tedair.gif","title":"tedair.gif",""" +
+                """"mimetype":"image/gif","url_private":"https://files.slack.com/tedair.gif",""" +
+                """"url_private_download":"https://files.slack.com/tedair.gif",""" +
+                """"alt_txt":"tedair.gif"}""",
+        )
+        assertEquals("", SlackPoster.fileAlt(info))
+        assertFalse(SlackPoster.needsFileInfo(info))
+    }
+
+    /* files.list example omits alt_txt entirely, even when the Slack
+       UI shows Image description. Catalog hydrate used to stop here. */
+    @Test
+    fun `files list without alt_txt needs files info`() {
+        val hash = "d5061ff1cf483c6cab285c9489dd3d8253ef05d6cd6733b4f49918560905f67b"
+        val listed = JSONObject(
+            """{"id":"F0C11BMN49G","name":"$hash.png","title":"$hash.png",""" +
+                """"mimetype":"image/png",""" +
+                """"url_private":"https://files.slack.com/files-pri/T/F/$hash.png",""" +
+                """"url_private_download":"https://files.slack.com/files-pri/T/F/$hash.png"}""",
+        )
+        assertEquals("", SlackPoster.fileAlt(listed))
+        assertTrue(SlackPoster.needsFileInfo(listed))
+    }
+
+    /* ChatGPT's Image description as files.info returns it — the
+       field Slack's UI labels Image description. */
+    @Test
+    fun `files info image description is stored and shown`() {
+        val hash = "d5061ff1cf483c6cab285c9489dd3d8253ef05d6cd6733b4f49918560905f67b"
+        val desc = "Prince Roland orders his officers to drive their steel " +
+            "river gunboat at full speed ahead from its compact command room."
+        val info = JSONObject(
+            """{"id":"F0C11BMN49G","name":"$hash.png","title":"$hash.png",""" +
+                """"mimetype":"image/png","alt_txt":${JSONObject.quote(desc)},""" +
+                """"url_private":"https://files.slack.com/files-pri/T/F/$hash.png",""" +
+                """"url_private_download":"https://files.slack.com/files-pri/T/F/$hash.png"}""",
+        )
+        assertEquals(desc, SlackPoster.fileAlt(info))
+        assertFalse(SlackPoster.needsFileInfo(info))
+    }
+
+    @Test
+    fun `file alt reads alt_text when alt_txt is missing`() {
+        val hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        val file = JSONObject()
+            .put("id", "F123")
+            .put("name", "$hash.png")
+            .put("title", "$hash.png")
+            .put("alt_text", "A lantern in the rain")
+        assertEquals("A lantern in the rain", SlackPoster.fileAlt(file))
+        assertFalse(SlackPoster.needsFileInfo(file))
+    }
+
+    @Test
+    fun `an image block alt_text is copied onto the file stub`() {
+        val m = JSONObject(
+            """{"ts":"1.1","blocks":[{"type":"image","alt_text":"A lantern in the rain",""" +
+                """"slack_file":{"id":"F123"}}]}""",
+        )
+        val files = mutableListOf<JSONObject>()
+        SlackPoster.collectMessageFiles(m, files)
+        assertEquals(1, files.size)
+        assertEquals("A lantern in the rain", SlackPoster.fileAlt(files[0]))
+        assertFalse(SlackPoster.needsFileInfo(files[0]))
     }
 
     @Test

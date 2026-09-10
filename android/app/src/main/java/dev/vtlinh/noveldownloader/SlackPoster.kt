@@ -114,18 +114,34 @@ class SlackPoster(
             if (blocks != null) {
                 for (i in 0 until blocks.length()) {
                     val b = blocks.optJSONObject(i) ?: continue
-                    b.optJSONObject("file")?.let { out.add(it) }
-                    b.optJSONObject("slack_file")?.let { out.add(it) }
+                    /* Image blocks store the caption as alt_text, not
+                       on the slim slack_file / file stub. */
+                    val blockAlt = b.optString("alt_text")
+                    b.optJSONObject("file")?.let { out.add(withBlockAlt(it, blockAlt)) }
+                    b.optJSONObject("slack_file")?.let { out.add(withBlockAlt(it, blockAlt)) }
                     val id = b.optString("file_id")
-                    if (id.isNotEmpty()) out.add(JSONObject().put("id", id))
+                    if (id.isNotEmpty()) {
+                        out.add(withBlockAlt(JSONObject().put("id", id), blockAlt))
+                    }
                 }
             }
             val atts = m.optJSONArray("attachments") ?: return
             for (i in 0 until atts.length()) {
                 val a = atts.optJSONObject(i) ?: continue
+                val attAlt = a.optString("alt_text")
                 addMessageFiles(a.optJSONArray("files"), out)
-                a.optJSONObject("file")?.let { out.add(it) }
+                a.optJSONObject("file")?.let { out.add(withBlockAlt(it, attAlt)) }
             }
+        }
+
+        /* Copy a Block Kit alt_text onto a file stub that has none. */
+        fun withBlockAlt(file: JSONObject, altText: String): JSONObject {
+            val t = altText.trim()
+            if (t.isEmpty()) return file
+            if (file.optString("alt_txt").isNotEmpty() ||
+                file.optString("alt_text").isNotEmpty()
+            ) return file
+            return file.put("alt_text", t)
         }
 
         private fun addMessageFiles(arr: JSONArray?, out: MutableList<JSONObject>) {
@@ -145,9 +161,10 @@ class SlackPoster(
             return name.lowercase() == want || title.lowercase() == want
         }
 
-        /* Slack's description of the picture: alt_txt first, then title.
-           Skip a value that is only the filename — Slack copies that
-           into both fields when ChatGPT left no caption (files.info
+        /* Slack's description of the picture: alt_txt first, then
+           alt_text (Block Kit / upload spelling), then title. Skip a
+           value that is only the filename — Slack copies that into
+           both fields when ChatGPT left no caption (files.info
            example: alt_txt == "tedair.gif"). */
         fun fileAlt(altTxt: String, title: String, name: String): String {
             fun useful(raw: String): Boolean {
@@ -179,10 +196,21 @@ class SlackPoster(
         }
 
         fun fileAlt(file: JSONObject): String = fileAlt(
-            file.optString("alt_txt"),
+            file.optString("alt_txt").ifEmpty { file.optString("alt_text") },
             file.optString("title"),
             file.optString("name"),
         )
+
+        /* files.list (and some message stubs) include name + url but
+           omit alt_txt. Image description is on files.info. Skip a
+           second look when the object already carried alt_txt /
+           alt_text — even a filename placeholder. */
+        fun needsFileInfo(file: JSONObject): Boolean {
+            if (file.optString("id").isEmpty()) return false
+            if (fileAlt(file).isNotEmpty()) return false
+            if (file.has("alt_txt") || file.has("alt_text")) return false
+            return true
+        }
 
         fun describe(code: String): String = when (code) {
             "invalid_auth", "not_authed", "token_revoked", "account_inactive" ->
@@ -376,9 +404,10 @@ class SlackPoster(
                 fileMatchesHash(hash, it.name, it.title)
             }
             if (file != null) {
-                png = download(file.file)
-                alt = fileAlt(file.file)
-                log("catalog png ${hit.pngName} ${png?.size ?: 0}B")
+                val full = withDescription(file.file)
+                png = download(full)
+                alt = fileAlt(full)
+                log("catalog png ${hit.pngName} ${png?.size ?: 0}B alt=${alt.length}c")
             }
         }
         if (png == null) {
@@ -489,7 +518,8 @@ class SlackPoster(
             if (!fileMatchesHash(hash, name, title)) {
                 continue
             }
-            download(file)?.let { return FoundPng(it, fileAlt(file)) }
+            val full = withDescription(file)
+            download(full)?.let { return FoundPng(it, fileAlt(full)) }
             log("pick $id $name download empty")
         }
         return null
@@ -497,7 +527,8 @@ class SlackPoster(
 
     /* Fill name / url_private when the list or reply only had an id.
        Title alone is not enough to skip — Slack often invents a caption
-       while leaving name blank. */
+       while leaving name blank. Does not fetch alt_txt: files.list
+       already has name+url, and catalog hydrate runs on every file. */
     private fun hydrate(file: JSONObject): JSONObject {
         val url = file.optString("url_private_download").ifEmpty {
             file.optString("url_private")
@@ -506,6 +537,15 @@ class SlackPoster(
         val id = file.optString("id")
         if (id.isEmpty()) return file
         return fileInfo(id).optJSONObject("file") ?: file
+    }
+
+    /* files.list omits Image description (alt_txt). After we have
+       matched {hash}.png, ask files.info for that one file. */
+    private fun withDescription(file: JSONObject): JSONObject {
+        if (!needsFileInfo(file)) return file
+        val id = file.optString("id")
+        val info = fileInfo(id).optJSONObject("file") ?: return file
+        return info
     }
 
     private fun replies(threadTs: String): List<JSONObject> {
