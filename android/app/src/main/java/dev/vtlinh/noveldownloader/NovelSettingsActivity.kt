@@ -41,11 +41,19 @@ class NovelSettingsActivity : AppCompatActivity() {
     private var busy = false
 
     /* Help text behind each help icon. Some change with novel state (finished,
-       already English); bindHelp shows whatever is current. */
+       already English); bindHelp shows whatever is current. Everyday words
+       for what the reader will see — no Slack, API, selector, cadence, or
+       formula talk. */
     private var autoDownloadHelp =
         "Automatically download new chapters of this novel when they come out."
     private var translateHelp =
         "Translate this novel into English. This costs money, charged to your Anthropic account."
+    private val autoImageHelp =
+        "When this is on, the app makes pictures for some chapters of this novel.\n\n" +
+            "Every and Starting from chapter pick which ones. For example, every 20 " +
+            "starting from chapter 1 means chapters 1, 21, 41, and so on.\n\n" +
+            "It makes one picture every 15 minutes, and skips a chapter that already " +
+            "has one. Each novel has its own setting."
     private val ttsLangHelp =
         "Which language this novel is read aloud in. Auto uses the chapter's own text. Pick English or Vietnamese if that guess is wrong."
     private val recheckHelp =
@@ -66,22 +74,15 @@ class NovelSettingsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.redownloadBtn).setOnClickListener { confirmRedownload() }
         bindHelp(R.id.autoDownloadHelp, "Auto-download new chapters") { autoDownloadHelp }
         bindHelp(R.id.translateHelp, "Translate to English") { translateHelp }
-        bindHelp(
-            R.id.autoImageHelp, "Chapter images",
-        ) {
-            "When this is on, opening this novel posts matching chapters to Slack " +
-                "the same way Generate image does.\n\n" +
-                "Every X chapters starting from chapter Y: chapter Y, then Y+X, Y+2X, and so on. " +
-                "Defaults (every 20 from 1) are chapters 1, 21, 41, …\n\n" +
-                "At most one chapter is posted every 15 minutes. " +
-                "A chapter already posted is not posted again. Each novel has its own setting."
-        }
+        bindHelp(R.id.autoImageHelp, "Chapter images") { autoImageHelp }
         bindHelp(R.id.ttsLangHelp, "TTS language") { ttsLangHelp }
         bindAutoImage()
         bindHelp(R.id.recheckHelp, "Check for new chapters") { recheckHelp }
         bindHelp(R.id.redownloadHelp, "Re-download all chapters") { redownloadHelp }
     }
 
+    /* Keep `message` in everyday words. What the reader will see, not how
+       the machine does it — bindHelp is how a new string reaches the user. */
     private fun bindHelp(id: Int, title: String, message: () -> String) {
         findViewById<View>(id).setOnClickListener {
             AlertDialog.Builder(this)
@@ -370,7 +371,7 @@ class NovelSettingsActivity : AppCompatActivity() {
         val rec = this.rec ?: return
         if (busy) return
         if (DownloadService.isBusy(Ownership.normKey(slug))) {
-            status("This novel is downloading — a check would rename its files mid-write.")
+                    status("This novel is downloading — wait until it finishes, then check again.")
             return
         }
         setBusy(true)
@@ -397,22 +398,21 @@ class NovelSettingsActivity : AppCompatActivity() {
                 )
                 return@launch
             }
-            val how = if (res.resumed) "" else " (read in full)"
             /* the BOX, not the snapshot the screen loaded with: ticking
                auto-download and then checking, in that order, is the obvious
                way to use this screen and the write behind the tick is
                asynchronous */
             val auto = findViewById<CheckBox>(R.id.autoDownloadCheck).isChecked
             when {
-                res.missing <= 0 -> status("Up to date — ${res.total} chapters$how.")
+                res.missing <= 0 -> status("Up to date — ${res.total} chapters.")
                 auto -> {
                     if (NovelCheck.startDownload(this@NovelSettingsActivity, res.url)) {
-                        status("${res.missing} new chapter(s)$how — downloading.")
+                        status("${res.missing} new chapter(s) — downloading.")
                     } else {
-                        status("${res.missing} new chapter(s)$how — the download would not start; try again with the app open.")
+                        status("${res.missing} new chapter(s) — the download would not start; try again with the app open.")
                     }
                 }
-                else -> status("${res.missing} chapter(s) missing$how — turn on auto-download, or use Download in the Library.")
+                else -> status("${res.missing} chapter(s) missing — turn on auto-download, or use Download in the Library.")
             }
             /* keep the outcome on screen — a reload overwrote exactly the
                messages that name a partial failure */
@@ -427,10 +427,10 @@ class NovelSettingsActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Re-download this novel?")
             .setMessage(
-                "Every chapter of \"$title\" will be deleted from the download folder — " +
-                    "including translations, which cost money to produce and will be " +
-                    "bought again if translation is on. The site's chapter list is then " +
-                    "read in full and the whole novel downloaded again.",
+                "Every chapter of \"$title\" will be deleted from your phone — " +
+                    "including translations, which cost money and would have to be " +
+                    "paid for again if translation is on. Then the whole novel is " +
+                    "downloaded again from the website.",
             )
             .setPositiveButton("Delete and re-download") { _, _ -> redownload() }
             .setNegativeButton("Cancel", null)

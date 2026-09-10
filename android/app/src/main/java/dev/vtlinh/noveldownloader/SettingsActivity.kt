@@ -91,7 +91,7 @@ class SettingsActivity : AppCompatActivity() {
         updateFolderLabel()
         bindHelp(
             R.id.storageUsedHelp, "Used",
-            "How much space your downloaded novels take up, including translations and chapter scenes.",
+            "How much space your downloaded novels take up, including translations and chapter pictures.",
         )
 
         /* single "Compress my novels" switch: on → compress every novel and
@@ -152,13 +152,15 @@ class SettingsActivity : AppCompatActivity() {
         )
         bindHelp(
             R.id.slackHelp, "Slack",
-            "Generate image posts this chapter to Slack and saves the picture Slack sends back. " +
-                "Poll image looks for that picture without posting again.\n\n" +
+            "The app uses Slack to make chapter pictures. Generate image asks for a " +
+                "picture of the chapter you are reading and saves it. Poll image checks " +
+                "whether that picture is ready yet.\n\n" +
                 "1. Create an app at api.slack.com/apps\n" +
-                "2. Bot Token Scopes: files:write, files:read, channels:join, " +
+                "2. Give it permission to send and read files, and to join and read " +
+                "channels: files:write, files:read, channels:join, " +
                 "channels:history, groups:history\n" +
-                "3. Install (or reinstall) the app and copy the Bot User OAuth Token (xoxb-…)\n" +
-                "4. Invite the bot to the channel. A private channel needs groups:history.\n" +
+                "3. Install the app and copy the bot token (it starts with xoxb-)\n" +
+                "4. Invite the bot to your channel\n" +
                 "5. Channel ID is the C… in the channel's Slack link",
         )
         bindHelp(
@@ -171,6 +173,8 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
+    /* Keep `message` in everyday words. What the reader will see, not how
+       the machine does it — bindHelp is how a new string reaches the user. */
     private fun bindHelp(id: Int, title: String, message: String) {
         findViewById<View>(id).setOnClickListener {
             AlertDialog.Builder(this)

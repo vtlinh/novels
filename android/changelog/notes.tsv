@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Use simpler words in the in-app help
 	Set auto-generate image cadence before turning it on
 1.37.22	Show generated chapter images under the synopsis
 1.37.21	Reuse one Slack file list for every missing chapter image
