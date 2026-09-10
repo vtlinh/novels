@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Keep Generate image off until the last Slack look finishes
 	Disable Generate image when the chapter picture is already saved
 	Use a picture already in scenes/ before asking Slack
 1.37.11	Don't list the library folder when opening a chapter

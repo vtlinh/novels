@@ -133,8 +133,9 @@ object ChapterImages {
     }
 
     /* Locked while the png is on disk and in the database, or a
-       request is still inside the hour. A stale row whose file is
-       gone does not lock — Generate image can be tapped again. */
+       request is still waiting — inside the hour, or past it before
+       the last Slack look. A stale image row whose file is gone does
+       not lock — Generate image can be tapped again. */
     fun alreadyRequested(
         ctx: Context,
         folder: String,
@@ -147,17 +148,17 @@ object ChapterImages {
         val store = DownloadStore(ctx)
         return lockGenerate(
             hasImage = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null,
-            reqStarts = store.imageReqs(folder, slug, chapter).map { it.startedAt },
+            waits = store.imageReqs(folder, slug, chapter).map { it.startedAt to it.looked },
         )
     }
 
     fun lockGenerate(
         hasImage: Boolean,
-        reqStarts: List<Long>,
+        waits: List<Pair<Long, Boolean>>,
         now: Long = System.currentTimeMillis(),
     ): Boolean {
         if (hasImage) return true
-        return reqStarts.any { !expired(it, now) }
+        return waits.any { (startedAt, looked) -> !mayDrop(startedAt, looked, now) }
     }
 
     fun markRequested(
@@ -311,7 +312,9 @@ object ChapterImages {
             savePng(ctx, folder, dirName, slug, chapter, png)
             return Result.success(true)
         }
-        val started = DownloadStore(ctx).imageReqs(folder, slug, chapter)
+        val store = DownloadStore(ctx)
+        store.markImageReqLooked(folder, slug, chapter)
+        val started = store.imageReqs(folder, slug, chapter)
             .minOfOrNull { it.startedAt } ?: 0L
         if (mayDrop(started, looked = true)) {
             return Result.failure(IOException("Gave up waiting for the image."))
