@@ -18,9 +18,9 @@ import java.io.IOException
    but only after one last look at Slack, or a png that arrived while
    the app was closed would be thrown away.
 
-   Auto-generate (Settings): when enabled, opening a novel posts every
-   chapter N ≥ from where (N − from) is a multiple of every. A chapter
-   already posted is not posted again. */
+   Auto-generate (this novel's ⚙): when enabled, opening that novel
+   posts every chapter N ≥ from where (N − from) is a multiple of
+   every. A chapter already posted is not posted again. */
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
@@ -50,16 +50,30 @@ object ChapterImages {
         return (n - from) % every == 0
     }
 
-    fun autoEnabled(ctx: Context): Boolean =
-        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).getBoolean("autoImage", false)
+    fun autoEnabledKey(slug: String) = "autoImage:$slug"
+    fun autoEveryKey(slug: String) = "autoImageEvery:$slug"
+    fun autoFromKey(slug: String) = "autoImageFrom:$slug"
 
-    fun autoEvery(ctx: Context): Int =
+    fun autoEnabled(ctx: Context, slug: String): Boolean =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-            .getInt("autoImageEvery", AUTO_EVERY_DEFAULT).coerceAtLeast(1)
+            .getBoolean(autoEnabledKey(slug), false)
 
-    fun autoFrom(ctx: Context): Int =
+    fun autoEvery(ctx: Context, slug: String): Int =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-            .getInt("autoImageFrom", AUTO_FROM_DEFAULT).coerceAtLeast(1)
+            .getInt(autoEveryKey(slug), AUTO_EVERY_DEFAULT).coerceAtLeast(1)
+
+    fun autoFrom(ctx: Context, slug: String): Int =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getInt(autoFromKey(slug), AUTO_FROM_DEFAULT).coerceAtLeast(1)
+
+    fun setAuto(ctx: Context, slug: String, enabled: Boolean, every: Int, from: Int) {
+        if (slug.isEmpty()) return
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
+            .putBoolean(autoEnabledKey(slug), enabled)
+            .putInt(autoEveryKey(slug), every.coerceAtLeast(1))
+            .putInt(autoFromKey(slug), from.coerceAtLeast(1))
+            .apply()
+    }
 
     private fun slackReady(ctx: Context): Boolean {
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
@@ -89,10 +103,10 @@ object ChapterImages {
         chapters: List<String>,
         scope: CoroutineScope,
     ) {
-        if (!autoEnabled(ctx) || !slackReady(ctx)) return
-        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty()) return
-        val every = autoEvery(ctx)
-        val from = autoFrom(ctx)
+        if (slug.isEmpty() || !autoEnabled(ctx, slug) || !slackReady(ctx)) return
+        if (folder.isEmpty() || dirName.isEmpty()) return
+        val every = autoEvery(ctx, slug)
+        val from = autoFrom(ctx, slug)
         val app = ctx.applicationContext
         scope.launch(Dispatchers.IO) {
             for (chapter in chapters) {

@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
@@ -19,11 +20,11 @@ import kotlinx.coroutines.withContext
 /* One novel's own settings, reached from the ⚙ on its chapter list.
 
    Two switches that outlive the screen — fetch new chapters without asking,
-   and translate this novel whatever the app-wide switch says — a TTS
-   language pin so a novel the detector gets wrong is still read in the
-   right voice, and two actions on the novel itself: check the site for
-   chapters it has gained, and throw the whole thing away and download
-   it again. */
+   and translate this novel whatever the app-wide switch says — auto-
+   generated chapter images for this novel only, a TTS language pin so a
+   novel the detector gets wrong is still read in the right voice, and two
+   actions on the novel itself: check the site for chapters it has gained,
+   and throw the whole thing away and download it again. */
 class NovelSettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -65,7 +66,17 @@ class NovelSettingsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.redownloadBtn).setOnClickListener { confirmRedownload() }
         bindHelp(R.id.autoDownloadHelp, "Auto-download new chapters") { autoDownloadHelp }
         bindHelp(R.id.translateHelp, "Translate to English") { translateHelp }
+        bindHelp(
+            R.id.autoImageHelp, "Chapter images",
+        ) {
+            "When this is on, opening this novel posts matching chapters to Slack " +
+                "the same way Generate image does.\n\n" +
+                "Every X chapters starting from chapter Y: chapter Y, then Y+X, Y+2X, and so on. " +
+                "Defaults (every 20 from 1) are chapters 1, 21, 41, …\n\n" +
+                "A chapter already posted is not posted again. Each novel has its own setting."
+        }
         bindHelp(R.id.ttsLangHelp, "TTS language") { ttsLangHelp }
+        bindAutoImage()
         bindHelp(R.id.recheckHelp, "Check for new chapters") { recheckHelp }
         bindHelp(R.id.redownloadHelp, "Re-download all chapters") { redownloadHelp }
     }
@@ -82,6 +93,11 @@ class NovelSettingsActivity : AppCompatActivity() {
 
     /* Reload on every return: a download started from here changes the counts,
        and so does one started anywhere else while this screen was behind it. */
+    override fun onPause() {
+        super.onPause()
+        try { saveAutoImage() } catch (e: Exception) {}
+    }
+
     override fun onResume() {
         super.onResume()
         load()
@@ -176,6 +192,57 @@ class NovelSettingsActivity : AppCompatActivity() {
     }
 
     /* ---- the two switches ---- */
+
+    private fun bindAutoImage() {
+        val autoCheck = findViewById<CheckBox>(R.id.autoImageCheck)
+        val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
+        val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
+        autoCheck.isChecked = ChapterImages.autoEnabled(this, slug)
+        everyInput.setText(ChapterImages.autoEvery(this, slug).toString())
+        fromInput.setText(ChapterImages.autoFrom(this, slug).toString())
+        fun syncAutoFields() {
+            val on = autoCheck.isChecked
+            everyInput.isEnabled = on
+            fromInput.isEnabled = on
+            everyInput.alpha = if (on) 1f else 0.5f
+            fromInput.alpha = if (on) 1f else 0.5f
+        }
+        autoCheck.setOnCheckedChangeListener { _, checked ->
+            saveAutoImage()
+            syncAutoFields()
+            if (checked) {
+                val token = (prefs.getString("slackBotToken", "") ?: "").trim()
+                val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
+                if (token.isEmpty() || channel.isEmpty()) {
+                    status("Set Slack in Settings, or no images will be generated.")
+                }
+            }
+        }
+        everyInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveAutoImage()
+        }
+        fromInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveAutoImage()
+        }
+        syncAutoFields()
+    }
+
+    private fun saveAutoImage() {
+        if (!::slug.isInitialized) return
+        val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
+        val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
+        val every = everyInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
+            ?: ChapterImages.AUTO_EVERY_DEFAULT
+        val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
+            ?: ChapterImages.AUTO_FROM_DEFAULT
+        ChapterImages.setAuto(
+            this, slug,
+            findViewById<CheckBox>(R.id.autoImageCheck).isChecked,
+            every, from,
+        )
+        if (everyInput.text.toString() != every.toString()) everyInput.setText(every.toString())
+        if (fromInput.text.toString() != from.toString()) fromInput.setText(from.toString())
+    }
 
     /* Both checkbox writes run NonCancellable: lifecycleScope dies with the
        screen, and a tick followed immediately by Back was cancelled before
