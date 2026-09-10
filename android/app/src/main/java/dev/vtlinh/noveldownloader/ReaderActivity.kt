@@ -3065,7 +3065,8 @@ class ReaderActivity : AppCompatActivity() {
         val uri = ChapterImages.chapterUri(this, folder, dir, chapter, slug) ?: return raw
         val maxW = (text.width - text.paddingLeft - text.paddingRight)
             .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }
-        val bmp = ChapterImages.thumb(this, uri, maxW)
+        val pad = dp(10)
+        val bmp = ChapterImages.thumb(this, uri, (maxW - pad * 2).coerceAtLeast(1))
         if (bmp == null) {
             DownloadService.appendLog("image: $chapter thumb failed $uri")
             ChapterImages.forgetMissingImage(this, folder, slug, chapter)
@@ -3077,11 +3078,12 @@ class ReaderActivity : AppCompatActivity() {
         val sb = android.text.SpannableStringBuilder(head)
         val at = sb.length
         sb.append('\uFFFC').append('\n')
-        val dw = android.graphics.drawable.BitmapDrawable(resources, bmp)
-        val h = (bmp.height * (maxW.toFloat() / bmp.width.coerceAtLeast(1))).toInt().coerceAtLeast(1)
-        dw.setBounds(0, 0, maxW, h)
         sb.setSpan(
-            android.text.style.ImageSpan(dw, android.text.style.ImageSpan.ALIGN_BOTTOM),
+            ChapterImageSpan(
+                bmp, maxW, pad, dp(8), dp(10), dp(1),
+                getColor(R.color.card), getColor(R.color.input_stroke),
+                text.lineSpacingMultiplier, text.lineSpacingExtra,
+            ),
             at, at + 1,
             android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
         )
