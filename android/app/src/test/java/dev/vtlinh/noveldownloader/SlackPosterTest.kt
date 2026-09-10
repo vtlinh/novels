@@ -25,4 +25,14 @@ class SlackPosterTest {
         assertFalse(SlackPoster.fileMatchesHash(hash, "${hash}_image.png", "scene"))
         assertFalse(SlackPoster.fileMatchesHash(hash, "", ""))
     }
+
+    @Test
+    fun `the asked-for hash txt matches only as txt`() {
+        val hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        assertTrue(SlackPoster.fileMatchesTxt(hash, "$hash.txt", ""))
+        assertTrue(SlackPoster.fileMatchesTxt(hash, "", "$hash.txt"))
+        assertFalse(SlackPoster.fileMatchesTxt(hash, "$hash.png", ""))
+        assertFalse(SlackPoster.fileMatchesTxt(hash, "other.txt", ""))
+        assertFalse(SlackPoster.fileMatchesHash(hash, "$hash.txt", ""))
+    }
 }

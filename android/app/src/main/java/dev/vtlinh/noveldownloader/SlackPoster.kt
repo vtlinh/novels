@@ -31,10 +31,23 @@ class SlackPoster(
 
         /* ChatGPT always saves as {hash}.png. A thread reply often
            returns a stub with only an id — hydrate, then match this. */
-        fun fileMatchesHash(hash: String, name: String, title: String): Boolean {
+        fun fileMatchesHash(hash: String, name: String, title: String) =
+            fileMatchesExt(hash, "png", name, title)
+
+        /* The chapter upload is {hash}.txt. After a failed hour we
+           find every copy of that file and walk each thread. */
+        fun fileMatchesTxt(hash: String, name: String, title: String) =
+            fileMatchesExt(hash, "txt", name, title)
+
+        fun fileMatchesExt(
+            hash: String,
+            ext: String,
+            name: String,
+            title: String,
+        ): Boolean {
             val h = hash.lowercase()
-            if (h.isEmpty()) return false
-            val want = "$h.png"
+            if (h.isEmpty() || ext.isEmpty()) return false
+            val want = "$h.${ext.lowercase()}"
             return name.lowercase() == want || title.lowercase() == want
         }
 
@@ -136,6 +149,42 @@ class SlackPoster(
         return null
     }
 
+    /* After an hour give-up the saved thread ts is gone. Find every
+       {hash}.txt in the channel and look in each thread for {hash}.png
+       before posting the chapter again. */
+    fun findExistingImage(hash: String, knownThread: String? = null): ByteArray? {
+        findImage(hash, knownThread)?.let { return it }
+        val threads = linkedSetOf<String>()
+        try {
+            for (stub in listedFilesAll()) {
+                val file = hydrate(stub)
+                val name = file.optString("name")
+                val title = file.optString("title")
+                if (fileMatchesHash(hash, name, title)) {
+                    download(file)?.let { return it }
+                }
+                if (fileMatchesTxt(hash, name, title)) {
+                    threadTsOf(file)?.let { threads.add(it) }
+                }
+            }
+        } catch (e: ApiException) {
+            if (e.code != "missing_scope") throw e
+        }
+        for (ts in threads) {
+            if (ts == knownThread) continue
+            try {
+                pickImage(hash, replies(ts))?.let { return it }
+            } catch (e: ApiException) {
+                if (e.code != "missing_scope" && e.code != "thread_not_found" &&
+                    e.code != "message_not_found"
+                ) {
+                    throw e
+                }
+            }
+        }
+        return null
+    }
+
     private fun pickImage(hash: String, files: List<JSONObject>): ByteArray? {
         val seen = mutableSetOf<String>()
         for (stub in files) {
@@ -195,6 +244,36 @@ class SlackPoster(
         val out = mutableListOf<JSONObject>()
         addFiles(json.optJSONArray("files"), out)
         return out
+    }
+
+    /* Every file Slack will give us in this channel — a retry after
+       give-up has to see older {hash}.txt posts, not only the last 50. */
+    private fun listedFilesAll(): List<JSONObject> {
+        val out = mutableListOf<JSONObject>()
+        var page = 1
+        var pages = 1
+        while (page <= pages && page <= 20) {
+            val json = apiForm(
+                "files.list",
+                FormBody.Builder()
+                    .add("channel", channelId)
+                    .add("count", "100")
+                    .add("page", page.toString())
+                    .build(),
+            )
+            addFiles(json.optJSONArray("files"), out)
+            pages = json.optJSONObject("paging")?.optInt("pages", 1) ?: 1
+            if (pages < 1) break
+            page++
+        }
+        return out
+    }
+
+    private fun threadTsOf(file: JSONObject): String? {
+        shareTsOf(file)?.let { return it }
+        val id = file.optString("id")
+        if (id.isEmpty()) return null
+        return shareTs(fileInfo(id))
     }
 
     /* Thread replies list `files`, sometimes a singular `file`, and
