@@ -76,6 +76,7 @@ data class ChapterImageReq(
     val hash: String,
     val threadTs: String,
     val startedAt: Long,
+    val looked: Boolean = false,
 )
 
 class DownloadStore(context: Context) :
@@ -664,11 +665,18 @@ class DownloadStore(context: Context) :
         )
     }
 
+    fun markImageReqLooked(folder: String, slug: String, chapter: String) {
+        writableDatabase.execSQL(
+            "UPDATE chapter_image_req SET looked=1 WHERE folder=? AND slug=? AND chapter=?",
+            arrayOf(folder, slug, chapter),
+        )
+    }
+
     fun imageReqs(folder: String, slug: String, chapter: String): List<ChapterImageReq> {
         val out = ArrayList<ChapterImageReq>()
         readableDatabase.query(
             "chapter_image_req",
-            arrayOf("hash", "thread_ts", "started_at"),
+            arrayOf("hash", "thread_ts", "started_at", "looked"),
             "folder=? AND slug=? AND chapter=?",
             arrayOf(folder, slug, chapter),
             null, null, "started_at ASC",
@@ -680,6 +688,7 @@ class DownloadStore(context: Context) :
                         c.getString(0) ?: "",
                         c.getString(1) ?: "",
                         c.getLong(2),
+                        c.getInt(3) != 0,
                     ),
                 )
             }
@@ -691,10 +700,10 @@ class DownloadStore(context: Context) :
     fun waitingImageReqs(): List<ChapterImageReq> {
         val out = ArrayList<ChapterImageReq>()
         readableDatabase.rawQuery(
-            "SELECT r.folder, r.slug, r.chapter, r.hash, r.thread_ts, r.started_at " +
+            "SELECT r.folder, r.slug, r.chapter, r.hash, r.thread_ts, r.started_at, r.looked " +
                 "FROM chapter_image_req r LEFT JOIN chapter_image i " +
                 "ON i.folder=r.folder AND i.slug=r.slug AND i.chapter=r.chapter " +
-                "WHERE i.image IS NULL OR i.image=''",
+                "WHERE (i.image IS NULL OR i.image='') AND r.looked=0",
             null,
         ).use { c ->
             while (c.moveToNext()) {
@@ -706,6 +715,7 @@ class DownloadStore(context: Context) :
                         c.getString(3) ?: "",
                         c.getString(4) ?: "",
                         c.getLong(5),
+                        c.getInt(6) != 0,
                     ),
                 )
             }

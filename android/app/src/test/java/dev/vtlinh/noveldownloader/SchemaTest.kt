@@ -102,7 +102,7 @@ class SchemaTest {
             Schema.create(Jdbc(c))
             val s = shape(c)
             assertEquals(
-                setOf("folder", "slug", "chapter", "hash", "thread_ts", "started_at"),
+                setOf("folder", "slug", "chapter", "hash", "thread_ts", "started_at", "looked"),
                 s["chapter_image_req"],
             )
             assertEquals(
