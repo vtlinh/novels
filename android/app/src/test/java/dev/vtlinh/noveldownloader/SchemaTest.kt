@@ -97,7 +97,7 @@ class SchemaTest {
     }
 
     @Test
-    fun `v24 records Slack image threads and the chapter to image link`() {
+    fun `v25 records Slack image threads and the last-look flag`() {
         open().use { c ->
             Schema.create(Jdbc(c))
             val s = shape(c)
