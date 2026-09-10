@@ -4,7 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Post a chapter as {hash}.txt to Slack; drop Cursor key
+1.37.5	Post a chapter as {hash}.txt to Slack; drop Cursor key
 1.37.4	Cursor key: chapter summary, on-demand image
 1.37.3	Scroll the chapter list to the TTS chapter
 1.37.2	Delete a novel from the Library long-press menu
