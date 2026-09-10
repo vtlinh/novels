@@ -6,7 +6,9 @@ import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,16 +20,20 @@ import java.io.IOException
    threads stay until that save — an hour give-up only stops polling.
 
    Auto-generate (this novel's ⚙): when enabled, opening that novel
-   posts every chapter N ≥ from where (N − from) is a multiple of
-   every. A chapter already posted is not posted again. */
+   posts chapter N ≥ from where (N − from) is a multiple of every,
+   at most one chapter every 15 minutes. A chapter already posted
+   is not posted again. */
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
     const val GIVE_UP_MS = 60L * 60L * 1000L
     const val AUTO_EVERY_DEFAULT = 20
     const val AUTO_FROM_DEFAULT = 1
+    const val AUTO_GAP_MS = 15L * 60L * 1000L
+    private const val AUTO_LAST_KEY = "autoImageLastAt"
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val autoLock = Any()
+    private var autoFollow: Job? = null
     /* Polls must outlive the chapter list: opening the reader finishes
        that screen and would cancel a lifecycle-scoped wait. */
     private val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -69,6 +75,21 @@ object ChapterImages {
     fun autoEnabledKey(slug: String) = "autoImage:$slug"
     fun autoEveryKey(slug: String) = "autoImageEvery:$slug"
     fun autoFromKey(slug: String) = "autoImageFrom:$slug"
+    fun autoLastKey() = AUTO_LAST_KEY
+
+    /* First auto post is immediate. After that, 15 minutes from the
+       last auto start. lastAt 0 means never. */
+    fun autoReady(
+        lastAt: Long,
+        now: Long = System.currentTimeMillis(),
+        gapMs: Long = AUTO_GAP_MS,
+    ): Boolean = lastAt <= 0L || now - lastAt >= gapMs
+
+    fun autoWaitMs(
+        lastAt: Long,
+        now: Long = System.currentTimeMillis(),
+        gapMs: Long = AUTO_GAP_MS,
+    ): Long = if (lastAt <= 0L) 0L else (lastAt + gapMs - now).coerceAtLeast(0L)
 
     fun autoEnabled(ctx: Context, slug: String): Boolean =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
@@ -89,6 +110,12 @@ object ChapterImages {
             .putInt(autoEveryKey(slug), every.coerceAtLeast(1))
             .putInt(autoFromKey(slug), from.coerceAtLeast(1))
             .apply()
+        if (!enabled) {
+            synchronized(autoLock) {
+                autoFollow?.cancel()
+                autoFollow = null
+            }
+        }
     }
 
     private fun slackReady(ctx: Context): Boolean {
@@ -108,9 +135,17 @@ object ChapterImages {
             .apply()
     }
 
-    /* Opening a novel (list or reader) asks Slack for each due chapter
-       that has no local picture and has not already been posted. One
-       post at a time so a long book does not burst Slack. */
+    private fun autoLastAt(ctx: Context): Long =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).getLong(AUTO_LAST_KEY, 0L)
+
+    private fun markAutoLast(ctx: Context, at: Long = System.currentTimeMillis()) {
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
+            .putLong(AUTO_LAST_KEY, at).apply()
+    }
+
+    /* Opening a novel (list or reader) asks Slack for the next due
+       chapter that has no local picture and has not already been
+       posted. At most one auto post every 15 minutes. */
     fun autoSweep(
         ctx: Context,
         folder: String,
@@ -125,21 +160,75 @@ object ChapterImages {
         val from = autoFrom(ctx, slug)
         val app = ctx.applicationContext
         work.launch {
-            for (chapter in chapters) {
-                val n = Scenes.chapterNumber(chapter) ?: continue
-                if (!due(n, from, every)) continue
-                if (hasLocalImage(app, folder, dirName, chapter, slug)) continue
-                if (alreadyRequested(app, folder, dirName, slug, chapter)) {
-                    markAutoTried(app, slug, chapter)
-                    continue
-                }
-                if (autoTried(app, slug, chapter)) continue
+            val posted = autoTakeOne(app, folder, dirName, slug, chapters, every, from)
+            if (!autoEnabled(app, slug) || !slackReady(app)) return@launch
+            val wait = when {
+                posted -> AUTO_GAP_MS
+                !autoReady(autoLastAt(app)) -> autoWaitMs(autoLastAt(app))
+                else -> 0L
+            }
+            if (wait > 0L) scheduleAutoFollow(wait, app, folder, dirName, slug, chapters)
+        }
+    }
+
+    /* True when this sweep started a request. False when the gap is
+       still running or nothing is due — do not mark a skipped chapter
+       as tried. */
+    private fun autoTakeOne(
+        app: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapters: List<String>,
+        every: Int,
+        from: Int,
+    ): Boolean {
+        for (chapter in chapters) {
+            val n = Scenes.chapterNumber(chapter) ?: continue
+            if (!due(n, from, every)) continue
+            if (hasLocalImage(app, folder, dirName, chapter, slug)) continue
+            if (alreadyRequested(app, folder, dirName, slug, chapter)) {
                 markAutoTried(app, slug, chapter)
-                synchronized(autoLock) {
-                    try { request(app, folder, dirName, slug, chapter) } catch (e: Exception) {}
+                continue
+            }
+            if (autoTried(app, slug, chapter)) continue
+            synchronized(autoLock) {
+                val last = autoLastAt(app)
+                if (!autoReady(last)) {
+                    log("auto wait ${autoWaitMs(last)}ms")
+                    return false
                 }
+                markAutoLast(app)
+            }
+            markAutoTried(app, slug, chapter)
+            log("auto $chapter")
+            try {
+                request(app, folder, dirName, slug, chapter)
+            } catch (e: Exception) {
+                log("auto $chapter fail ${e.message}")
+            }
+            return true
+        }
+        return false
+    }
+
+    private fun scheduleAutoFollow(
+        waitMs: Long,
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapters: List<String>,
+    ) {
+        if (waitMs <= 0L) return
+        synchronized(autoLock) {
+            autoFollow?.cancel()
+            autoFollow = work.launch {
+                delay(waitMs)
+                autoSweep(ctx, folder, dirName, slug, chapters, work)
             }
         }
+        log("auto next in ${waitMs}ms")
     }
 
     fun alreadyRequested(ctx: Context, dirName: String, slug: String, chapter: String): Boolean {

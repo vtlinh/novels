@@ -73,6 +73,7 @@ class NovelSettingsActivity : AppCompatActivity() {
                 "the same way Generate image does.\n\n" +
                 "Every X chapters starting from chapter Y: chapter Y, then Y+X, Y+2X, and so on. " +
                 "Defaults (every 20 from 1) are chapters 1, 21, 41, …\n\n" +
+                "At most one chapter is posted every 15 minutes. " +
                 "A chapter already posted is not posted again. Each novel has its own setting."
         }
         bindHelp(R.id.ttsLangHelp, "TTS language") { ttsLangHelp }
