@@ -157,12 +157,9 @@ class ChapterImagesTest {
 
     @Test
     fun `savedOf keeps a trimmed alt`() {
-        val uri = android.net.Uri.parse("content://tree/Chapter 1.png")
-        val with = ChapterImages.savedOf("Chapter 1.txt", uri, "  A lantern in the rain  ")
-        assertEquals("A lantern in the rain", with.alt)
-        val empty = ChapterImages.savedOf("Chapter 1.txt", uri, "")
-        assertEquals("", empty.alt)
-        assertFalse(ChapterImages.showAlt(empty.alt))
+        assertEquals("A lantern in the rain", ChapterImages.altText("  A lantern in the rain  "))
+        assertEquals("", ChapterImages.altText(""))
+        assertFalse(ChapterImages.showAlt(ChapterImages.altText("")))
     }
 
     @Test

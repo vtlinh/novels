@@ -649,9 +649,12 @@ object ChapterImages {
         val alt: String = "",
     )
 
+    /* Slack's description after trim. Padding is not a caption. */
+    fun altText(alt: String): String = alt.trim()
+
     /* Empty / whitespace is not a caption — hide it so an older
        row or a disk-adopted png does not draw a blank line. */
-    fun showAlt(alt: String): Boolean = alt.trim().isNotEmpty()
+    fun showAlt(alt: String): Boolean = altText(alt).isNotEmpty()
 
     /* chapter_image rows for this novel, lowest chapter number first.
        One exists-query per row — not a listing of scenes/. */
@@ -684,7 +687,7 @@ object ChapterImages {
     fun savedOf(chapter: String, uri: Uri, alt: String = ""): Saved {
         val number = Scenes.chapterNumber(chapter) ?: Int.MAX_VALUE
         val label = if (number == Int.MAX_VALUE) Scenes.chapterStem(chapter) else number.toString()
-        return Saved(chapter, number, label, uri, alt.trim())
+        return Saved(chapter, number, label, uri, altText(alt))
     }
 
     fun sortSaved(items: List<Saved>): List<Saved> =
