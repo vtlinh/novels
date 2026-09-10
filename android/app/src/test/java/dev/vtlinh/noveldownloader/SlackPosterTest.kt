@@ -73,6 +73,26 @@ class SlackPosterTest {
     }
 
     @Test
+    fun `one catalog list matches every missing hash`() {
+        val a = "5dc9a2e5732e7789f3edd21debdfa4519c2c16003ba4ac3ccb800e6c2caca186"
+        val b = "9dbbc0ca1896d555c9e96772c55780ca9f6722c227647bd76abab0b18a"
+        val hist = listOf(
+            SlackPoster.HistoryMsg("1.1", files = listOf(SlackPoster.NamedFile("$a.txt"))),
+            SlackPoster.HistoryMsg("2.2", files = listOf(SlackPoster.NamedFile("$b.txt"))),
+        )
+        val files = listOf(
+            SlackPoster.NamedFile("$a.png", threadTs = "1.1"),
+            SlackPoster.NamedFile("$b.txt", threadTs = "2.2"),
+        )
+        val hitA = SlackPoster.catalogHit(hist, files, a)
+        val hitB = SlackPoster.catalogHit(hist, files, b)
+        assertEquals("$a.png", hitA.pngName)
+        assertEquals(listOf("1.1"), hitA.threads)
+        assertEquals(null, hitB.pngName)
+        assertEquals(listOf("2.2"), hitB.threads)
+    }
+
+    @Test
     fun `a png in history is not a posted chapter`() {
         val hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         val png = SlackPoster.HistoryMsg(

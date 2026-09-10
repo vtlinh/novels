@@ -26,11 +26,19 @@ class SlackPoster(
         val threads: List<String>,
         val readError: String? = null,
     )
-    data class NamedFile(val name: String, val title: String = "")
+    data class NamedFile(
+        val name: String,
+        val title: String = "",
+        val threadTs: String = "",
+    )
     data class HistoryMsg(
         val ts: String,
         val threadTs: String = "",
         val files: List<NamedFile>,
+    )
+    data class CatalogHit(
+        val pngName: String?,
+        val threads: List<String>,
     )
 
     companion object {
@@ -54,6 +62,28 @@ class SlackPoster(
            post this hash". files.list missed Chapter 374's first
            {hash}.txt and the app posted the same bytes again. The
            message ts is the thread — do not wait on shares. */
+        /* One history + files.list answers every missing hash. */
+        fun catalogHit(
+            hist: Iterable<HistoryMsg>,
+            files: Iterable<NamedFile>,
+            hash: String,
+            knownThreads: Collection<String> = emptyList(),
+        ): CatalogHit {
+            val threads = linkedSetOf<String>()
+            for (ts in knownThreads) if (ts.isNotEmpty()) threads.add(ts)
+            for (ts in historyTxtThreads(hist, hash)) threads.add(ts)
+            var png: String? = null
+            for (f in files) {
+                if (png == null && fileMatchesHash(hash, f.name, f.title)) {
+                    png = f.name.ifEmpty { f.title }
+                }
+                if (fileMatchesTxt(hash, f.name, f.title) && f.threadTs.isNotEmpty()) {
+                    threads.add(f.threadTs)
+                }
+            }
+            return CatalogHit(png, threads.toList())
+        }
+
         fun historyTxtThreads(messages: Iterable<HistoryMsg>, hash: String): List<String> {
             val seen = linkedSetOf<String>()
             for (m in messages) {
@@ -132,7 +162,36 @@ class SlackPoster(
            produce a png. A png we already downloaded wins. */
         fun lookDenied(png: ByteArray?, readError: String?): Boolean =
             png == null && !readError.isNullOrEmpty()
+
+        /* One history + files.list is reused for every missing hash
+           in a burst. A post invalidates it so the wait sees new files. */
+        const val CATALOG_TTL_MS = 2L * 60_000L
+        private val catalogLock = Any()
+        private var cachedChannel: String? = null
+        private var cachedAt = 0L
+        private var cached: Catalog? = null
+
+        fun invalidateCatalog() {
+            synchronized(catalogLock) {
+                cached = null
+                cachedChannel = null
+                cachedAt = 0L
+            }
+        }
     }
+
+    class Catalog(
+        val hist: List<HistoryMsg>,
+        val files: List<CatFile>,
+        val readError: String? = null,
+    )
+
+    class CatFile(
+        val name: String,
+        val title: String,
+        val threadTs: String,
+        val file: JSONObject,
+    )
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -186,6 +245,7 @@ class SlackPoster(
            share timestamp. */
         var ts = shareTs(done)
         if (ts.isNullOrEmpty()) ts = shareTs(fileInfo(fileId))
+        invalidateCatalog()
         return Post(hash, ts)
     }
 
@@ -240,50 +300,43 @@ class SlackPoster(
     fun findExistingImage(hash: String, knownThreads: Collection<String> = emptyList()): ByteArray? =
         findExisting(hash, knownThreads).png
 
-    fun findExisting(hash: String, knownThreads: Collection<String> = emptyList()): Existing {
-        val seen = linkedSetOf<String>()
-        for (ts in knownThreads) if (ts.isNotEmpty()) seen.add(ts)
-        log("look ${shortHash(hash)} known=${seen.size}")
-        var readError: String? = null
-        fun remember(code: String) {
-            if (readError == null &&
-                (code == "missing_scope" || code == "not_in_channel" ||
-                    code == "channel_not_found")
-            ) {
-                readError = code
-            }
+    fun findExistingMany(
+        wants: List<Pair<String, Collection<String>>>,
+    ): Map<String, Existing> {
+        if (wants.isEmpty()) return emptyMap()
+        val cat = catalog()
+        val out = linkedMapOf<String, Existing>()
+        for ((hash, threads) in wants) {
+            if (hash.isEmpty() || hash in out) continue
+            out[hash] = findExisting(hash, threads, cat)
         }
-        val hist = channelHistory()
-        hist.error?.let { remember(it) }
-        val fromHist = historyTxtThreads(hist.msgs.map { historyMsgOf(it) }, hash)
-        for (ts in fromHist) seen.add(ts)
-        log("history msgs=${hist.msgs.size} txt=${fromHist.size} threads=${seen.size}")
+        return out
+    }
+
+    fun findExisting(hash: String, knownThreads: Collection<String> = emptyList()): Existing =
+        findExisting(hash, knownThreads, catalog())
+
+    fun findExisting(
+        hash: String,
+        knownThreads: Collection<String>,
+        catalog: Catalog,
+    ): Existing {
+        val named = catalog.files.map { NamedFile(it.name, it.title, it.threadTs) }
+        val hit = catalogHit(catalog.hist, named, hash, knownThreads)
+        log("look ${shortHash(hash)} known=${knownThreads.count { it.isNotEmpty() }} catalog png=${hit.pngName != null} threads=${hit.threads.size}")
         var png: ByteArray? = null
-        try {
-            val listed = listedFilesAll()
-            var listTxt = 0
-            for (stub in listed) {
-                val file = hydrate(stub)
-                val name = file.optString("name")
-                val title = file.optString("title")
-                if (fileMatchesHash(hash, name, title) && png == null) {
-                    png = download(file)
-                    log("files.list png ${name.ifEmpty { title }} ${png?.size ?: 0}B")
-                }
-                if (fileMatchesTxt(hash, name, title)) {
-                    listTxt++
-                    threadTsOf(file)?.let { seen.add(it) }
-                        ?: log("files.list txt $name no thread ts")
-                }
+        var readError = catalog.readError
+        if (hit.pngName != null) {
+            val file = catalog.files.firstOrNull {
+                fileMatchesHash(hash, it.name, it.title)
             }
-            log("files.list n=${listed.size} txt=$listTxt png=${png?.size ?: 0}B threads=${seen.size}")
-        } catch (e: ApiException) {
-            log("files.list ${e.code}")
-            remember(e.code)
-            if (e.code != "missing_scope") throw e
+            if (file != null) {
+                png = download(file.file)
+                log("catalog png ${hit.pngName} ${png?.size ?: 0}B")
+            }
         }
         if (png == null) {
-            for (ts in seen) {
+            for (ts in hit.threads) {
                 try {
                     val files = replies(ts)
                     val names = files.map {
@@ -298,7 +351,12 @@ class SlackPoster(
                     }
                 } catch (e: ApiException) {
                     log("replies $ts ${e.code}")
-                    remember(e.code)
+                    if (readError == null &&
+                        (e.code == "missing_scope" || e.code == "not_in_channel" ||
+                            e.code == "channel_not_found")
+                    ) {
+                        readError = e.code
+                    }
                     if (e.code != "missing_scope" && e.code != "thread_not_found" &&
                         e.code != "message_not_found"
                     ) {
@@ -310,8 +368,57 @@ class SlackPoster(
         if (lookDenied(png, readError)) {
             log("look denied $readError")
         }
-        log("look done ${shortHash(hash)} png=${png?.size ?: 0}B threads=${seen.size}")
-        return Existing(png, seen.toList(), readError)
+        log("look done ${shortHash(hash)} png=${png?.size ?: 0}B threads=${hit.threads.size}")
+        return Existing(png, hit.threads, readError)
+    }
+
+    fun catalog(): Catalog {
+        val now = System.currentTimeMillis()
+        synchronized(catalogLock) {
+            val hit = cached
+            if (hit != null && cachedChannel == channelId && now - cachedAt < CATALOG_TTL_MS) {
+                return hit
+            }
+        }
+        val fresh = loadCatalog()
+        synchronized(catalogLock) {
+            cachedChannel = channelId
+            cachedAt = System.currentTimeMillis()
+            cached = fresh
+        }
+        return fresh
+    }
+
+    private fun loadCatalog(): Catalog {
+        var readError: String? = null
+        fun remember(code: String) {
+            if (readError == null &&
+                (code == "missing_scope" || code == "not_in_channel" ||
+                    code == "channel_not_found")
+            ) {
+                readError = code
+            }
+        }
+        val hist = channelHistory()
+        hist.error?.let { remember(it) }
+        val msgs = hist.msgs.map { historyMsgOf(it) }
+        val files = mutableListOf<CatFile>()
+        try {
+            val listed = listedFilesAll()
+            for (stub in listed) {
+                val file = hydrate(stub)
+                val name = file.optString("name")
+                val title = file.optString("title")
+                val ts = threadTsOf(file).orEmpty()
+                files.add(CatFile(name, title, ts, file))
+            }
+            log("catalog history=${msgs.size} files=${files.size}")
+        } catch (e: ApiException) {
+            log("catalog files.list ${e.code}")
+            remember(e.code)
+            if (e.code != "missing_scope") throw e
+        }
+        return Catalog(msgs, files, readError)
     }
 
     fun findImage(hash: String, threads: Collection<String>): ByteArray? {
