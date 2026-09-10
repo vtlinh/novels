@@ -3,7 +3,7 @@ package dev.vtlinh.noveldownloader
 /* How much of the download folder is novels. The tree can be a folder the
    user also keeps other things in, so this is not "size of the tree": it
    walks each immediate subdirectory, counts chapter files (loose, gzipped,
-   in-progress, and translations), and ignores everything else.
+   in-progress, translations, and chapter scenes), and ignores everything else.
 
    SAF cannot be faked off-device, so the walk arrives as lists — the same
    shape Folder uses. Both a loose chapter and its .gz occupy space until
@@ -21,9 +21,26 @@ object Storage {
         return ChapterName.isStored(name)
     }
 
+    fun isSceneStored(name: String): Boolean {
+        if (Zips.isPartName(name)) return true
+        return Scenes.isSceneFile(name)
+    }
+
     /* One directory listing — files only. Directory sizes are ignored even
        when the provider reports them: they are not a chapter, and some
        providers fill them with a recursive sum we must not double-count. */
+    fun ofScenes(items: List<Folder.Item>): Total {
+        var bytes = 0L
+        var files = 0
+        var unknown = 0
+        for (e in items) {
+            if (e.isDir || !isSceneStored(e.name)) continue
+            files++
+            if (e.size < 0L) unknown++ else bytes += e.size
+        }
+        return Total(bytes, files, unknown)
+    }
+
     fun of(items: List<Folder.Item>): Total {
         var bytes = 0L
         var files = 0
@@ -50,6 +67,8 @@ object Storage {
             acc += of(kids)
             val translated = kids.firstOrNull { it.isDir && it.name == "translated" }
             if (translated != null) acc += of(childrenOf(translated.ref))
+            val scenes = kids.firstOrNull { it.isDir && it.name == Scenes.DIR }
+            if (scenes != null) acc += ofScenes(childrenOf(scenes.ref))
         }
         return acc
     }

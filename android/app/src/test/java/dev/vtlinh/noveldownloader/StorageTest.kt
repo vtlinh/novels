@@ -6,8 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /* What the Settings storage line reports: only novel files, both copies
-   when a compress pass hasn't finished, translations included, and nothing
-   from a shared folder that isn't a chapter. */
+   when a compress pass hasn't finished, translations and chapter scenes
+   included, and nothing from a shared folder that isn't a chapter. */
 class StorageTest {
 
     private fun f(name: String, size: Long, ref: String = "id:$name") =
@@ -81,6 +81,27 @@ class StorageTest {
         assertEquals(1700L, t.bytes)
         assertEquals(3, t.files)
         assertEquals("1.7 KB", Storage.label(t))
+    }
+
+    @Test
+    fun `chapter scenes count, other pictures do not`() {
+        val t = total(
+            listOf(dir("Book")),
+            mapOf(
+                "dir:Book" to listOf(
+                    f("Chapter 1.txt", 1000L),
+                    f("cover.jpg", 200_000L),
+                    dir("scenes", "dir:scenes"),
+                ),
+                "dir:scenes" to listOf(
+                    f("Chapter 1.json", 400L),
+                    f("Chapter 1.png", 80_000L),
+                    f("readme.txt", 9_000L),
+                ),
+            ),
+        )
+        assertEquals(81_400L, t.bytes)
+        assertEquals(3, t.files)
     }
 
     @Test

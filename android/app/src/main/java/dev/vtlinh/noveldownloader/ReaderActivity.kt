@@ -26,7 +26,8 @@ import kotlinx.coroutines.withContext
    The ≡ button opens the novel's chapter list. A right-edge swipe still
    opens the in-reader drawer for jumping anywhere. EN/VI switches between
    the English translation and the Vietnamese source; the ⚙ menu also has
-   the language toggle and Font size +/−. Language and font persist. */
+   the language toggle, Font size +/−, and the chapter-scene entry.
+   Language and font persist. */
 class ReaderActivity : AppCompatActivity() {
 
     companion object {
@@ -2264,6 +2265,25 @@ class ReaderActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    private fun currentChapterFile(): String? {
+        val ch = chapters ?: return null
+        if (currentChapterIdx in ch.ordered.indices) return ch.ordered[currentChapterIdx]
+        val start = intent.getStringExtra("start")
+        if (start != null && start in ch.ordered) return start
+        return ch.ordered.getOrNull(firstIdx) ?: ch.ordered.firstOrNull()
+    }
+
+    private fun openChapterScene() {
+        val chapter = currentChapterFile() ?: return
+        startActivity(
+            android.content.Intent(this, ChapterSceneActivity::class.java)
+                .putExtra("dir", intent.getStringExtra("dir"))
+                .putExtra("slug", intent.getStringExtra("slug"))
+                .putExtra("title", intent.getStringExtra("title"))
+                .putExtra("chapter", chapter),
+        )
+    }
+
     /* ---- full-page reader settings (styled like the main app Settings) ---- */
     private fun showReaderSettings() {
         val ctx = this
@@ -2326,6 +2346,25 @@ class ReaderActivity : AppCompatActivity() {
                 setPadding(0, dp(6), 0, 0)
             },
         )
+
+        if (!asDocument()) {
+            val scene = card()
+            cardTitle(scene, "Chapter scene")
+            scene.addView(
+                TextView(ctx).apply {
+                    text = "Summarize this chapter"
+                    textSize = 15f; setTextColor(getColor(R.color.accent))
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    setPadding(0, dp(12), 0, dp(6))
+                    isClickable = true; isFocusable = true
+                    setOnClickListener {
+                        dialog.dismiss()
+                        openChapterScene()
+                    }
+                },
+            )
+            hint(scene, "A short summary, character descriptions, and setting. An image is generated only if you ask.")
+        }
 
         /* ── Display: language + font ── */
         val disp = card()
