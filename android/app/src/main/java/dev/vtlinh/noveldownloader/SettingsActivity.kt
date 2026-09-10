@@ -18,10 +18,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /* App settings: the Storage card (download folder, library size, and
-   "Compress my novels"), the Anthropic API key and Slack bot token, library auto
-   status-check interval, and reading options. Toggling compression starts
-   a background pass that converts every novel to match; new downloads
-   follow the same flag. The keys are saved on focus loss and when leaving.
+   "Compress my novels"), the Anthropic API key and Slack bot token,
+   auto-generated chapter images, library auto status-check interval,
+   and reading options. Toggling compression starts a background pass
+   that converts every novel to match; new downloads follow the same
+   flag. The keys are saved on focus loss and when leaving.
    Descriptions live behind each setting's help icon. */
 class SettingsActivity : AppCompatActivity() {
 
@@ -49,6 +50,7 @@ class SettingsActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         try { saveKeys() } catch (e: Exception) {}
+        try { saveAuto() } catch (e: Exception) {}
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,6 +89,34 @@ class SettingsActivity : AppCompatActivity() {
                 )
             } catch (e: Exception) {}
         }
+        val autoCheck = findViewById<CheckBox>(R.id.autoImageCheck)
+        val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
+        val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
+        autoCheck.isChecked = prefs.getBoolean("autoImage", false)
+        everyInput.setText(
+            prefs.getInt("autoImageEvery", ChapterImages.AUTO_EVERY_DEFAULT).coerceAtLeast(1).toString(),
+        )
+        fromInput.setText(
+            prefs.getInt("autoImageFrom", ChapterImages.AUTO_FROM_DEFAULT).coerceAtLeast(1).toString(),
+        )
+        fun syncAutoFields() {
+            val on = autoCheck.isChecked
+            everyInput.isEnabled = on
+            fromInput.isEnabled = on
+            everyInput.alpha = if (on) 1f else 0.5f
+            fromInput.alpha = if (on) 1f else 0.5f
+        }
+        autoCheck.setOnCheckedChangeListener { _, _ ->
+            saveAuto()
+            syncAutoFields()
+        }
+        everyInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveAuto()
+        }
+        fromInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveAuto()
+        }
+        syncAutoFields()
         updateFolderLabel()
         bindHelp(
             R.id.storageUsedHelp, "Used",
@@ -159,6 +189,14 @@ class SettingsActivity : AppCompatActivity() {
                 "5. Channel ID is the C… in the channel's Slack link",
         )
         bindHelp(
+            R.id.autoImageHelp, "Chapter images",
+            "When this is on, opening a novel posts matching chapters to Slack " +
+                "the same way Generate image does.\n\n" +
+                "Every X chapters starting from chapter Y: chapter Y, then Y+X, Y+2X, and so on. " +
+                "Defaults (every 20 from 1) are chapters 1, 21, 41, …\n\n" +
+                "A chapter already posted is not posted again, even if Slack never sent a picture.",
+        )
+        bindHelp(
             R.id.statusCheckHelp, "Automatic status check",
             "How often the app looks for new chapters in your novels.",
         )
@@ -184,6 +222,22 @@ class SettingsActivity : AppCompatActivity() {
             .putString("slackBotToken", findViewById<EditText>(R.id.slackTokenInput).text.toString().trim())
             .putString("slackChannelId", findViewById<EditText>(R.id.slackChannelInput).text.toString().trim())
             .apply()
+    }
+
+    private fun saveAuto() {
+        val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
+        val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
+        val every = everyInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
+            ?: ChapterImages.AUTO_EVERY_DEFAULT
+        val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
+            ?: ChapterImages.AUTO_FROM_DEFAULT
+        prefs.edit()
+            .putBoolean("autoImage", findViewById<CheckBox>(R.id.autoImageCheck).isChecked)
+            .putInt("autoImageEvery", every)
+            .putInt("autoImageFrom", from)
+            .apply()
+        if (everyInput.text.toString() != every.toString()) everyInput.setText(every.toString())
+        if (fromInput.text.toString() != from.toString()) fromInput.setText(from.toString())
     }
 
     override fun onResume() {

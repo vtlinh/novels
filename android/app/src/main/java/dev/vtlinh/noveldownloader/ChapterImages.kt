@@ -15,17 +15,95 @@ import java.io.IOException
    image stays off, then poll Slack for {hash}.png in that thread and
    save it under scenes/. Prefs hold the wait list so a kill mid-poll
    resumes on the next foreground. A wait older than an hour is dropped
-   so a missing picture does not retry forever. */
+   so a missing picture does not retry forever.
+
+   Auto-generate (Settings): when enabled, opening a novel posts every
+   chapter N ≥ from where (N − from) is a multiple of every. A chapter
+   already posted — even one that later gave up — is not posted again. */
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
     const val GIVE_UP_MS = 60L * 60L * 1000L
+    const val AUTO_EVERY_DEFAULT = 20
+    const val AUTO_FROM_DEFAULT = 1
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val autoLock = Any()
 
     fun postedKey(slug: String, chapter: String) = "imgPosted:$slug:$chapter"
 
+    fun autoTriedKey(slug: String, chapter: String) = "imgAuto:$slug:$chapter"
+
     fun expired(startedAt: Long, now: Long = System.currentTimeMillis()) =
         now - startedAt >= GIVE_UP_MS
+
+    /* Chapter N is due when it is at or after `from` and lands on the
+       every-th step from there. Defaults (from 1, every 20) → 1, 21, 41. */
+    fun due(n: Int, from: Int, every: Int): Boolean {
+        if (every < 1 || from < 1 || n < from) return false
+        return (n - from) % every == 0
+    }
+
+    fun autoEnabled(ctx: Context): Boolean =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).getBoolean("autoImage", false)
+
+    fun autoEvery(ctx: Context): Int =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getInt("autoImageEvery", AUTO_EVERY_DEFAULT).coerceAtLeast(1)
+
+    fun autoFrom(ctx: Context): Int =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getInt("autoImageFrom", AUTO_FROM_DEFAULT).coerceAtLeast(1)
+
+    private fun slackReady(ctx: Context): Boolean {
+        val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+        val token = (prefs.getString("slackBotToken", "") ?: "").trim()
+        val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
+        return token.isNotEmpty() && channel.isNotEmpty()
+    }
+
+    private fun autoTried(ctx: Context, slug: String, chapter: String): Boolean =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getBoolean(autoTriedKey(slug, chapter), false)
+
+    private fun markAutoTried(ctx: Context, slug: String, chapter: String) {
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
+            .putBoolean(autoTriedKey(slug, chapter), true)
+            .apply()
+    }
+
+    /* Opening a novel (list or reader) asks Slack for each due chapter
+       that has no local picture and has not already been posted. One
+       post at a time so a long book does not burst Slack. */
+    fun autoSweep(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapters: List<String>,
+        scope: CoroutineScope,
+    ) {
+        if (!autoEnabled(ctx) || !slackReady(ctx)) return
+        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty()) return
+        val every = autoEvery(ctx)
+        val from = autoFrom(ctx)
+        val app = ctx.applicationContext
+        scope.launch(Dispatchers.IO) {
+            for (chapter in chapters) {
+                val n = Scenes.chapterNumber(chapter) ?: continue
+                if (!due(n, from, every)) continue
+                if (hasLocalImage(app, folder, dirName, chapter)) continue
+                if (alreadyRequested(app, slug, chapter)) {
+                    markAutoTried(app, slug, chapter)
+                    continue
+                }
+                if (autoTried(app, slug, chapter)) continue
+                markAutoTried(app, slug, chapter)
+                synchronized(autoLock) {
+                    try { request(app, folder, dirName, slug, chapter) } catch (e: Exception) {}
+                }
+            }
+        }
+    }
 
     fun alreadyRequested(ctx: Context, slug: String, chapter: String): Boolean {
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)

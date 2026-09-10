@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Auto-generate chapter images every N chapters
 	Show the chapter image at the top of the reader
 	Give up a missing Slack image after an hour
 	Show generated chapter images under the synopsis
