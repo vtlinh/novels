@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Post only one auto-generated chapter image every 15 minutes
+	Reuse one Slack file list for every missing chapter image
+1.37.20	Post only one auto-generated chapter image every 15 minutes
 1.37.19	Frame the chapter image with a padded card and border
 1.37.18	Don't wait eight minutes when Slack denies the image look
 1.37.17	Resume a Slack image wait from the novel's folder name

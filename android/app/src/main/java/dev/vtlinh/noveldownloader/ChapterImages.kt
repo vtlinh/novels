@@ -125,6 +125,65 @@ object ChapterImages {
         return token.isNotEmpty() && channel.isNotEmpty()
     }
 
+    private fun slackPoster(ctx: Context): SlackPoster? {
+        val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+        val token = (prefs.getString("slackBotToken", "") ?: "").trim()
+        val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
+        if (token.isEmpty() || channel.isEmpty()) return null
+        return SlackPoster(token, channel)
+    }
+
+    /* One Slack history + files.list, then match every missing chapter
+       against that catalog. Saves any png already there so later
+       request() calls do not crawl Slack again. */
+    private fun adoptFromSlack(
+        ctx: Context,
+        slack: SlackPoster,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapters: List<String>,
+    ) {
+        val store = DownloadStore(ctx)
+        val looks = mutableListOf<Triple<String, String, List<String>>>()
+        for (chapter in chapters.distinct()) {
+            if (chapter.isEmpty()) continue
+            if (adoptDiskImage(ctx, folder, dirName, slug, chapter) != null) continue
+            val reqs = try { store.imageReqs(folder, slug, chapter) } catch (e: Exception) {
+                emptyList()
+            }
+            val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
+                ?: chapterText(ctx, folder, dirName, slug, chapter)?.let { Scenes.contentHash(it) }
+                ?: continue
+            looks.add(Triple(chapter, hash, reqs.map { it.threadTs }.filter { it.isNotEmpty() }))
+        }
+        if (looks.isEmpty()) return
+        log("catalog look ${looks.size} missing")
+        val found = try {
+            slack.findExistingMany(looks.map { it.second to it.third })
+        } catch (e: Exception) {
+            log("catalog look fail ${e.message}")
+            return
+        }
+        for ((chapter, hash, _) in looks) {
+            val ex = found[hash] ?: continue
+            if (SlackPoster.lookDenied(ex.png, ex.readError)) {
+                log("look denied ${ex.readError}")
+                return
+            }
+            if (ex.png != null) {
+                try {
+                    savePng(ctx, folder, dirName, slug, chapter, ex.png)
+                } catch (e: Exception) {
+                    log("$chapter catalog save fail ${e.message}")
+                }
+            }
+            for (ts in ex.threads) {
+                if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+            }
+        }
+    }
+
     private fun autoTried(ctx: Context, slug: String, chapter: String): Boolean =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
             .getBoolean(autoTriedKey(slug, chapter), false)
@@ -160,6 +219,13 @@ object ChapterImages {
         val from = autoFrom(ctx, slug)
         val app = ctx.applicationContext
         work.launch {
+            slackPoster(app)?.let { slack ->
+                val dueCh = chapters.filter { ch ->
+                    val n = Scenes.chapterNumber(ch) ?: return@filter false
+                    due(n, from, every)
+                }
+                adoptFromSlack(app, slack, folder, dirName, slug, dueCh)
+            }
             val posted = autoTakeOne(app, folder, dirName, slug, chapters, every, from)
             if (!autoEnabled(app, slug) || !slackReady(app)) return@launch
             val wait = when {
@@ -406,6 +472,23 @@ object ChapterImages {
         log("resume ${waiting.size} waiting")
         val app = ctx.applicationContext
         scope.launch(Dispatchers.IO) {
+            slackPoster(app)?.let { slack ->
+                val byNovel = linkedMapOf<String, MutableList<String>>()
+                val loc = mutableMapOf<String, Triple<String, String, String>>()
+                for (w in waiting) {
+                    val found = try { store.imageResumeDir(w.folder, w.slug) } catch (e: Exception) {
+                        null
+                    } ?: continue
+                    val (folder, dir) = found
+                    val key = "${folder}\u0000${w.slug}\u0000${dir}"
+                    loc[key] = Triple(folder, dir, w.slug)
+                    byNovel.getOrPut(key) { mutableListOf() }.add(w.chapter)
+                }
+                for ((key, chapters) in byNovel) {
+                    val (folder, dir, slug) = loc[key] ?: continue
+                    adoptFromSlack(app, slack, folder, dir, slug, chapters)
+                }
+            }
             val seen = mutableSetOf<String>()
             for (w in waiting) {
                 val key = "${w.folder}\u0000${w.slug}\u0000${w.chapter}"
