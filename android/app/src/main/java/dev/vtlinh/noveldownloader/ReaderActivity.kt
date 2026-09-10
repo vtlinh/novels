@@ -491,15 +491,7 @@ class ReaderActivity : AppCompatActivity() {
                     } else {
                         ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order, slug)
                     }
-                } catch (e: Exception) { null }?.also { listed ->
-                    /* One scenes/ listing on IO, before decorateChapter runs.
-                       The chapter→image row is what lets readAt skip SAF. */
-                    if (!asDocument() && !slug.isNullOrEmpty()) {
-                        ChapterImages.rememberScenes(
-                            this@ReaderActivity, folder, dirName, slug, listed.ordered,
-                        )
-                    }
-                }
+                } catch (e: Exception) { null }
             }
             val ch = chapters ?: run {
                 titleBar.text = novelTitle
@@ -2308,12 +2300,6 @@ class ReaderActivity : AppCompatActivity() {
             android.widget.Toast.makeText(this, "Could not read this chapter.", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
-        val token = (prefs.getString("slackBotToken", "") ?: "").trim()
-        val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
-        if (token.isEmpty() || channel.isEmpty()) {
-            android.widget.Toast.makeText(this, "Set Slack in Settings.", android.widget.Toast.LENGTH_SHORT).show()
-            return
-        }
         setGenerateEnabled(gen, false)
         lifecycleScope.launch {
             val outcome = withContext(Dispatchers.IO) {
@@ -2332,7 +2318,7 @@ class ReaderActivity : AppCompatActivity() {
                     }
                 },
                 onFailure = {
-                    if (!ChapterImages.alreadyRequested(this@ReaderActivity, slug, chapter)) {
+                    if (!ChapterImages.alreadyRequested(this@ReaderActivity, dir, slug, chapter)) {
                         setGenerateEnabled(gen, true)
                     }
                     android.widget.Toast.makeText(
@@ -2420,8 +2406,9 @@ class ReaderActivity : AppCompatActivity() {
                 isFocusable = true
             }
             img.addView(gen)
-            val locked = slug != null && chapter != null &&
-                ChapterImages.alreadyRequested(this, slug, chapter)
+            val dir = intent.getStringExtra("dir")
+            val locked = slug != null && chapter != null && !dir.isNullOrEmpty() &&
+                ChapterImages.alreadyRequested(this, dir, slug, chapter)
             setGenerateEnabled(gen, !locked)
             if (!locked) {
                 gen.setOnClickListener { requestChapterImage(gen) }

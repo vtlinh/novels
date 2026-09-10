@@ -104,19 +104,16 @@ object ChapterImages {
         scope: CoroutineScope,
     ) {
         if (slug.isEmpty() || folder.isEmpty() || dirName.isEmpty()) return
-        val enabled = autoEnabled(ctx, slug)
-        val ready = slackReady(ctx)
+        if (!autoEnabled(ctx, slug) || !slackReady(ctx)) return
         val every = autoEvery(ctx, slug)
         val from = autoFrom(ctx, slug)
         val app = ctx.applicationContext
         work.launch {
-            rememberScenes(app, folder, dirName, slug, chapters)
-            if (!enabled || !ready) return@launch
             for (chapter in chapters) {
                 val n = Scenes.chapterNumber(chapter) ?: continue
                 if (!due(n, from, every)) continue
                 if (hasLocalImage(app, folder, dirName, chapter, slug)) continue
-                if (alreadyRequested(app, folder, slug, chapter)) {
+                if (alreadyRequested(app, folder, dirName, slug, chapter)) {
                     markAutoTried(app, slug, chapter)
                     continue
                 }
@@ -129,21 +126,27 @@ object ChapterImages {
         }
     }
 
-    fun alreadyRequested(ctx: Context, slug: String, chapter: String): Boolean {
+    fun alreadyRequested(ctx: Context, dirName: String, slug: String, chapter: String): Boolean {
         val folder = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
             .getString("tree", "") ?: ""
-        return alreadyRequested(ctx, folder, slug, chapter)
+        return alreadyRequested(ctx, folder, dirName, slug, chapter)
     }
 
-    /* Locked while a picture is on disk, or a request is still inside
-       the hour. After give-up the thread rows stay, but this is false
-       so Generate image can be tapped again. */
-    fun alreadyRequested(ctx: Context, folder: String, slug: String, chapter: String): Boolean {
+    /* Locked while the png is on disk and in the database, or a
+       request is still inside the hour. A stale row whose file is
+       gone does not lock — Generate image can be tapped again. */
+    fun alreadyRequested(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapter: String,
+    ): Boolean {
         if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return false
         importLegacyWaits(ctx)
         val store = DownloadStore(ctx)
         return lockGenerate(
-            hasImage = !store.chapterImage(folder, slug, chapter).isNullOrEmpty(),
+            hasImage = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null,
             reqStarts = store.imageReqs(folder, slug, chapter).map { it.startedAt },
         )
     }
@@ -182,15 +185,15 @@ object ChapterImages {
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
         val token = (prefs.getString("slackBotToken", "") ?: "").trim()
         val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
-        if (token.isEmpty() || channel.isEmpty()) {
-            return Result.failure(IOException("Set Slack in Settings."))
-        }
         importLegacyWaits(ctx)
         val store = DownloadStore(ctx)
         return try {
-            if (hasLocalImage(ctx, folder, dirName, chapter, slug)) {
+            if (adoptDiskImage(ctx, folder, dirName, slug, chapter) != null) {
                 store.clearImageReqs(folder, slug, chapter)
                 return Result.success(true)
+            }
+            if (token.isEmpty() || channel.isEmpty()) {
+                return Result.failure(IOException("Set Slack in Settings."))
             }
             val slack = SlackPoster(token, channel)
             val reqs = store.imageReqs(folder, slug, chapter)
@@ -336,36 +339,6 @@ object ChapterImages {
         } catch (e: Exception) { null }
     }
 
-    /* One listing of scenes/ when the novel opens — not per chapter.
-       DocumentFile.findFile lists the parent; doing that on the library
-       tree for every readAt is what made opening a chapter hang. */
-    fun rememberScenes(
-        ctx: Context,
-        folder: String,
-        dirName: String,
-        slug: String,
-        chapters: List<String>,
-    ) {
-        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty() || chapters.isEmpty()) return
-        val tree = Uri.parse(folder)
-        val scenesId = imageDocId(Saf.rootId(tree), dirName, "")
-            .trimEnd('/')
-        val kids = try {
-            Saf.children(ctx.contentResolver, tree, scenesId, includeSize = false)
-        } catch (e: Exception) {
-            return
-        }
-        if (kids.isEmpty()) return
-        val byImage = chapters.associateBy { Scenes.imageName(it) }
-        val store = DownloadStore(ctx)
-        for (k in kids) {
-            if (k.isDir) continue
-            val chapter = byImage[k.name] ?: continue
-            if (!store.chapterImage(folder, slug, chapter).isNullOrEmpty()) continue
-            store.setChapterImage(folder, slug, chapter, k.name)
-        }
-    }
-
     fun linkedImage(ctx: Context, folder: String, slug: String, chapter: String): String? {
         if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
         return try { DownloadStore(ctx).chapterImage(folder, slug, chapter) } catch (e: Exception) { null }
@@ -377,7 +350,37 @@ object ChapterImages {
         dirName: String,
         chapter: String,
         slug: String = "",
-    ): Boolean = !linkedImage(ctx, folder, slug, chapter).isNullOrEmpty()
+    ): Boolean = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
+
+    /* One document query for scenes/{chapter}.png — not a listing of
+       scenes/. Generate image does this before any Slack call. A
+       database row whose file is gone is dropped. */
+    fun adoptDiskImage(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapter: String,
+    ): String? {
+        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
+        val linked = linkedImage(ctx, folder, slug, chapter)
+        if (!linked.isNullOrEmpty()) {
+            if (imageOnDisk(ctx, folder, dirName, linked)) return linked
+            forgetMissingImage(ctx, folder, slug, chapter)
+        }
+        val name = Scenes.imageName(chapter)
+        if (!imageOnDisk(ctx, folder, dirName, name)) return null
+        try { DownloadStore(ctx).setChapterImage(folder, slug, chapter, name) } catch (e: Exception) { return null }
+        return name
+    }
+
+    fun imageOnDisk(ctx: Context, folder: String, dirName: String, image: String): Boolean {
+        if (folder.isEmpty() || dirName.isEmpty() || image.isEmpty()) return false
+        val tree = Uri.parse(folder)
+        return try {
+            Saf.exists(ctx.contentResolver, tree, imageDocId(Saf.rootId(tree), dirName, image))
+        } catch (e: Exception) { false }
+    }
 
     fun imageDocId(rootId: String, dirName: String, image: String): String {
         val base = "$rootId/$dirName/${Scenes.DIR}"
