@@ -39,6 +39,15 @@ object ChapterImages {
     private fun shortHash(hash: String) =
         if (hash.length <= 12) hash else hash.take(12)
 
+    /* missing_scope / not_in_channel: another 8 minutes will not
+       produce a png. Surface Slack's message and stop. */
+    private fun deniedLook(found: SlackPoster.Existing): Result<Boolean>? {
+        if (!SlackPoster.lookDenied(found.png, found.readError)) return null
+        val code = found.readError ?: return null
+        log("look denied $code")
+        return Result.failure(SlackPoster.ApiException(code))
+    }
+
     fun autoTriedKey(slug: String, chapter: String) = "imgAuto:$slug:$chapter"
 
     fun expired(startedAt: Long, now: Long = System.currentTimeMillis()) =
@@ -242,6 +251,7 @@ object ChapterImages {
             log("$chapter hash=${shortHash(hash)} storedThreads=${threads.size}")
             val found = slack.findExisting(hash, threads)
             log("$chapter look png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
+            deniedLook(found)?.let { return it }
             if (found.png != null) {
                 savePng(ctx, folder, dirName, slug, chapter, found.png)
                 return Result.success(true)
@@ -392,6 +402,7 @@ object ChapterImages {
             return Result.failure(e)
         }
         log("$chapter look png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
+        deniedLook(found)?.let { return it }
         if (found.png != null) {
             savePng(ctx, folder, dirName, slug, chapter, found.png)
             return Result.success(true)
@@ -420,6 +431,7 @@ object ChapterImages {
             SlackPoster.Existing(null, emptyList())
         }
         log("$chapter lastLook png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
+        deniedLook(found)?.let { return it }
         if (found.png != null) {
             savePng(ctx, folder, dirName, slug, chapter, found.png)
             return Result.success(true)

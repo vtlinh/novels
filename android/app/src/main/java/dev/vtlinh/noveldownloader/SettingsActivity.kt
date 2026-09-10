@@ -155,9 +155,10 @@ class SettingsActivity : AppCompatActivity() {
             "Generate image posts this chapter to Slack and saves the picture Slack sends back. " +
                 "Poll image looks for that picture without posting again.\n\n" +
                 "1. Create an app at api.slack.com/apps\n" +
-                "2. Bot Token Scopes: files:write, files:read, channels:join, channels:history\n" +
-                "3. Install the app to your workspace and copy the Bot User OAuth Token (xoxb-…)\n" +
-                "4. Create a public channel and invite the bot\n" +
+                "2. Bot Token Scopes: files:write, files:read, channels:join, " +
+                "channels:history, groups:history\n" +
+                "3. Install (or reinstall) the app and copy the Bot User OAuth Token (xoxb-…)\n" +
+                "4. Invite the bot to the channel. A private channel needs groups:history.\n" +
                 "5. Channel ID is the C… in the channel's Slack link",
         )
         bindHelp(
