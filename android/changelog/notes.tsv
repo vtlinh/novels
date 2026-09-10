@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Don't post a chapter to Slack again when its file is already there
+	Don't post a chapter to Slack again when channel history already has that file
+1.37.14	Don't post a chapter to Slack again when its file is already there
 1.37.13	Keep Generate image off until the last Slack look finishes
 1.37.12	Disable Generate image when the chapter picture is already saved
 1.37.12	Use a picture already in scenes/ before asking Slack
