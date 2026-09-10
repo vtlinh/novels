@@ -14,7 +14,9 @@ import java.io.IOException
 /* One chapter image: post {hash}.txt, remember that chapter so Generate
    image stays off, then poll Slack for {hash}.png in that thread and
    save it under scenes/. Prefs hold the wait list so a kill mid-poll
-   resumes on the next foreground.
+   resumes on the next foreground. After an hour the wait is dropped —
+   but only after one last look at Slack, or a png that arrived while
+   the app was closed would be thrown away.
 
    Auto-generate (Settings): when enabled, opening a novel posts every
    chapter N ≥ from where (N − from) is a multiple of every. A chapter
@@ -22,6 +24,7 @@ import java.io.IOException
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
+    const val GIVE_UP_MS = 60L * 60L * 1000L
     const val AUTO_EVERY_DEFAULT = 20
     const val AUTO_FROM_DEFAULT = 1
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
@@ -30,6 +33,15 @@ object ChapterImages {
     fun postedKey(slug: String, chapter: String) = "imgPosted:$slug:$chapter"
 
     fun autoTriedKey(slug: String, chapter: String) = "imgAuto:$slug:$chapter"
+
+    fun expired(startedAt: Long, now: Long = System.currentTimeMillis()) =
+        now - startedAt >= GIVE_UP_MS
+
+    /* A stale wait is dropped only after Slack has been checked once
+       more. Dropping first loses a png that landed while the app was
+       closed (generated at 30 min, app opened at 2 h). */
+    fun mayDrop(startedAt: Long, looked: Boolean, now: Long = System.currentTimeMillis()) =
+        expired(startedAt, now) && looked
 
     /* Chapter N is due when it is at or after `from` and lands on the
        every-th step from there. Defaults (from 1, every 20) → 1, 21, 41. */
@@ -148,7 +160,13 @@ object ChapterImages {
             }
             if (!inflight.add(hash)) return Result.success(false)
             try {
-                val png = slack.waitForImage(hash, threadTs)
+                val started = waitStarted(ctx, hash) ?: System.currentTimeMillis()
+                val remain = (started + GIVE_UP_MS - System.currentTimeMillis())
+                    .coerceAtMost(SlackPoster.MAX_WAIT_MS)
+                if (expired(started) || remain <= 0L) {
+                    return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, threadTs)
+                }
+                val png = slack.waitForImage(hash, threadTs, remain)
                 savePng(ctx, folder, dirName, slug, chapter, png)
                 forgetWait(ctx, hash)
                 Result.success(true)
@@ -156,6 +174,13 @@ object ChapterImages {
                 inflight.remove(hash)
             }
         } catch (e: Exception) {
+            val h = prefs.getString(postedKey(slug, chapter), null)
+            if (h != null && expired(waitStarted(ctx, h) ?: 0L)) {
+                val slack = SlackPoster(token, channel)
+                return lastLook(
+                    ctx, slack, folder, dirName, slug, chapter, h, waitThread(ctx, h),
+                )
+            }
             Result.failure(e)
         }
     }
@@ -198,7 +223,8 @@ object ChapterImages {
                 .put("slug", slug)
                 .put("chapter", chapter)
                 .put("hash", hash)
-                .put("threadTs", threadTs ?: ""),
+                .put("threadTs", threadTs ?: "")
+                .put("startedAt", System.currentTimeMillis()),
         )
         prefs.edit().putString(WAIT_KEY, arr.toString()).apply()
     }
@@ -214,15 +240,55 @@ object ChapterImages {
         prefs.edit().putString(WAIT_KEY, next.toString()).apply()
     }
 
-    private fun waitThread(ctx: Context, hash: String): String? {
+    private fun waitOf(ctx: Context, hash: String): JSONObject? {
         val arr = waiting(ctx)
         for (i in 0 until arr.length()) {
             val w = arr.optJSONObject(i) ?: continue
-            if (w.optString("hash") == hash) {
-                return w.optString("threadTs").takeIf { it.isNotEmpty() }
-            }
+            if (w.optString("hash") == hash) return w
         }
         return null
+    }
+
+    private fun waitThread(ctx: Context, hash: String): String? =
+        waitOf(ctx, hash)?.optString("threadTs")?.takeIf { it.isNotEmpty() }
+
+    private fun waitStarted(ctx: Context, hash: String): Long? {
+        val w = waitOf(ctx, hash) ?: return null
+        val at = w.optLong("startedAt", 0L)
+        return if (at > 0L) at else null
+    }
+
+    /* One Slack lookup, then drop the wait if the png is still missing.
+       Callers must not drop first — that is the 2-hour-closed loss. */
+    private fun lastLook(
+        ctx: Context,
+        slack: SlackPoster,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapter: String,
+        hash: String,
+        threadTs: String?,
+    ): Result<Boolean> {
+        val png = try { slack.findImage(hash, threadTs) } catch (e: Exception) { null }
+        if (png != null) {
+            savePng(ctx, folder, dirName, slug, chapter, png)
+            forgetWait(ctx, hash)
+            return Result.success(true)
+        }
+        val started = waitStarted(ctx, hash) ?: 0L
+        if (mayDrop(started, looked = true)) {
+            giveUp(ctx, slug, chapter, hash)
+            return Result.failure(IOException("Gave up waiting for the image."))
+        }
+        return Result.failure(IOException("No image came back from Slack."))
+    }
+
+    private fun giveUp(ctx: Context, slug: String, chapter: String, hash: String) {
+        forgetWait(ctx, hash)
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
+            .remove(postedKey(slug, chapter))
+            .apply()
     }
 
     private fun waiting(ctx: Context): JSONArray {

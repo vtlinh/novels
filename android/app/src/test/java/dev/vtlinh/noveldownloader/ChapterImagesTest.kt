@@ -5,8 +5,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /* Auto-generate picks chapters N ≥ from where (N − from) is a
-   multiple of every. */
+   multiple of every. A wait older than an hour is dropped only
+   after Slack has been looked at once more. */
 class ChapterImagesTest {
+
+    @Test
+    fun `a wait is stale after one hour`() {
+        val start = 1_000_000L
+        assertFalse(ChapterImages.expired(start, start))
+        assertFalse(ChapterImages.expired(start, start + ChapterImages.GIVE_UP_MS - 1))
+        assertTrue(ChapterImages.expired(start, start + ChapterImages.GIVE_UP_MS))
+        assertTrue(ChapterImages.expired(start, start + ChapterImages.GIVE_UP_MS + 60_000L))
+        assertTrue(ChapterImages.expired(0L, start))
+    }
+
+    @Test
+    fun `an expired wait is not dropped until Slack has been looked at`() {
+        val start = 1_000_000L
+        val twoHours = start + 2 * ChapterImages.GIVE_UP_MS
+        assertFalse(ChapterImages.mayDrop(start, looked = false, twoHours))
+        assertTrue(ChapterImages.mayDrop(start, looked = true, twoHours))
+        assertFalse(ChapterImages.mayDrop(start, looked = true, start + ChapterImages.GIVE_UP_MS - 1))
+        assertFalse(ChapterImages.mayDrop(start, looked = false, start))
+    }
 
     @Test
     fun `defaults pick chapter 1 then every 20`() {
