@@ -54,7 +54,8 @@ class NovelSettingsActivity : AppCompatActivity() {
             "Every and Starting from chapter pick which ones. For example, every 20 " +
             "starting from chapter 1 means chapters 1, 21, 41, and so on.\n\n" +
             "It makes one picture every 15 minutes, and skips a chapter that already " +
-            "has one. The novels you read most recently get pictures first. " +
+            "has one. If the next chapter is not on your phone yet, it waits. " +
+            "The novels you read most recently get pictures first. " +
             "Each novel has its own setting."
     private val ttsLangHelp =
         "Which language this novel is read aloud in. Auto uses the chapter's own text. Pick English or Vietnamese if that guess is wrong."

@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Wait to make a picture until that chapter is downloaded
 	Make chapter pictures in the background, last-read novels first
 1.37.27	Save image descriptions on chapter pictures
 1.37.26	Use simpler words in the in-app help

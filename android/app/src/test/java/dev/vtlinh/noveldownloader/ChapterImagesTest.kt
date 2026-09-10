@@ -7,9 +7,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /* Auto-generate picks chapters N ≥ from where (N − from) is a
-   multiple of every, at most one every 15 minutes. A wait older
-   than an hour is dropped only after Slack has been looked at
-   once more. A posted chapter shows Poll image instead of Generate. */
+   multiple of every, at most one every 15 minutes. The next due
+   N that is not downloaded yet waits — a later due chapter is
+   not used in its place. A wait older than an hour is dropped
+   only after Slack has been looked at once more. A posted
+   chapter shows Poll image instead of Generate. */
 class ChapterImagesTest {
 
     @Test
@@ -88,7 +90,7 @@ class ChapterImagesTest {
     @Test
     fun `a never-read novel waits behind every novel that has been read`() {
         val read = ChapterImages.AutoNovel(
-            slug = "read", lastRead = 1, from = 1, every = 1,
+            slug = "read", lastRead = 1, from = 5, every = 1,
             chapters = listOf("Chapter 5.txt"),
         )
         val unread = ChapterImages.AutoNovel(
@@ -98,6 +100,51 @@ class ChapterImagesTest {
         assertEquals(
             ChapterImages.AutoPick("read", "Chapter 5.txt"),
             ChapterImages.nextAuto(listOf(unread, read)) { _, _ -> false },
+        )
+    }
+
+    @Test
+    fun `auto-generate waits when the starting chapter is not downloaded yet`() {
+        val laterOnly = ChapterImages.AutoNovel(
+            slug = "later", lastRead = 9, from = 1, every = 20,
+            chapters = listOf("Chapter 21.txt", "Chapter 41.txt"),
+        )
+        assertEquals(null, ChapterImages.nextDueName(laterOnly.chapters, 1, 20) { false })
+        assertEquals(null, ChapterImages.nextAuto(listOf(laterOnly)) { _, _ -> false })
+        val notYet = ChapterImages.AutoNovel(
+            slug = "not-yet", lastRead = 8, from = 100, every = 20,
+            chapters = listOf("Chapter 1.txt", "Chapter 80.txt", "Chapter 120.txt"),
+        )
+        assertEquals(null, ChapterImages.nextDueName(notYet.chapters, 100, 20) { false })
+        assertEquals(null, ChapterImages.nextAuto(listOf(notYet)) { _, _ -> false })
+        val ready = ChapterImages.AutoNovel(
+            slug = "ready", lastRead = 7, from = 100, every = 20,
+            chapters = listOf("Chapter 80.txt", "Chapter 100.txt", "Chapter 120.txt"),
+        )
+        assertEquals("Chapter 100.txt", ChapterImages.nextDueName(ready.chapters, 100, 20) { false })
+        assertEquals(
+            ChapterImages.AutoPick("ready", "Chapter 100.txt"),
+            ChapterImages.nextAuto(listOf(laterOnly, notYet, ready)) { _, _ -> false },
+        )
+        val firstDone = ChapterImages.AutoNovel(
+            slug = "first-done", lastRead = 6, from = 1, every = 20,
+            chapters = listOf("Chapter 1.txt", "Chapter 21.txt"),
+        )
+        assertEquals(
+            "Chapter 21.txt",
+            ChapterImages.nextDueName(firstDone.chapters, 1, 20) { it == "Chapter 1.txt" },
+        )
+        val waiting = ChapterImages.AutoNovel(
+            slug = "waiting", lastRead = 90, from = 100, every = 20,
+            chapters = listOf("Chapter 1.txt", "Chapter 50.txt"),
+        )
+        val available = ChapterImages.AutoNovel(
+            slug = "available", lastRead = 20, from = 1, every = 20,
+            chapters = listOf("Chapter 1.txt"),
+        )
+        assertEquals(
+            ChapterImages.AutoPick("available", "Chapter 1.txt"),
+            ChapterImages.nextAuto(listOf(waiting, available)) { _, _ -> false },
         )
     }
 
