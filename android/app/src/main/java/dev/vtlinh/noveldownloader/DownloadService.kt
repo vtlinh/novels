@@ -301,6 +301,10 @@ class DownloadService : Service() {
                     appendLog("ERROR: ${e.message}")
                     statusFlow.value = "Error: ${e.message}"
                 }
+                /* New chapters may have filled a hole auto-generate was
+                   waiting on. This service is already in the foreground,
+                   so starting ImageService from here is allowed. */
+                try { ImageService.startIfNeeded(applicationContext) } catch (e: Exception) {}
                 /* next in line — unless the user pressed Stop (which also
                    cleared the queue) */
                 val next = if (eng.stopRequested) null else popQueue(applicationContext)
