@@ -37,4 +37,18 @@ class ScenesTest {
         assertFalse(Scenes.slackFileName("abc").contains("scene"))
         assertFalse(Scenes.slackFileName("abc").startsWith("scene-"))
     }
+
+    @Test
+    fun `scene pictures sort by the chapter number in the name`() {
+        assertEquals("Chapter 12", Scenes.chapterStem("Chapter 12.png"))
+        assertEquals(12, Scenes.chapterNumber("Chapter 12.png"))
+        assertEquals(374, Scenes.chapterNumber("Chapter 374.jpg"))
+        assertEquals(1, Scenes.chapterNumber("Chapter 1.txt.gz"))
+        assertTrue((Scenes.chapterNumber("Chapter 2.png") ?: 0) < (Scenes.chapterNumber("Chapter 10.png") ?: 0))
+        val names = listOf("Chapter 10.png", "Chapter 2.png", "notes.png")
+        val sorted = names.sortedWith(
+            compareBy<String> { Scenes.chapterNumber(it) ?: Int.MAX_VALUE }.thenBy { it },
+        )
+        assertEquals(listOf("Chapter 2.png", "Chapter 10.png", "notes.png"), sorted)
+    }
 }

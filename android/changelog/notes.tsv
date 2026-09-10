@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Show generated chapter images under the synopsis
 	Generate image posts the chapter and waits for Slack
 1.37.5	Post a chapter as {hash}.txt to Slack; drop Cursor key
 1.37.4	Cursor key: chapter summary, on-demand image

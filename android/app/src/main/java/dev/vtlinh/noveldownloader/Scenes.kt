@@ -32,6 +32,23 @@ object Scenes {
     fun slackImageName(hash: String) = hash + ".png"
     fun imageName(filename: String) = chapterBase(filename) + ".png"
 
+    /* "Chapter 12.png" → "Chapter 12". Used to label the grid and to
+       open the matching chapter file. */
+    fun chapterStem(filename: String): String {
+        var n = filename.removeSuffix(".gz")
+        for (ext in listOf(".png", ".jpg", ".jpeg", ".webp", ".json", ".txt")) {
+            if (n.endsWith(ext, ignoreCase = true)) {
+                n = n.dropLast(ext.length)
+                break
+            }
+        }
+        return n
+    }
+
+    fun chapterNumber(filename: String): Int? =
+        Regex("""Chapter (\d+)""", RegexOption.IGNORE_CASE)
+            .find(chapterStem(filename))?.groupValues?.get(1)?.toIntOrNull()
+
     fun isSceneFile(name: String): Boolean {
         val n = name.removeSuffix(".gz").lowercase()
         return n.endsWith(".json") || n.endsWith(".png") || n.endsWith(".jpg") ||

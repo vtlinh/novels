@@ -173,6 +173,56 @@ object ChapterImages {
         } catch (e: Exception) { null }
     }
 
+    data class Saved(
+        val name: String,
+        val number: Int,
+        val label: String,
+        val chapterFile: String,
+        val uri: Uri,
+    )
+
+    /* Pictures in this novel's scenes/, lowest chapter number first. */
+    fun listSaved(ctx: Context, folder: String, dirName: String): List<Saved> {
+        val dir = scenesDir(ctx, folder, dirName, create = false) ?: return emptyList()
+        val out = mutableListOf<Saved>()
+        for (f in dir.listFiles().orEmpty()) {
+            if (!f.isFile) continue
+            val name = f.name ?: continue
+            if (!Scenes.isSceneFile(name)) continue
+            val n = name.lowercase()
+            if (n.endsWith(".json")) continue
+            val number = Scenes.chapterNumber(name) ?: Int.MAX_VALUE
+            val stem = Scenes.chapterStem(name)
+            out.add(
+                Saved(
+                    name = name,
+                    number = number,
+                    label = if (number == Int.MAX_VALUE) stem else number.toString(),
+                    chapterFile = "$stem.txt",
+                    uri = f.uri,
+                ),
+            )
+        }
+        return out.sortedWith(compareBy<Saved> { it.number }.thenBy { it.name })
+    }
+
+    fun thumb(ctx: Context, uri: Uri, edgePx: Int): android.graphics.Bitmap? {
+        return try {
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, opts)
+            }
+            val w = opts.outWidth
+            val h = opts.outHeight
+            if (w <= 0 || h <= 0) return null
+            val sample = maxOf(1, minOf(w, h) / edgePx.coerceAtLeast(1))
+            val dec = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            ctx.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, dec)
+            }
+        } catch (e: Exception) { null }
+    }
+
     fun hasLocalImage(ctx: Context, folder: String, dirName: String, chapter: String): Boolean {
         val dir = scenesDir(ctx, folder, dirName, create = false) ?: return false
         return dir.findFile(Scenes.imageName(chapter)) != null
