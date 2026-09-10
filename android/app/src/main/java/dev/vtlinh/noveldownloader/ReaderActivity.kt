@@ -82,7 +82,11 @@ class ReaderActivity : AppCompatActivity() {
     private class LoadedChapter(var idx: Int, var start: Int, val heading: String)
     private val loadedChapters = ArrayList<LoadedChapter>()
 
-    private fun headingOf(body: String): String = body.substringBefore('\n').trim()
+    private fun headingOf(body: CharSequence): String {
+        val nl = body.indexOf('\n')
+        val end = if (nl < 0) body.length else nl
+        return body.subSequence(0, end).toString().trim()
+    }
 
     private var currentChapterIdx = -1
     private var drawerAdapter: ArrayAdapter<String>? = null
@@ -1322,7 +1326,7 @@ class ReaderActivity : AppCompatActivity() {
        terminator punctuation followed by a space (so "3.5" stays intact) */
     private fun nextSentence(body: String, from: Int): Pair<Int, Int>? {
         var i = from.coerceAtLeast(0)
-        while (i < body.length && (body[i] == '\n' || body[i] == ' ' || body[i] == '\u2042')) i++
+        while (i < body.length && (body[i] == '\n' || body[i] == ' ' || body[i] == '\u2042' || body[i] == '\uFFFC')) i++
         if (i >= body.length) return null
         var j = i
         while (j < body.length) {
@@ -2314,6 +2318,10 @@ class ReaderActivity : AppCompatActivity() {
                         if (saved) "Image saved." else "Waiting for the image…",
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
+                    if (saved && !asDocument()) {
+                        val pos = currentChapterIdx
+                        if (pos >= 0) openAt(pos)
+                    }
                 },
                 onFailure = {
                     if (!ChapterImages.alreadyRequested(this@ReaderActivity, slug, chapter)) {
@@ -2987,18 +2995,48 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun readAt(i: Int): String? {
+    private suspend fun readAt(i: Int): CharSequence? {
         val ch = chapters ?: return null
         if (i < 0 || i >= ch.ordered.size) return null
         val name = ch.ordered[i]
         val ref = (if (english) ch.translated[name] ?: ch.source[name] else ch.source[name])
             ?: return null
         return withContext(Dispatchers.IO) {
-            when {
+            val raw = when {
                 Zips.isGzRef(ref) -> Zips.readGz(contentResolver, treeUri!!, Zips.gzDocId(ref))
                 else -> Saf.readText(contentResolver, treeUri!!, ref)
             }
+            decorateChapter(name, raw)
         }
+    }
+
+    /* Picture sits on its own line under the heading so headingOf / TTS
+       still see the chapter title as the first line. \uFFFC is skipped
+       when reading aloud. */
+    private fun decorateChapter(chapter: String, raw: String): CharSequence {
+        if (asDocument()) return raw
+        val folder = prefs.getString("tree", null) ?: return raw
+        val dir = intent.getStringExtra("dir") ?: return raw
+        val uri = ChapterImages.chapterUri(this, folder, dir, chapter) ?: return raw
+        val maxW = (text.width - text.paddingLeft - text.paddingRight)
+            .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }
+        val bmp = ChapterImages.thumb(this, uri, maxW) ?: return raw
+        val nl = raw.indexOf('\n')
+        val head = if (nl >= 0) raw.substring(0, nl + 1) else raw + "\n"
+        val rest = if (nl >= 0) raw.substring(nl + 1) else ""
+        val sb = android.text.SpannableStringBuilder(head)
+        val at = sb.length
+        sb.append('\uFFFC').append('\n')
+        val dw = android.graphics.drawable.BitmapDrawable(resources, bmp)
+        val h = (bmp.height * (maxW.toFloat() / bmp.width.coerceAtLeast(1))).toInt().coerceAtLeast(1)
+        dw.setBounds(0, 0, maxW, h)
+        sb.setSpan(
+            android.text.style.ImageSpan(dw, android.text.style.ImageSpan.ALIGN_BOTTOM),
+            at, at + 1,
+            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        sb.append(rest)
+        return sb
     }
 
     /* Jump within the ALREADY-LOADED buffer: scroll straight to the chapter
@@ -3117,7 +3155,7 @@ class ReaderActivity : AppCompatActivity() {
                already given up. Placing last means nothing can disturb it. */
             val last = (p + LOAD_BATCH).coerceAtMost(ch.ordered.size - 1)
             val firstWanted = (p - LOAD_BATCH).coerceAtLeast(0)
-            val sb = StringBuilder()
+            val sb = android.text.SpannableStringBuilder()
             /* where the opened chapter lands once the ones above it are in */
             var openStart = 0
             var targetBodyLen = 0
@@ -3517,7 +3555,12 @@ class ReaderActivity : AppCompatActivity() {
                 if (body != null) {
                     val start = if (text.text.isEmpty()) 0 else text.text.length + SEP.length
                     loadedChapters.add(LoadedChapter(idx, start, headingOf(body)))
-                    text.append(if (text.text.isEmpty()) body else SEP + body)
+                    if (text.text.isEmpty()) {
+                        text.setText(body, TextView.BufferType.EDITABLE)
+                    } else {
+                        text.append(SEP)
+                        text.append(body)
+                    }
                 } else {
                     /* the buffer runs straight from one chapter into the one
                        after next with nothing to show for it — say so */
@@ -3581,7 +3624,7 @@ class ReaderActivity : AppCompatActivity() {
         loading = true
         lifecycleScope.launch {
             /* gather the chapters directly above, kept in ascending order */
-            val bodies = ArrayList<Pair<Int, String>>()
+            val bodies = ArrayList<Pair<Int, CharSequence>>()
             var idx = firstIdx - 1
             while (idx >= 0 && bodies.size < n) {
                 val b = readAt(idx)
@@ -3615,7 +3658,11 @@ class ReaderActivity : AppCompatActivity() {
                 withinLine = y - l.getLineTop(line)
             }
             clearTextSelection()
-            val block = bodies.joinToString(SEP) { it.second }
+            val block = android.text.SpannableStringBuilder()
+            for ((i, pair) in bodies.withIndex()) {
+                if (i > 0) block.append(SEP)
+                block.append(pair.second)
+            }
             val shift = block.length + SEP.length
             for (l in loadedChapters) l.start += shift
             speakCursor += shift
@@ -3627,7 +3674,8 @@ class ReaderActivity : AppCompatActivity() {
                 acc += body.length + SEP.length
             }
             loadedChapters.addAll(0, newLoaded)
-            text.setText(block + SEP + text.text.toString(), TextView.BufferType.EDITABLE)
+            val combined = android.text.SpannableStringBuilder(block).append(SEP).append(text.text)
+            text.setText(combined, TextView.BufferType.EDITABLE)
             firstIdx = bodies.first().first
             if (speaking && curSentStart >= 0) {
                 setHighlight(curSentStart + shift, curSentEnd + shift)

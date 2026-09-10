@@ -4,7 +4,13 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+<<<<<<< HEAD
 1.37.8	Auto-generate chapter images is per novel
+=======
+	Show the Slack chapter image under the heading
+	Find Slack images that are not named {hash}.png
+	Auto-generate chapter images is per novel
+>>>>>>> e44f1ab (Download Slack chapter images and show them under the heading)
 1.37.7	Look once more on Slack before giving up a chapter image
 1.37.7	Auto-generate chapter images every N chapters
 1.37.6	Generate image posts the chapter and waits for Slack
