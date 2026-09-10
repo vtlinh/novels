@@ -22,8 +22,10 @@ import java.io.IOException
    posts chapter N ≥ from where (N − from) is a multiple of every,
    at most one chapter every 15 minutes, including while the app is
    in the background. Novels are always tried in last-read order —
-   the book opened most recently in the reader goes first. A chapter
-   already posted is not posted again. */
+   the book opened most recently in the reader goes first. The next
+   due chapter that is not on disk yet is skipped until it arrives —
+   later due chapters are not pulled forward. A chapter already
+   posted is not posted again. */
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
@@ -62,19 +64,47 @@ object ChapterImages {
     ): List<T> =
         items.sortedWith(compareByDescending(lastReadOf).thenBy(tieOf))
 
+    /* First due chapter that is actually on disk, walking from, from+every,
+       from+2*every. A hole — Starting from 21 when only 1–20 are
+       downloaded, or chapter 1 missing while 21 is present — waits
+       rather than jumping ahead. skip is "already has a picture /
+       already posted / already tried". */
+    fun nextDueName(
+        chapters: List<String>,
+        from: Int,
+        every: Int,
+        skip: (chapter: String) -> Boolean,
+    ): String? {
+        if (every < 1 || from < 1) return null
+        val byNum = LinkedHashMap<Int, String>()
+        var maxN = 0
+        for (chapter in chapters) {
+            val n = Scenes.chapterNumber(chapter) ?: continue
+            if (n !in byNum) byNum[n] = chapter
+            if (n > maxN) maxN = n
+        }
+        if (maxN < from) return null
+        var n = from
+        while (n <= maxN) {
+            val chapter = byNum[n] ?: return null
+            if (!skip(chapter)) return chapter
+            n += every
+        }
+        return null
+    }
+
     /* First due chapter across novels already in last-read order.
-       skip is "already has a picture / already posted / already tried". */
+       A novel whose next due chapter is not downloaded yet is
+       skipped until that file arrives. */
     fun nextAuto(
         novels: List<AutoNovel>,
         skip: (slug: String, chapter: String) -> Boolean,
     ): AutoPick? {
         for (novel in byLastRead(novels, { it.lastRead }, { it.slug })) {
-            for (chapter in novel.chapters) {
-                val n = Scenes.chapterNumber(chapter) ?: continue
-                if (!due(n, novel.from, novel.every)) continue
-                if (skip(novel.slug, chapter)) continue
-                return AutoPick(novel.slug, chapter)
-            }
+            val chapter = nextDueName(novel.chapters, novel.from, novel.every) { ch ->
+                skip(novel.slug, ch)
+            } ?: continue
+            return AutoPick(novel.slug, chapter)
         }
         return null
     }
@@ -409,33 +439,37 @@ object ChapterImages {
         every: Int,
         from: Int,
     ): Boolean {
-        for (chapter in chapters) {
-            val n = Scenes.chapterNumber(chapter) ?: continue
-            if (!due(n, from, every)) continue
-            if (hasLocalImage(app, folder, dirName, chapter, slug)) continue
-            if (alreadyRequested(app, folder, dirName, slug, chapter)) {
-                markAutoTried(app, slug, chapter)
-                continue
+        val chapter = nextDueName(chapters, from, every) { ch ->
+            if (hasLocalImage(app, folder, dirName, ch, slug)) return@nextDueName true
+            if (alreadyRequested(app, folder, dirName, slug, ch)) {
+                markAutoTried(app, slug, ch)
+                return@nextDueName true
             }
-            if (autoTried(app, slug, chapter)) continue
-            synchronized(autoLock) {
-                val last = autoLastAt(app)
-                if (!autoReady(last)) {
-                    log("auto wait ${autoWaitMs(last)}ms")
-                    return false
-                }
-                markAutoLast(app)
-            }
-            markAutoTried(app, slug, chapter)
-            log("auto $chapter")
-            try {
-                request(app, folder, dirName, slug, chapter)
-            } catch (e: Exception) {
-                log("auto $chapter fail ${e.message}")
-            }
-            return true
+            autoTried(app, slug, ch)
+        } ?: return false
+        /* Listing can name a chapter whose file is not here yet.
+           Leave it untried so the next pass retries when it arrives. */
+        val text = chapterText(app, folder, dirName, slug, chapter)
+        if (text.isNullOrEmpty()) {
+            log("auto $chapter not ready")
+            return false
         }
-        return false
+        synchronized(autoLock) {
+            val last = autoLastAt(app)
+            if (!autoReady(last)) {
+                log("auto wait ${autoWaitMs(last)}ms")
+                return false
+            }
+            markAutoLast(app)
+        }
+        markAutoTried(app, slug, chapter)
+        log("auto $chapter")
+        try {
+            request(app, folder, dirName, slug, chapter)
+        } catch (e: Exception) {
+            log("auto $chapter fail ${e.message}")
+        }
+        return true
     }
 
     fun alreadyRequested(ctx: Context, dirName: String, slug: String, chapter: String): Boolean {
