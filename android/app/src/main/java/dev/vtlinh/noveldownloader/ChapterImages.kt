@@ -162,8 +162,8 @@ object ChapterImages {
     }
 
     /* A chapter that already has a Slack {hash}.txt must not get another.
-       "No png downloaded" is not "nothing posted" — Chapter 400 posted
-       twice that way (6b1884… then 9dbbc0…) after the hour. */
+       "No png downloaded" is not "nothing posted" — Chapter 374 posted
+       the same hash twice after files.list missed the first upload. */
     fun shouldPost(postIfMissing: Boolean, alreadyPosted: Boolean): Boolean =
         postIfMissing && !alreadyPosted
 
