@@ -166,7 +166,11 @@ class SlackPoster(
         var png: ByteArray? = null
         for (ts in seen) {
             try {
-                pickImage(hash, replies(ts))?.let { png = it; break }
+                val got = pickImage(hash, replies(ts))
+                if (got != null) {
+                    png = got
+                    break
+                }
             } catch (e: ApiException) {
                 if (e.code != "missing_scope" && e.code != "thread_not_found" &&
                     e.code != "message_not_found"
@@ -182,7 +186,11 @@ class SlackPoster(
                     val name = file.optString("name")
                     val title = file.optString("title")
                     if (fileMatchesHash(hash, name, title)) {
-                        download(file)?.let { png = it; break }
+                        val got = download(file)
+                        if (got != null) {
+                            png = got
+                            break
+                        }
                     }
                     if (fileMatchesTxt(hash, name, title)) {
                         threadTsOf(file)?.let { seen.add(it) }
@@ -196,7 +204,11 @@ class SlackPoster(
             for (ts in seen) {
                 if (knownThreads.contains(ts)) continue
                 try {
-                    pickImage(hash, replies(ts))?.let { png = it; break }
+                    val got = pickImage(hash, replies(ts))
+                    if (got != null) {
+                        png = got
+                        break
+                    }
                 } catch (e: ApiException) {
                     if (e.code != "missing_scope" && e.code != "thread_not_found" &&
                         e.code != "message_not_found"
