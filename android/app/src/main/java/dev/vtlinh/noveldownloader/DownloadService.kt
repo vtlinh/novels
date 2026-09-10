@@ -243,7 +243,9 @@ class DownloadService : Service() {
             createChannel()
             startForeground(NOTIF_ID, buildNotification("Starting…", 0, 0))
             runningFlow.value = true
-            logFlow.value = emptyList()
+            /* Keep earlier lines — Logs and Slack image traces live in
+               the same buffer. A wipe made a new download look like the
+               only thing that had ever run. */
             /* Which run this is. The flags below are static, and a cancelled
                run does not stop instantly — the engine can be parked in a
                socket read for up to the 30s timeout. By the time it unwinds,
@@ -265,6 +267,7 @@ class DownloadService : Service() {
             try {
             while (true) {
                 currentUrl = curUrl
+                appendLog("— $curUrl —")
                 activeSlugFlow.value = Sites.slugKey(curUrl)
                 val eng = DownloadEngine(
                     applicationContext,
@@ -307,7 +310,6 @@ class DownloadService : Service() {
                 curTranslate = next.optBoolean("translate")
                 curForce = next.optBoolean("force")
                 curKey = p.getString("apiKey", "") ?: ""
-                appendLog("— next novel: $curUrl —")
             }
             } finally {
                 /* Must run even when the loop leaves by cancellation. Skipping
