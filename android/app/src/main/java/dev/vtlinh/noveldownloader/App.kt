@@ -39,7 +39,10 @@ class App : Application() {
                        kill — done on foreground so starting the service is
                        allowed on Android 12+ */
                     try { CompressService.resumeIfNeeded(applicationContext) } catch (e: Exception) {}
-                    ChapterImages.resumeWaiting(applicationContext, scope)
+                    /* Pictures keep going in ImageService after this
+                       screen stops. Starting here is allowed on
+                       Android 12+; a start from the background is not. */
+                    try { ImageService.startIfNeeded(applicationContext) } catch (e: Exception) {}
                 }
                 override fun onStop(owner: LifecycleOwner) {
                     TtsWarmup.onBackground()

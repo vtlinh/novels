@@ -49,11 +49,13 @@ class NovelSettingsActivity : AppCompatActivity() {
     private var translateHelp =
         "Translate this novel into English. This costs money, charged to your Anthropic account."
     private val autoImageHelp =
-        "When this is on, the app makes pictures for some chapters of this novel.\n\n" +
+        "When this is on, the app makes pictures for some chapters of this novel, " +
+            "even after you leave the app.\n\n" +
             "Every and Starting from chapter pick which ones. For example, every 20 " +
             "starting from chapter 1 means chapters 1, 21, 41, and so on.\n\n" +
             "It makes one picture every 15 minutes, and skips a chapter that already " +
-            "has one. Each novel has its own setting."
+            "has one. The novels you read most recently get pictures first. " +
+            "Each novel has its own setting."
     private val ttsLangHelp =
         "Which language this novel is read aloud in. Auto uses the chapter's own text. Pick English or Vietnamese if that guess is wrong."
     private val recheckHelp =
