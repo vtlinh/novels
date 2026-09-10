@@ -19,6 +19,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipFile
 
 /* Self-update against the fixed "android-latest" GitHub release: CI uploads
    the APK plus a version.json carrying the build's versionCode. On app start
@@ -69,7 +70,7 @@ object Updater {
             val apk = ensureApk(context, latest.first) ?: return@launch
             if (apk.length() <= 0L) return@launch
             rememberPendingName(context, latest.second)
-            notifyUpdateReady(context, latest.second)
+            notifyUpdateReady(context, latest.second, notesFromApk(apk, latest.second))
         }
     }
 
@@ -115,7 +116,28 @@ object Updater {
         )
     }
 
-    private fun notifyUpdateReady(context: Context, versionName: String) {
+    /* This version's notes from the downloaded APK — not the running
+       app's changelog, which is the previous build. */
+    fun pendingUpdateNotes(context: Context): String? {
+        val name = pendingUpdateName(context) ?: return null
+        val notes = notesFromApk(apkFile(context), name)
+        return notes.ifEmpty { null }
+    }
+
+    internal fun notesFromApk(apk: File, versionName: String): String {
+        if (versionName.isEmpty() || !apk.exists() || apk.length() <= 0L) return ""
+        return try {
+            ZipFile(apk).use { zip ->
+                val entry = zip.getEntry("assets/changelog.tsv") ?: return ""
+                val tsv = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                ReleaseNotes.renderVersion(tsv, versionName)
+            }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun notifyUpdateReady(context: Context, versionName: String, notes: String = "") {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         try {
             ensureUpdateChannel(nm)
@@ -131,22 +153,25 @@ object Updater {
                 Intent(context, AboutActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 flags,
             )
-            nm.notify(
-                UPDATE_NOTIF_ID,
-                NotificationCompat.Builder(context, UPDATE_CHANNEL)
-                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
-                    .setContentTitle("Update ready — v$versionName")
-                    .setContentText("Downloaded. Tap Install to update.")
-                    .setContentIntent(open)
-                    .addAction(0, "Install", install)
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setCategory(NotificationCompat.CATEGORY_STATUS)
-                    /* re-posted on every foreground while it sits unused —
-                       alert once so it doesn't nag */
-                    .setOnlyAlertOnce(true)
-                    .setAutoCancel(true)
-                    .build(),
-            )
+            val fallback = "Downloaded. Tap Install to update."
+            val detail = if (notes.isNotEmpty()) notes else fallback
+            val short = notes.lineSequence().firstOrNull { it.isNotEmpty() } ?: fallback
+            val builder = NotificationCompat.Builder(context, UPDATE_CHANNEL)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle("Update ready — v$versionName")
+                .setContentText(short)
+                .setContentIntent(open)
+                .addAction(0, "Install", install)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                /* re-posted on every foreground while it sits unused —
+                   alert once so it doesn't nag */
+                .setOnlyAlertOnce(true)
+                .setAutoCancel(true)
+            if (notes.isNotEmpty()) {
+                builder.setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+            }
+            nm.notify(UPDATE_NOTIF_ID, builder.build())
         } catch (e: Exception) {}
     }
 
@@ -203,7 +228,7 @@ object Updater {
        leaving the update to reappear only on some later foreground check. */
     fun reofferPendingUpdate(context: Context) {
         val name = pendingUpdateName(context) ?: return
-        notifyUpdateReady(context, name)
+        notifyUpdateReady(context, name, pendingUpdateNotes(context) ?: "")
     }
 
     /* The OS rejected this exact build — a signing mismatch, an incompatible

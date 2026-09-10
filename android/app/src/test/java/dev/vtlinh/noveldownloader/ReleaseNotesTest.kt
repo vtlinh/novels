@@ -78,6 +78,25 @@ class ReleaseNotesTest {
     }
 
     @Test
+    fun `an update notification lists only that version`() {
+        val tsv = """
+            1.37.20${'\t'}Pace auto images
+            1.37.20${'\t'}Reuse Slack list
+            1.37.19${'\t'}Frame the chapter image
+        """.trimIndent()
+        assertEquals(
+            listOf("Pace auto images", "Reuse Slack list"),
+            ReleaseNotes.summariesFor(tsv, "1.37.20"),
+        )
+        assertEquals(
+            "• Pace auto images\n• Reuse Slack list",
+            ReleaseNotes.renderVersion(tsv, "1.37.20"),
+        )
+        assertEquals(emptyList<String>(), ReleaseNotes.summariesFor(tsv, "9.9.9"))
+        assertEquals("", ReleaseNotes.renderVersion(tsv, "9.9.9"))
+    }
+
+    @Test
     fun `a blank version column parses as unreleased`() {
         val entries = ReleaseNotes.parse("\tThis build")
         assertEquals(1, entries.size)

@@ -53,6 +53,24 @@ object ReleaseNotes {
     fun sections(tsv: String, currentVersion: String): List<Section> =
         sections(parse(tsv), currentVersion)
 
+    /* Notes for one version only — the update notification must not
+       dump the whole history. Packaged rows already carry a version. */
+    fun summariesFor(entries: List<Entry>, version: String): List<String> {
+        if (version.isEmpty()) return emptyList()
+        return entries.mapNotNull { e ->
+            if (e.version == version) e.summary else null
+        }
+    }
+
+    fun summariesFor(tsv: String, version: String): List<String> =
+        summariesFor(parse(tsv), version)
+
+    fun renderVersion(summaries: List<String>): String =
+        summaries.joinToString("\n") { "• $it" }
+
+    fun renderVersion(tsv: String, version: String): String =
+        renderVersion(summariesFor(tsv, version))
+
     fun render(tsv: String, currentVersion: String): String =
         sections(tsv, currentVersion).joinToString("\n\n") { sec ->
             buildString {
