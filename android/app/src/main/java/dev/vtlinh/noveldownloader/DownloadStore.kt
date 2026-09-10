@@ -907,6 +907,31 @@ class DownloadStore(context: Context) :
     fun dirNameOrGuess(folder: String, slug: String, title: String): String =
         Ownership.recordedDir(dirNameFor(folder, slug), getTitle(folder, slug), title, slug)
 
+    /* Resume a Slack image wait. dir_name is empty on libraries that
+       upgraded before it was seeded — looking only there skipped every
+       waiting chapter (Logs: "resume skip no folder"). Fall back to the
+       title, then any novels row with this slug. */
+    fun imageResumeDir(folder: String, slug: String): Pair<String, String>? {
+        if (slug.isEmpty()) return null
+        fun resolve(f: String): Pair<String, String>? {
+            if (f.isEmpty()) return null
+            val rec = try { novel(f, slug) } catch (e: Exception) { null }
+            val dir = dirNameOrGuess(f, slug, rec?.title ?: "")
+            return if (dir.isNotEmpty()) f to dir else null
+        }
+        resolve(folder)?.let { return it }
+        readableDatabase.rawQuery(
+            "SELECT folder FROM novels WHERE slug=? LIMIT 1",
+            arrayOf(slug),
+        ).use { c ->
+            if (c.moveToFirst()) {
+                val f = c.getString(0).orEmpty()
+                if (f.isNotEmpty() && f != folder) resolve(f)?.let { return it }
+            }
+        }
+        return null
+    }
+
     fun setDirName(folder: String, slug: String, name: String) {
         writableDatabase.execSQL(
             "UPDATE novels SET dir_name=? WHERE folder=? AND slug=?", arrayOf(name, folder, slug),

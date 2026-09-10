@@ -4,9 +4,10 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Move download and status-check logs to the drawer Logs screen
-	Log Slack image lookups in the download log
-	Replace a waiting Generate image with Poll image
+	Resume a Slack image wait from the novel's folder name
+1.37.16	Move download and status-check logs to the drawer Logs screen
+1.37.16	Log Slack image lookups in the download log
+1.37.16	Replace a waiting Generate image with Poll image
 1.37.15	Don't post a chapter to Slack again when channel history already has that file
 1.37.14	Don't post a chapter to Slack again when its file is already there
 1.37.13	Keep Generate image off until the last Slack look finishes

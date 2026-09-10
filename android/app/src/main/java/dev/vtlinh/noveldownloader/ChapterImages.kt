@@ -311,13 +311,18 @@ object ChapterImages {
             for (w in waiting) {
                 val key = "${w.folder}\u0000${w.slug}\u0000${w.chapter}"
                 if (!seen.add(key)) continue
-                val dir = try { store.dirNameFor(w.folder, w.slug) } catch (e: Exception) { null }
-                if (dir.isNullOrEmpty()) {
-                    log("${w.chapter} resume skip no folder")
+                val found = try { store.imageResumeDir(w.folder, w.slug) } catch (e: Exception) {
+                    log("${w.chapter} resume dir fail ${e.message}")
+                    null
+                }
+                if (found == null) {
+                    log("${w.chapter} resume skip no folder slug=${w.slug}")
                     continue
                 }
+                val (folder, dir) = found
+                log("${w.chapter} resume $dir")
                 try {
-                    request(app, w.folder, dir, w.slug, w.chapter, postIfMissing = false)
+                    request(app, folder, dir, w.slug, w.chapter, postIfMissing = false)
                 } catch (e: Exception) {
                     log("${w.chapter} resume fail ${e.message}")
                 }
