@@ -15,9 +15,11 @@ import java.io.IOException
 /* One chapter image: post {hash}.txt, remember that chapter so Generate
    image stays off, then poll Slack for {hash}.png in that thread and
    save it under scenes/. Prefs hold the wait list so a kill mid-poll
-   resumes on the next foreground. After an hour the wait is dropped —
+   resumes on the next foreground.    After an hour the wait is dropped —
    but only after one last look at Slack, or a png that arrived while
-   the app was closed would be thrown away.
+   the app was closed would be thrown away. A later Generate image
+   tap searches every {hash}.txt in the channel and those threads
+   before posting the chapter again.
 
    Auto-generate (this novel's ⚙): when enabled, opening that novel
    posts every chapter N ≥ from where (N − from) is a multiple of
@@ -168,6 +170,16 @@ object ChapterImages {
                 if (text.isEmpty()) {
                     return Result.failure(IOException("This chapter is empty."))
                 }
+                hash = Scenes.contentHash(text)
+                /* An hour give-up clears the wait. ChatGPT may already
+                   have replied on an earlier {hash}.txt — look there
+                   before posting another copy. */
+                slack.findExistingImage(hash)?.let { png ->
+                    savePng(ctx, folder, dirName, slug, chapter, png)
+                    markRequested(ctx, slug, chapter, hash)
+                    forgetWait(ctx, hash)
+                    return Result.success(true)
+                }
                 val post = slack.postChapter(text)
                 hash = post.hash
                 threadTs = post.threadTs
@@ -288,7 +300,7 @@ object ChapterImages {
         hash: String,
         threadTs: String?,
     ): Result<Boolean> {
-        val png = try { slack.findImage(hash, threadTs) } catch (e: Exception) { null }
+        val png = try { slack.findExistingImage(hash, threadTs) } catch (e: Exception) { null }
         if (png != null) {
             savePng(ctx, folder, dirName, slug, chapter, png)
             forgetWait(ctx, hash)
