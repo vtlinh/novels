@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /* App settings: the Storage card (download folder, library size, and
-   "Compress my novels"), the Anthropic and Cursor API keys, library auto
+   "Compress my novels"), the Anthropic API key and Slack bot token, library auto
    status-check interval, and reading options. Toggling compression starts
    a background pass that converts every novel to match; new downloads
    follow the same flag. The keys are saved on focus loss and when leaving.
@@ -70,15 +70,20 @@ class SettingsActivity : AppCompatActivity() {
                 )
             } catch (e: Exception) {}
         }
-        val cursorKey = findViewById<EditText>(R.id.cursorApiKeyInput)
-        cursorKey.setText(prefs.getString("cursorApiKey", ""))
-        cursorKey.setOnFocusChangeListener { _, hasFocus ->
+        val slackToken = findViewById<EditText>(R.id.slackTokenInput)
+        slackToken.setText(prefs.getString("slackBotToken", ""))
+        slackToken.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) saveKeys()
         }
-        findViewById<TextView>(R.id.cursorApiKeyLink).setOnClickListener {
+        val slackChannel = findViewById<EditText>(R.id.slackChannelInput)
+        slackChannel.setText(prefs.getString("slackChannelId", ""))
+        slackChannel.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveKeys()
+        }
+        findViewById<TextView>(R.id.slackLink).setOnClickListener {
             try {
                 startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse("https://cursor.com/dashboard/api")),
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://api.slack.com/apps")),
                 )
             } catch (e: Exception) {}
         }
@@ -145,8 +150,13 @@ class SettingsActivity : AppCompatActivity() {
             "Lets the app translate chapters into English. Translation costs money, charged to your Anthropic account.",
         )
         bindHelp(
-            R.id.cursorApiKeyHelp, "Cursor API key",
-            "Lets the app summarize a chapter and, when you ask, generate an image of it. Uses your Cursor plan's included usage first, then on-demand if that pool is empty.",
+            R.id.slackHelp, "Slack",
+            "Posts the unzipped chapter as {sha256}.txt. The hash is SHA-256 of those UTF-8 bytes only — no title, slug, or prefix.\n\n" +
+                "1. Create an app at api.slack.com/apps\n" +
+                "2. Bot Token Scopes: files:write and channels:join\n" +
+                "3. Install the app to your workspace and copy the Bot User OAuth Token (xoxb-…)\n" +
+                "4. Create a public channel and invite the bot\n" +
+                "5. Channel ID is the C… in the channel's Slack link",
         )
         bindHelp(
             R.id.statusCheckHelp, "Automatic status check",
@@ -171,7 +181,8 @@ class SettingsActivity : AppCompatActivity() {
     private fun saveKeys() {
         prefs.edit()
             .putString("apiKey", findViewById<EditText>(R.id.apiKeyInput).text.toString().trim())
-            .putString("cursorApiKey", findViewById<EditText>(R.id.cursorApiKeyInput).text.toString().trim())
+            .putString("slackBotToken", findViewById<EditText>(R.id.slackTokenInput).text.toString().trim())
+            .putString("slackChannelId", findViewById<EditText>(R.id.slackChannelInput).text.toString().trim())
             .apply()
     }
 

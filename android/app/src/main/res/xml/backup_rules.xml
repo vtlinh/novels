@@ -2,7 +2,7 @@
 <!--
   Backup everything EXCEPT the "app" preferences file.
 
-  It holds the Anthropic and Cursor API keys in cleartext, and with the default
+  It holds the Anthropic API key and Slack bot token in cleartext, and with the default
   allowBackup="true" and no rules at all, shared_prefs/app.xml went into the
   user's Google Drive backup and into any device-to-device transfer — so
   restoring the app on any device signed into that account replayed the key
