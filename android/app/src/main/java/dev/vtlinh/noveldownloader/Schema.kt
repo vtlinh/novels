@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 25
+    const val VERSION = 26
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -104,10 +104,14 @@ object Schema {
             "looked INTEGER DEFAULT 0, " +
             "PRIMARY KEY(folder, slug, chapter, thread_ts))"
     /* Chapter file → image file under scenes/. Set only when the png
-       is on disk, so the reader knows which chapters to draw. */
+       is on disk, so the reader knows which chapters to draw.
+       `alt` is the Slack file's alt_txt, or its title when that is
+       not just the filename — empty on older rows and on a png
+       adopted from disk with no Slack look. */
     const val CHAPTER_IMAGE_TABLE =
         "CREATE TABLE IF NOT EXISTS chapter_image (" +
             "folder TEXT, slug TEXT, chapter TEXT, image TEXT DEFAULT '', " +
+            "alt TEXT DEFAULT '', " +
             "PRIMARY KEY(folder, slug, chapter))"
 
     /* Somewhere to send the statements. `soft` is for the ones whose failure is
@@ -295,6 +299,13 @@ object Schema {
            png is saved. */
         if (oldVersion < 25) {
             db.soft("ALTER TABLE chapter_image_req ADD COLUMN looked INTEGER DEFAULT 0")
+        }
+        /* Slack file alt_txt / title, captured when the png is saved.
+           Empty on upgrade — nothing to seed: older rows never stored
+           it, and inventing a caption from the chapter text would not
+           be the picture's own description. */
+        if (oldVersion < 26) {
+            db.soft("ALTER TABLE chapter_image ADD COLUMN alt TEXT DEFAULT ''")
         }
     }
 }

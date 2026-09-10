@@ -99,7 +99,7 @@ class SchemaTest {
     @Test
     fun `v25 records Slack image threads and the last-look flag`() {
         open().use { c ->
-            Schema.create(Jdbc(c))
+            at(25, c)
             val s = shape(c)
             assertEquals(
                 setOf("folder", "slug", "chapter", "hash", "thread_ts", "started_at", "looked"),
@@ -109,6 +109,73 @@ class SchemaTest {
                 setOf("folder", "slug", "chapter", "image"),
                 s["chapter_image"],
             )
+        }
+    }
+
+    @Test
+    fun `v26 stores chapter image alt text`() {
+        open().use { c ->
+            Schema.create(Jdbc(c))
+            val s = shape(c)
+            assertEquals(
+                setOf("folder", "slug", "chapter", "hash", "thread_ts", "started_at", "looked"),
+                s["chapter_image_req"],
+            )
+            assertEquals(
+                setOf("folder", "slug", "chapter", "image", "alt"),
+                s["chapter_image"],
+            )
+        }
+    }
+
+    /* Persist + read through the same statements the store uses. A
+       missing column here is a crash the first time a picture is saved. */
+    @Test
+    fun `a chapter image alt persists and reads back`() {
+        open().use { c ->
+            Schema.create(Jdbc(c))
+            c.createStatement().use {
+                it.execute(
+                    "INSERT INTO chapter_image(folder,slug,chapter,image,alt) " +
+                        "VALUES('f','s','Chapter 1.txt','Chapter 1.png','A lantern in the rain')",
+                )
+            }
+            c.createStatement().use { s ->
+                s.executeQuery(
+                    "SELECT image, alt FROM chapter_image WHERE chapter='Chapter 1.txt'",
+                ).use { r ->
+                    assertTrue(r.next())
+                    assertEquals("Chapter 1.png", r.getString(1))
+                    assertEquals("A lantern in the rain", r.getString(2))
+                }
+            }
+        }
+    }
+
+    /* Older libraries have the picture but no description. Empty, not
+       a crash — the reader and the full-screen view hide a blank alt. */
+    @Test
+    fun `an existing chapter image upgrades with blank alt`() {
+        for (v in 24..(Schema.VERSION - 1)) {
+            open().use { c ->
+                at(v, c)
+                c.createStatement().use {
+                    it.execute(
+                        "INSERT INTO chapter_image(folder,slug,chapter,image) " +
+                            "VALUES('f','s','Chapter 1.txt','Chapter 1.png')",
+                    )
+                }
+                Schema.upgrade(Jdbc(c), v)
+                c.createStatement().use { s ->
+                    s.executeQuery(
+                        "SELECT image, alt FROM chapter_image WHERE chapter='Chapter 1.txt'",
+                    ).use { r ->
+                        assertTrue("upgrading from v$v lost the image row", r.next())
+                        assertEquals("upgrading from v$v: image", "Chapter 1.png", r.getString(1))
+                        assertEquals("upgrading from v$v: alt must stay empty", "", r.getString(2))
+                    }
+                }
+            }
         }
     }
 

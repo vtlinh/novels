@@ -111,6 +111,23 @@ class SlackPosterTest {
     }
 
     @Test
+    fun `file alt prefers alt_txt then a real title`() {
+        val hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        assertEquals(
+            "A lantern in the rain",
+            SlackPoster.fileAlt("A lantern in the rain", "other title", "$hash.png"),
+        )
+        assertEquals(
+            "A lantern in the rain",
+            SlackPoster.fileAlt("", "A lantern in the rain", "$hash.png"),
+        )
+        assertEquals("", SlackPoster.fileAlt("", "", "$hash.png"))
+        assertEquals("", SlackPoster.fileAlt("$hash.png", "$hash.png", "$hash.png"))
+        assertEquals("", SlackPoster.fileAlt("tedair.gif", "tedair.gif", "tedair.gif"))
+        assertEquals("", SlackPoster.fileAlt("", "$hash.png", ""))
+    }
+
+    @Test
     fun `a denied look is a png miss with a read error`() {
         assertTrue(SlackPoster.lookDenied(null, "missing_scope"))
         assertFalse(SlackPoster.lookDenied(ByteArray(1), "missing_scope"))

@@ -173,7 +173,7 @@ object ChapterImages {
             }
             if (ex.png != null) {
                 try {
-                    savePng(ctx, folder, dirName, slug, chapter, ex.png)
+                    savePng(ctx, folder, dirName, slug, chapter, ex.png, ex.alt)
                 } catch (e: Exception) {
                     log("$chapter catalog save fail ${e.message}")
                 }
@@ -408,7 +408,7 @@ object ChapterImages {
             log("$chapter look png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
             deniedLook(found)?.let { return it }
             if (found.png != null) {
-                savePng(ctx, folder, dirName, slug, chapter, found.png)
+                savePng(ctx, folder, dirName, slug, chapter, found.png, found.alt)
                 return Result.success(true)
             }
             for (ts in found.threads) {
@@ -443,7 +443,7 @@ object ChapterImages {
                 }
                 log("$chapter wait ${remain}ms threads=${poll.size}")
                 val png = slack.waitForImage(hash, poll, remain)
-                savePng(ctx, folder, dirName, slug, chapter, png)
+                savePng(ctx, folder, dirName, slug, chapter, png.bytes, png.alt)
                 Result.success(true)
             } finally {
                 inflight.remove(hash)
@@ -576,7 +576,7 @@ object ChapterImages {
         log("$chapter look png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
         deniedLook(found)?.let { return it }
         if (found.png != null) {
-            savePng(ctx, folder, dirName, slug, chapter, found.png)
+            savePng(ctx, folder, dirName, slug, chapter, found.png, found.alt)
             return Result.success(true)
         }
         for (ts in found.threads) {
@@ -605,7 +605,7 @@ object ChapterImages {
         log("$chapter lastLook png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
         deniedLook(found)?.let { return it }
         if (found.png != null) {
-            savePng(ctx, folder, dirName, slug, chapter, found.png)
+            savePng(ctx, folder, dirName, slug, chapter, found.png, found.alt)
             return Result.success(true)
         }
         for (ts in found.threads) {
@@ -646,7 +646,15 @@ object ChapterImages {
         val number: Int,
         val label: String,
         val uri: Uri,
+        val alt: String = "",
     )
+
+    /* Slack's description after trim. Padding is not a caption. */
+    fun altText(alt: String): String = alt.trim()
+
+    /* Empty / whitespace is not a caption — hide it so an older
+       row or a disk-adopted png does not draw a blank line. */
+    fun showAlt(alt: String): Boolean = altText(alt).isNotEmpty()
 
     /* chapter_image rows for this novel, lowest chapter number first.
        One exists-query per row — not a listing of scenes/. */
@@ -663,23 +671,23 @@ object ChapterImages {
             emptyList()
         }
         val out = mutableListOf<Saved>()
-        for ((chapter, stored) in rows) {
-            if (!imageOnDisk(ctx, folder, dirName, stored)) {
-                forgetMissingImage(ctx, folder, slug, chapter)
+        for (row in rows) {
+            if (!imageOnDisk(ctx, folder, dirName, row.image)) {
+                forgetMissingImage(ctx, folder, slug, row.chapter)
                 continue
             }
             val uri = DocumentsContract.buildDocumentUriUsingTree(
-                tree, resolveImageDocId(rootId, dirName, stored),
+                tree, resolveImageDocId(rootId, dirName, row.image),
             )
-            out.add(savedOf(chapter, uri))
+            out.add(savedOf(row.chapter, uri, row.alt))
         }
         return sortSaved(out)
     }
 
-    fun savedOf(chapter: String, uri: Uri): Saved {
+    fun savedOf(chapter: String, uri: Uri, alt: String = ""): Saved {
         val number = Scenes.chapterNumber(chapter) ?: Int.MAX_VALUE
         val label = if (number == Int.MAX_VALUE) Scenes.chapterStem(chapter) else number.toString()
-        return Saved(chapter, number, label, uri)
+        return Saved(chapter, number, label, uri, altText(alt))
     }
 
     fun sortSaved(items: List<Saved>): List<Saved> =
@@ -694,6 +702,11 @@ object ChapterImages {
     fun linkedImage(ctx: Context, folder: String, slug: String, chapter: String): String? {
         if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
         return try { DownloadStore(ctx).chapterImage(folder, slug, chapter) } catch (e: Exception) { null }
+    }
+
+    fun linkedAlt(ctx: Context, folder: String, slug: String, chapter: String): String {
+        if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return ""
+        return try { DownloadStore(ctx).chapterImageAlt(folder, slug, chapter) } catch (e: Exception) { "" }
     }
 
     fun hasLocalImage(
@@ -794,6 +807,7 @@ object ChapterImages {
         slug: String,
         chapter: String,
         bytes: ByteArray,
+        alt: String = "",
     ) {
         val dir = scenesDir(ctx, folder, dirName, create = true)
             ?: throw IOException("Could not create scenes/.")
@@ -804,7 +818,7 @@ object ChapterImages {
             throw IOException("Could not save the image.")
         }
         val store = DownloadStore(ctx)
-        store.setChapterImage(folder, slug, chapter, docId)
+        store.setChapterImage(folder, slug, chapter, docId, alt)
         log("$chapter saved ${bytes.size}B id=$docId")
         /* Keep the Slack threads. Clearing them was why Chapter 400
            posted a second {hash}.txt after the saved png could not be

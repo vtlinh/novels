@@ -612,18 +612,41 @@ class ChapterListActivity : AppCompatActivity() {
                 isFocusable = true
                 setOnClickListener { dialog.dismiss() }
             }
-            val img = ImageView(this@ChapterListActivity).apply {
+            val column = android.widget.LinearLayout(this@ChapterListActivity).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
                 layoutParams = android.widget.FrameLayout.LayoutParams(
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { dialog.dismiss() }
+            }
+            val img = ImageView(this@ChapterListActivity).apply {
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f,
+                )
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                contentDescription = item.label
+                contentDescription = if (ChapterImages.showAlt(item.alt)) item.alt else item.label
                 setImageBitmap(shown)
                 isClickable = true
                 setOnClickListener { dialog.dismiss() }
             }
-            root.addView(img)
+            column.addView(img)
+            if (ChapterImages.showAlt(item.alt)) {
+                column.addView(
+                    TextView(this@ChapterListActivity).apply {
+                        text = item.alt.trim()
+                        textSize = 15f
+                        setTextColor(getColor(R.color.fg))
+                        setLineSpacing(0f, 1.25f)
+                        setPadding(dp(24), dp(8), dp(24), dp(24))
+                    },
+                )
+            }
+            root.addView(column)
             root.addView(
                 TextView(this@ChapterListActivity).apply {
                     text = "←"

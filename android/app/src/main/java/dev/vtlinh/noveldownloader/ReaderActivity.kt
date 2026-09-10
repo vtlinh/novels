@@ -3072,6 +3072,7 @@ class ReaderActivity : AppCompatActivity() {
             ChapterImages.forgetMissingImage(this, folder, slug, chapter)
             return raw
         }
+        val alt = ChapterImages.linkedAlt(this, folder, slug, chapter)
         val nl = raw.indexOf('\n')
         val head = if (nl >= 0) raw.substring(0, nl + 1) else raw + "\n"
         val rest = if (nl >= 0) raw.substring(nl + 1) else ""
@@ -3083,6 +3084,7 @@ class ReaderActivity : AppCompatActivity() {
                 bmp, maxW, pad, dp(8), dp(10), dp(1),
                 getColor(R.color.card), getColor(R.color.input_stroke),
                 text.lineSpacingMultiplier, text.lineSpacingExtra,
+                alt,
             ),
             at, at + 1,
             android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
