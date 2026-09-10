@@ -4,8 +4,9 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Disable Generate image when the chapter picture is already saved
-	Use a picture already in scenes/ before asking Slack
+	Keep Generate image off until the last Slack look finishes
+1.37.12	Disable Generate image when the chapter picture is already saved
+1.37.12	Use a picture already in scenes/ before asking Slack
 1.37.11	Don't list the library folder when opening a chapter
 1.37.11	Keep Slack image threads in the database until the picture arrives
 1.37.10	Look for an existing Slack image before posting a chapter again

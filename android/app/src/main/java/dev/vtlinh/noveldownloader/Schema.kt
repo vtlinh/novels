@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 24
+    const val VERSION = 25
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -101,6 +101,7 @@ object Schema {
             "folder TEXT, slug TEXT, chapter TEXT, " +
             "hash TEXT DEFAULT '', thread_ts TEXT DEFAULT '', " +
             "started_at INTEGER DEFAULT 0, " +
+            "looked INTEGER DEFAULT 0, " +
             "PRIMARY KEY(folder, slug, chapter, thread_ts))"
     /* Chapter file → image file under scenes/. Set only when the png
        is on disk, so the reader knows which chapters to draw. */
@@ -288,6 +289,11 @@ object Schema {
         if (oldVersion < 24) {
             db.exec(CHAPTER_IMAGE_REQ_TABLE)
             db.exec(CHAPTER_IMAGE_TABLE)
+        }
+        /* Whether the hour give-up's last Slack look has run. 0 until
+           lastLook finishes — Generate image stays off until then. */
+        if (oldVersion < 25) {
+            db.soft("ALTER TABLE chapter_image_req ADD COLUMN looked INTEGER DEFAULT 0")
         }
     }
 }

@@ -73,20 +73,15 @@ class ChapterImagesTest {
     }
 
     @Test
-    fun `generate stays off while a request is inside the hour`() {
+    fun `generate stays off until the hour is up and Slack has been looked at`() {
         val start = 1_000_000L
-        assertTrue(ChapterImages.lockGenerate(false, listOf(start), start + 1))
-        assertFalse(
-            ChapterImages.lockGenerate(
-                false, listOf(start), start + ChapterImages.GIVE_UP_MS,
-            ),
-        )
+        val hour = start + ChapterImages.GIVE_UP_MS
+        assertTrue(ChapterImages.lockGenerate(false, listOf(start to false), start + 1))
+        assertTrue(ChapterImages.lockGenerate(false, listOf(start to false), hour))
+        assertTrue(ChapterImages.lockGenerate(false, listOf(start to true), start + 1))
+        assertFalse(ChapterImages.lockGenerate(false, listOf(start to true), hour))
         assertTrue(ChapterImages.lockGenerate(true, emptyList(), start))
-        assertTrue(
-            ChapterImages.lockGenerate(
-                true, listOf(start), start + ChapterImages.GIVE_UP_MS,
-            ),
-        )
+        assertTrue(ChapterImages.lockGenerate(true, listOf(start to true), hour))
         assertFalse(ChapterImages.lockGenerate(false, emptyList(), start))
     }
 
