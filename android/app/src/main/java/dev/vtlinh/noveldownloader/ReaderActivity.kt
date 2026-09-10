@@ -2322,7 +2322,7 @@ class ReaderActivity : AppCompatActivity() {
                     android.widget.Toast.makeText(
                         this@ReaderActivity,
                         it.message ?: "Could not generate an image.",
-                        android.widget.Toast.LENGTH_SHORT,
+                        android.widget.Toast.LENGTH_LONG,
                     ).show()
                 },
             )
@@ -2360,7 +2360,7 @@ class ReaderActivity : AppCompatActivity() {
                     android.widget.Toast.makeText(
                         this@ReaderActivity,
                         it.message ?: "No image yet.",
-                        android.widget.Toast.LENGTH_SHORT,
+                        android.widget.Toast.LENGTH_LONG,
                     ).show()
                 },
             )

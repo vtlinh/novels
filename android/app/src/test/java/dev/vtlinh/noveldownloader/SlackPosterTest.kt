@@ -81,4 +81,20 @@ class SlackPosterTest {
         )
         assertEquals(emptyList<String>(), SlackPoster.historyTxtThreads(listOf(png), hash))
     }
+
+    @Test
+    fun `missing_scope names the read scopes`() {
+        val msg = SlackPoster.describe("missing_scope")
+        assertTrue(msg.contains("files:read"))
+        assertTrue(msg.contains("groups:history"))
+        assertTrue(msg.contains("reinstall"))
+    }
+
+    @Test
+    fun `a denied look is a png miss with a read error`() {
+        assertTrue(SlackPoster.lookDenied(null, "missing_scope"))
+        assertFalse(SlackPoster.lookDenied(ByteArray(1), "missing_scope"))
+        assertFalse(SlackPoster.lookDenied(null, null))
+        assertFalse(SlackPoster.lookDenied(null, ""))
+    }
 }

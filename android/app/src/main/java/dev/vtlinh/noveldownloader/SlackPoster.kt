@@ -21,7 +21,11 @@ class SlackPoster(
     class ApiException(val code: String) : IOException(describe(code))
 
     data class Post(val hash: String, val threadTs: String?)
-    data class Existing(val png: ByteArray?, val threads: List<String>)
+    data class Existing(
+        val png: ByteArray?,
+        val threads: List<String>,
+        val readError: String? = null,
+    )
     data class NamedFile(val name: String, val title: String = "")
     data class HistoryMsg(
         val ts: String,
@@ -116,12 +120,18 @@ class SlackPoster(
             "not_in_channel" ->
                 "Invite the bot to that public channel, or add the channels:join scope."
             "missing_scope" ->
-                "The Slack app needs files:write, files:read, channels:join, " +
-                    "and channels:history or groups:history."
+                "The Slack app cannot read this channel. Add files:read and " +
+                    "groups:history (private) or channels:history (public), " +
+                    "reinstall the app, and paste the new token in Settings."
             "file_uploads_disabled" ->
                 "This Slack workspace has file uploads turned off."
             else -> "Slack error: $code"
         }
+
+        /* History / files.list / replies all denied — waiting will not
+           produce a png. A png we already downloaded wins. */
+        fun lookDenied(png: ByteArray?, readError: String?): Boolean =
+            png == null && !readError.isNullOrEmpty()
     }
 
     private val client = OkHttpClient.Builder()
@@ -198,22 +208,27 @@ class SlackPoster(
     }
 
     fun findImage(hash: String, threadTs: String?): ByteArray? {
+        var tried = 0
+        var denied = 0
         if (!threadTs.isNullOrEmpty()) {
+            tried++
             try {
                 pickImage(hash, replies(threadTs))?.let { bytes -> return bytes }
             } catch (e: ApiException) {
-                if (e.code != "missing_scope" && e.code != "thread_not_found" &&
-                    e.code != "message_not_found"
-                ) {
+                if (e.code == "missing_scope") denied++
+                else if (e.code != "thread_not_found" && e.code != "message_not_found") {
                     throw e
                 }
             }
         }
+        tried++
         try {
             pickImage(hash, listedFiles())?.let { bytes -> return bytes }
         } catch (e: ApiException) {
-            if (e.code != "missing_scope") throw e
+            if (e.code == "missing_scope") denied++
+            else throw e
         }
+        if (denied > 0 && denied == tried) throw ApiException("missing_scope")
         return null
     }
 
@@ -229,10 +244,20 @@ class SlackPoster(
         val seen = linkedSetOf<String>()
         for (ts in knownThreads) if (ts.isNotEmpty()) seen.add(ts)
         log("look ${shortHash(hash)} known=${seen.size}")
+        var readError: String? = null
+        fun remember(code: String) {
+            if (readError == null &&
+                (code == "missing_scope" || code == "not_in_channel" ||
+                    code == "channel_not_found")
+            ) {
+                readError = code
+            }
+        }
         val hist = channelHistory()
-        val fromHist = historyTxtThreads(hist.map { historyMsgOf(it) }, hash)
+        hist.error?.let { remember(it) }
+        val fromHist = historyTxtThreads(hist.msgs.map { historyMsgOf(it) }, hash)
         for (ts in fromHist) seen.add(ts)
-        log("history msgs=${hist.size} txt=${fromHist.size} threads=${seen.size}")
+        log("history msgs=${hist.msgs.size} txt=${fromHist.size} threads=${seen.size}")
         var png: ByteArray? = null
         try {
             val listed = listedFilesAll()
@@ -254,6 +279,7 @@ class SlackPoster(
             log("files.list n=${listed.size} txt=$listTxt png=${png?.size ?: 0}B threads=${seen.size}")
         } catch (e: ApiException) {
             log("files.list ${e.code}")
+            remember(e.code)
             if (e.code != "missing_scope") throw e
         }
         if (png == null) {
@@ -272,6 +298,7 @@ class SlackPoster(
                     }
                 } catch (e: ApiException) {
                     log("replies $ts ${e.code}")
+                    remember(e.code)
                     if (e.code != "missing_scope" && e.code != "thread_not_found" &&
                         e.code != "message_not_found"
                     ) {
@@ -280,8 +307,11 @@ class SlackPoster(
                 }
             }
         }
+        if (lookDenied(png, readError)) {
+            log("look denied $readError")
+        }
         log("look done ${shortHash(hash)} png=${png?.size ?: 0}B threads=${seen.size}")
-        return Existing(png, seen.toList())
+        return Existing(png, seen.toList(), readError)
     }
 
     fun findImage(hash: String, threads: Collection<String>): ByteArray? {
@@ -388,7 +418,9 @@ class SlackPoster(
 
     /* Top-level channel messages. The png lives in the txt thread,
        so history is only used to find {hash}.txt and its ts. */
-    private fun channelHistory(): List<JSONObject> {
+    private data class ChannelHist(val msgs: List<JSONObject>, val error: String? = null)
+
+    private fun channelHistory(): ChannelHist {
         val out = mutableListOf<JSONObject>()
         try {
             var cursor = ""
@@ -417,8 +449,9 @@ class SlackPoster(
             ) {
                 throw e
             }
+            return ChannelHist(out, e.code)
         }
-        return out
+        return ChannelHist(out)
     }
 
     private fun addFiles(arr: JSONArray?, out: MutableList<JSONObject>) {
