@@ -103,12 +103,15 @@ object ChapterImages {
         chapters: List<String>,
         scope: CoroutineScope,
     ) {
-        if (slug.isEmpty() || !autoEnabled(ctx, slug) || !slackReady(ctx)) return
-        if (folder.isEmpty() || dirName.isEmpty()) return
+        if (slug.isEmpty() || folder.isEmpty() || dirName.isEmpty()) return
+        val enabled = autoEnabled(ctx, slug)
+        val ready = slackReady(ctx)
         val every = autoEvery(ctx, slug)
         val from = autoFrom(ctx, slug)
         val app = ctx.applicationContext
         work.launch {
+            rememberScenes(app, folder, dirName, slug, chapters)
+            if (!enabled || !ready) return@launch
             for (chapter in chapters) {
                 val n = Scenes.chapterNumber(chapter) ?: continue
                 if (!due(n, from, every)) continue
@@ -186,7 +189,6 @@ object ChapterImages {
         val store = DownloadStore(ctx)
         return try {
             if (hasLocalImage(ctx, folder, dirName, chapter, slug)) {
-                linkIfMissing(ctx, folder, slug, chapter)
                 store.clearImageReqs(folder, slug, chapter)
                 return Result.success(true)
             }
@@ -334,13 +336,53 @@ object ChapterImages {
         } catch (e: Exception) { null }
     }
 
+    /* One listing of scenes/ when the novel opens — not per chapter.
+       DocumentFile.findFile lists the parent; doing that on the library
+       tree for every readAt is what made opening a chapter hang. */
+    fun rememberScenes(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapters: List<String>,
+    ) {
+        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty() || chapters.isEmpty()) return
+        val tree = Uri.parse(folder)
+        val scenesId = imageDocId(Saf.rootId(tree), dirName, "")
+            .trimEnd('/')
+        val kids = try {
+            Saf.children(ctx.contentResolver, tree, scenesId, includeSize = false)
+        } catch (e: Exception) {
+            return
+        }
+        if (kids.isEmpty()) return
+        val byImage = chapters.associateBy { Scenes.imageName(it) }
+        val store = DownloadStore(ctx)
+        for (k in kids) {
+            if (k.isDir) continue
+            val chapter = byImage[k.name] ?: continue
+            if (!store.chapterImage(folder, slug, chapter).isNullOrEmpty()) continue
+            store.setChapterImage(folder, slug, chapter, k.name)
+        }
+    }
+
+    fun linkedImage(ctx: Context, folder: String, slug: String, chapter: String): String? {
+        if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
+        return try { DownloadStore(ctx).chapterImage(folder, slug, chapter) } catch (e: Exception) { null }
+    }
+
     fun hasLocalImage(
         ctx: Context,
         folder: String,
         dirName: String,
         chapter: String,
         slug: String = "",
-    ): Boolean = chapterUri(ctx, folder, dirName, chapter, slug) != null
+    ): Boolean = !linkedImage(ctx, folder, slug, chapter).isNullOrEmpty()
+
+    fun imageDocId(rootId: String, dirName: String, image: String): String {
+        val base = "$rootId/$dirName/${Scenes.DIR}"
+        return if (image.isEmpty()) base else "$base/$image"
+    }
 
     fun chapterUri(
         ctx: Context,
@@ -349,23 +391,15 @@ object ChapterImages {
         chapter: String,
         slug: String = "",
     ): Uri? {
-        val dir = scenesDir(ctx, folder, dirName, create = false) ?: return null
-        val linked = if (slug.isNotEmpty()) {
-            try { DownloadStore(ctx).chapterImage(folder, slug, chapter) } catch (e: Exception) { null }
-        } else null
-        if (!linked.isNullOrEmpty()) {
-            dir.findFile(linked)?.uri?.let { return it }
-            try { DownloadStore(ctx).clearChapterImage(folder, slug, chapter) } catch (e: Exception) {}
-        }
-        val fallback = dir.findFile(Scenes.imageName(chapter)) ?: return null
-        if (slug.isNotEmpty()) linkIfMissing(ctx, folder, slug, chapter)
-        return fallback.uri
+        val name = linkedImage(ctx, folder, slug, chapter) ?: return null
+        val tree = Uri.parse(folder)
+        return DocumentsContract.buildDocumentUriUsingTree(
+            tree, imageDocId(Saf.rootId(tree), dirName, name),
+        )
     }
 
-    private fun linkIfMissing(ctx: Context, folder: String, slug: String, chapter: String) {
-        val store = DownloadStore(ctx)
-        if (!store.chapterImage(folder, slug, chapter).isNullOrEmpty()) return
-        store.setChapterImage(folder, slug, chapter, Scenes.imageName(chapter))
+    fun forgetMissingImage(ctx: Context, folder: String, slug: String, chapter: String) {
+        try { DownloadStore(ctx).clearChapterImage(folder, slug, chapter) } catch (e: Exception) {}
     }
 
     fun thumb(ctx: Context, uri: Uri, edgePx: Int): android.graphics.Bitmap? {

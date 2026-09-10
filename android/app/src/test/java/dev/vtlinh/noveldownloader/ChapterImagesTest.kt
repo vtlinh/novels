@@ -98,4 +98,16 @@ class ChapterImagesTest {
         assertFalse(ChapterImages.due(5, 0, 20))
         assertFalse(ChapterImages.due(5, -1, 20))
     }
+
+    @Test
+    fun `imageDocId is the tree-document id under the novel scenes folder`() {
+        assertEquals(
+            "primary:Novels/The Novel/scenes/Chapter 1.png",
+            ChapterImages.imageDocId("primary:Novels", "The Novel", "Chapter 1.png"),
+        )
+        assertEquals(
+            "primary:Novels/The Novel/scenes",
+            ChapterImages.imageDocId("primary:Novels", "The Novel", ""),
+        )
+    }
 }
