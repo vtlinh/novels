@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 23
+    const val VERSION = 24
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -93,6 +93,21 @@ object Schema {
         "CREATE TABLE IF NOT EXISTS chlist (" +
             "folder TEXT, slug TEXT, pos INTEGER, name TEXT, src TEXT, tr TEXT, " +
             "PRIMARY KEY(folder, slug, pos))"
+    /* Slack {hash}.txt posts we are waiting on. One chapter can have
+       several threads (a retry after an hour). Rows stay until the png
+       is saved — an expired wait is not a delete. */
+    const val CHAPTER_IMAGE_REQ_TABLE =
+        "CREATE TABLE IF NOT EXISTS chapter_image_req (" +
+            "folder TEXT, slug TEXT, chapter TEXT, " +
+            "hash TEXT DEFAULT '', thread_ts TEXT DEFAULT '', " +
+            "started_at INTEGER DEFAULT 0, " +
+            "PRIMARY KEY(folder, slug, chapter, thread_ts))"
+    /* Chapter file → image file under scenes/. Set only when the png
+       is on disk, so the reader knows which chapters to draw. */
+    const val CHAPTER_IMAGE_TABLE =
+        "CREATE TABLE IF NOT EXISTS chapter_image (" +
+            "folder TEXT, slug TEXT, chapter TEXT, image TEXT DEFAULT '', " +
+            "PRIMARY KEY(folder, slug, chapter))"
 
     /* Somewhere to send the statements. `soft` is for the ones whose failure is
        an ordinary outcome rather than a fault — an ALTER adding a column the
@@ -117,6 +132,8 @@ object Schema {
         db.exec(SCANNED_TABLE)
         db.exec(ORDER_TABLE)
         db.exec(CHLIST_TABLE)
+        db.exec(CHAPTER_IMAGE_REQ_TABLE)
+        db.exec(CHAPTER_IMAGE_TABLE)
     }
 
     fun upgrade(db: Exec, oldVersion: Int) {
@@ -264,6 +281,13 @@ object Schema {
            Nothing to seed — a pin is a choice, and there is no choice here. */
         if (oldVersion < 23) {
             db.soft("ALTER TABLE novels ADD COLUMN tts_lang TEXT DEFAULT ''")
+        }
+        /* Slack image request threads and the chapter→image link.
+           Empty on upgrade — nothing to seed: a thread is a Slack
+           measurement, and a link is a file we have not looked at. */
+        if (oldVersion < 24) {
+            db.exec(CHAPTER_IMAGE_REQ_TABLE)
+            db.exec(CHAPTER_IMAGE_TABLE)
         }
     }
 }

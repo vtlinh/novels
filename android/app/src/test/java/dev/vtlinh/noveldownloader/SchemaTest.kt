@@ -96,6 +96,22 @@ class SchemaTest {
         }
     }
 
+    @Test
+    fun `v24 records Slack image threads and the chapter to image link`() {
+        open().use { c ->
+            Schema.create(Jdbc(c))
+            val s = shape(c)
+            assertEquals(
+                setOf("folder", "slug", "chapter", "hash", "thread_ts", "started_at"),
+                s["chapter_image_req"],
+            )
+            assertEquals(
+                setOf("folder", "slug", "chapter", "image"),
+                s["chapter_image"],
+            )
+        }
+    }
+
     /* The captured v19 is what onCreate built at that commit; Schema.create is
        what it builds now. If those have drifted apart, every assertion below
        is measuring the wrong target. */

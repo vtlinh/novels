@@ -118,10 +118,13 @@ class SlackPoster(
        thread first. Replies often carry a file stub (id only); ask
        files.info for the name and download URL. files.list is the
        fallback when Slack omitted the share timestamp. */
-    fun waitForImage(hash: String, threadTs: String?, timeoutMs: Long = MAX_WAIT_MS): ByteArray {
+    fun waitForImage(hash: String, threadTs: String?, timeoutMs: Long = MAX_WAIT_MS): ByteArray =
+        waitForImage(hash, listOfNotNull(threadTs?.takeIf { it.isNotEmpty() }), timeoutMs)
+
+    fun waitForImage(hash: String, threads: Collection<String>, timeoutMs: Long = MAX_WAIT_MS): ByteArray {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
-            findImage(hash, threadTs)?.let { return it }
+            findImage(hash, threads)?.let { return it }
             if (System.currentTimeMillis() >= deadline) {
                 throw IOException("No image came back from Slack.")
             }
@@ -149,12 +152,22 @@ class SlackPoster(
         return null
     }
 
-    /* After an hour give-up the saved thread ts is gone. Find every
-       {hash}.txt in the channel and look in each thread for {hash}.png
-       before posting the chapter again. */
-    fun findExistingImage(hash: String, knownThread: String? = null): ByteArray? {
-        findImage(hash, knownThread)?.let { return it }
-        val threads = linkedSetOf<String>()
+    /* Stored request threads first, then every {hash}.txt Slack still
+       lists. Used on a retry tap and on the hour-end last look. */
+    fun findExistingImage(hash: String, knownThreads: Collection<String> = emptyList()): ByteArray? {
+        val seen = linkedSetOf<String>()
+        for (ts in knownThreads) if (ts.isNotEmpty()) seen.add(ts)
+        for (ts in seen) {
+            try {
+                pickImage(hash, replies(ts))?.let { return it }
+            } catch (e: ApiException) {
+                if (e.code != "missing_scope" && e.code != "thread_not_found" &&
+                    e.code != "message_not_found"
+                ) {
+                    throw e
+                }
+            }
+        }
         try {
             for (stub in listedFilesAll()) {
                 val file = hydrate(stub)
@@ -164,14 +177,14 @@ class SlackPoster(
                     download(file)?.let { return it }
                 }
                 if (fileMatchesTxt(hash, name, title)) {
-                    threadTsOf(file)?.let { threads.add(it) }
+                    threadTsOf(file)?.let { seen.add(it) }
                 }
             }
         } catch (e: ApiException) {
             if (e.code != "missing_scope") throw e
         }
-        for (ts in threads) {
-            if (ts == knownThread) continue
+        for (ts in seen) {
+            if (knownThreads.contains(ts)) continue
             try {
                 pickImage(hash, replies(ts))?.let { return it }
             } catch (e: ApiException) {
@@ -183,6 +196,14 @@ class SlackPoster(
             }
         }
         return null
+    }
+
+    fun findImage(hash: String, threads: Collection<String>): ByteArray? {
+        for (ts in threads) {
+            if (ts.isEmpty()) continue
+            findImage(hash, ts)?.let { return it }
+        }
+        return findImage(hash, null)
     }
 
     private fun pickImage(hash: String, files: List<JSONObject>): ByteArray? {

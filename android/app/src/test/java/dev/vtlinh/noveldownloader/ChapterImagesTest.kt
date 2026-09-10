@@ -73,11 +73,41 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `generate stays off while a request is inside the hour`() {
+        val start = 1_000_000L
+        assertTrue(ChapterImages.lockGenerate(false, listOf(start), start + 1))
+        assertFalse(
+            ChapterImages.lockGenerate(
+                false, listOf(start), start + ChapterImages.GIVE_UP_MS,
+            ),
+        )
+        assertTrue(ChapterImages.lockGenerate(true, emptyList(), start))
+        assertTrue(
+            ChapterImages.lockGenerate(
+                true, listOf(start), start + ChapterImages.GIVE_UP_MS,
+            ),
+        )
+        assertFalse(ChapterImages.lockGenerate(false, emptyList(), start))
+    }
+
+    @Test
     fun `a zero or negative step matches nothing`() {
         assertFalse(ChapterImages.due(1, 1, 0))
         assertFalse(ChapterImages.due(21, 1, 0))
         assertFalse(ChapterImages.due(1, 1, -20))
         assertFalse(ChapterImages.due(5, 0, 20))
         assertFalse(ChapterImages.due(5, -1, 20))
+    }
+
+    @Test
+    fun `imageDocId is the tree-document id under the novel scenes folder`() {
+        assertEquals(
+            "primary:Novels/The Novel/scenes/Chapter 1.png",
+            ChapterImages.imageDocId("primary:Novels", "The Novel", "Chapter 1.png"),
+        )
+        assertEquals(
+            "primary:Novels/The Novel/scenes",
+            ChapterImages.imageDocId("primary:Novels", "The Novel", ""),
+        )
     }
 }

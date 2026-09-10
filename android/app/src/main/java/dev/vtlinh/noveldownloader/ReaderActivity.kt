@@ -491,7 +491,15 @@ class ReaderActivity : AppCompatActivity() {
                     } else {
                         ChapterListActivity.chapterNames(this@ReaderActivity, treeUri!!, dirName, order, slug)
                     }
-                } catch (e: Exception) { null }
+                } catch (e: Exception) { null }?.also { listed ->
+                    /* One scenes/ listing on IO, before decorateChapter runs.
+                       The chapter→image row is what lets readAt skip SAF. */
+                    if (!asDocument() && !slug.isNullOrEmpty()) {
+                        ChapterImages.rememberScenes(
+                            this@ReaderActivity, folder, dirName, slug, listed.ordered,
+                        )
+                    }
+                }
             }
             val ch = chapters ?: run {
                 titleBar.text = novelTitle
@@ -3017,10 +3025,16 @@ class ReaderActivity : AppCompatActivity() {
         if (asDocument()) return raw
         val folder = prefs.getString("tree", null) ?: return raw
         val dir = intent.getStringExtra("dir") ?: return raw
-        val uri = ChapterImages.chapterUri(this, folder, dir, chapter) ?: return raw
+        val slug = intent.getStringExtra("slug") ?: ""
+        if (ChapterImages.linkedImage(this, folder, slug, chapter) == null) return raw
+        val uri = ChapterImages.chapterUri(this, folder, dir, chapter, slug) ?: return raw
         val maxW = (text.width - text.paddingLeft - text.paddingRight)
             .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }
-        val bmp = ChapterImages.thumb(this, uri, maxW) ?: return raw
+        val bmp = ChapterImages.thumb(this, uri, maxW)
+        if (bmp == null) {
+            ChapterImages.forgetMissingImage(this, folder, slug, chapter)
+            return raw
+        }
         val nl = raw.indexOf('\n')
         val head = if (nl >= 0) raw.substring(0, nl + 1) else raw + "\n"
         val rest = if (nl >= 0) raw.substring(nl + 1) else ""

@@ -12,14 +12,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 
-/* One chapter image: post {hash}.txt, remember that chapter so Generate
-   image stays off, then poll Slack for {hash}.png in that thread and
-   save it under scenes/. Prefs hold the wait list so a kill mid-poll
-   resumes on the next foreground.    After an hour the wait is dropped —
-   but only after one last look at Slack, or a png that arrived while
-   the app was closed would be thrown away. A later Generate image
-   tap searches every {hash}.txt in the channel and those threads
-   before posting the chapter again.
+/* One chapter image: post {hash}.txt, record that Slack thread in
+   the database, poll for {hash}.png, and save it under scenes/. The
+   chapter→image row is how the reader knows to draw a picture. Request
+   threads stay until that save — an hour give-up only stops polling.
 
    Auto-generate (this novel's ⚙): when enabled, opening that novel
    posts every chapter N ≥ from where (N − from) is a multiple of
@@ -35,8 +31,6 @@ object ChapterImages {
     /* Polls must outlive the chapter list: opening the reader finishes
        that screen and would cancel a lifecycle-scoped wait. */
     private val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    fun postedKey(slug: String, chapter: String) = "imgPosted:$slug:$chapter"
 
     fun autoTriedKey(slug: String, chapter: String) = "imgAuto:$slug:$chapter"
 
@@ -109,17 +103,20 @@ object ChapterImages {
         chapters: List<String>,
         scope: CoroutineScope,
     ) {
-        if (slug.isEmpty() || !autoEnabled(ctx, slug) || !slackReady(ctx)) return
-        if (folder.isEmpty() || dirName.isEmpty()) return
+        if (slug.isEmpty() || folder.isEmpty() || dirName.isEmpty()) return
+        val enabled = autoEnabled(ctx, slug)
+        val ready = slackReady(ctx)
         val every = autoEvery(ctx, slug)
         val from = autoFrom(ctx, slug)
         val app = ctx.applicationContext
         work.launch {
+            rememberScenes(app, folder, dirName, slug, chapters)
+            if (!enabled || !ready) return@launch
             for (chapter in chapters) {
                 val n = Scenes.chapterNumber(chapter) ?: continue
                 if (!due(n, from, every)) continue
-                if (hasLocalImage(app, folder, dirName, chapter)) continue
-                if (alreadyRequested(app, slug, chapter)) {
+                if (hasLocalImage(app, folder, dirName, chapter, slug)) continue
+                if (alreadyRequested(app, folder, slug, chapter)) {
                     markAutoTried(app, slug, chapter)
                     continue
                 }
@@ -133,14 +130,45 @@ object ChapterImages {
     }
 
     fun alreadyRequested(ctx: Context, slug: String, chapter: String): Boolean {
-        val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-        return !prefs.getString(postedKey(slug, chapter), null).isNullOrEmpty()
+        val folder = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getString("tree", "") ?: ""
+        return alreadyRequested(ctx, folder, slug, chapter)
     }
 
-    fun markRequested(ctx: Context, slug: String, chapter: String, hash: String) {
-        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
-            .putString(postedKey(slug, chapter), hash)
-            .apply()
+    /* Locked while a picture is on disk, or a request is still inside
+       the hour. After give-up the thread rows stay, but this is false
+       so Generate image can be tapped again. */
+    fun alreadyRequested(ctx: Context, folder: String, slug: String, chapter: String): Boolean {
+        if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return false
+        importLegacyWaits(ctx)
+        val store = DownloadStore(ctx)
+        return lockGenerate(
+            hasImage = !store.chapterImage(folder, slug, chapter).isNullOrEmpty(),
+            reqStarts = store.imageReqs(folder, slug, chapter).map { it.startedAt },
+        )
+    }
+
+    fun lockGenerate(
+        hasImage: Boolean,
+        reqStarts: List<Long>,
+        now: Long = System.currentTimeMillis(),
+    ): Boolean {
+        if (hasImage) return true
+        return reqStarts.any { !expired(it, now) }
+    }
+
+    fun markRequested(
+        ctx: Context,
+        folder: String,
+        slug: String,
+        chapter: String,
+        hash: String,
+        threadTs: String?,
+        startedAt: Long = System.currentTimeMillis(),
+    ) {
+        DownloadStore(ctx).rememberImageReq(
+            folder, slug, chapter, hash, threadTs.orEmpty(), startedAt,
+        )
     }
 
     fun request(
@@ -149,6 +177,7 @@ object ChapterImages {
         dirName: String,
         slug: String,
         chapter: String,
+        postIfMissing: Boolean = true,
     ): Result<Boolean> {
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
         val token = (prefs.getString("slackBotToken", "") ?: "").trim()
@@ -156,59 +185,62 @@ object ChapterImages {
         if (token.isEmpty() || channel.isEmpty()) {
             return Result.failure(IOException("Set Slack in Settings."))
         }
+        importLegacyWaits(ctx)
+        val store = DownloadStore(ctx)
         return try {
-            if (hasLocalImage(ctx, folder, dirName, chapter)) {
-                prefs.getString(postedKey(slug, chapter), null)?.let { forgetWait(ctx, it) }
+            if (hasLocalImage(ctx, folder, dirName, chapter, slug)) {
+                store.clearImageReqs(folder, slug, chapter)
                 return Result.success(true)
             }
             val slack = SlackPoster(token, channel)
-            var hash = prefs.getString(postedKey(slug, chapter), null)
-            var threadTs: String? = null
-            if (hash.isNullOrEmpty()) {
-                val text = chapterText(ctx, folder, dirName, slug, chapter)
-                    ?: return Result.failure(IOException("Could not read this chapter."))
-                if (text.isEmpty()) {
-                    return Result.failure(IOException("This chapter is empty."))
-                }
-                hash = Scenes.contentHash(text)
-                /* An hour give-up clears the wait. ChatGPT may already
-                   have replied on an earlier {hash}.txt — look there
-                   before posting another copy. */
-                slack.findExistingImage(hash)?.let { png ->
-                    savePng(ctx, folder, dirName, slug, chapter, png)
-                    markRequested(ctx, slug, chapter, hash)
-                    forgetWait(ctx, hash)
-                    return Result.success(true)
+            val reqs = store.imageReqs(folder, slug, chapter)
+            val threads = reqs.map { it.threadTs }.filter { it.isNotEmpty() }
+            val text = chapterText(ctx, folder, dirName, slug, chapter)
+                ?: return Result.failure(IOException("Could not read this chapter."))
+            if (text.isEmpty()) {
+                return Result.failure(IOException("This chapter is empty."))
+            }
+            var hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
+                ?: Scenes.contentHash(text)
+            slack.findExistingImage(hash, threads)?.let { png ->
+                savePng(ctx, folder, dirName, slug, chapter, png)
+                return Result.success(true)
+            }
+            val live = reqs.filter { !expired(it.startedAt) }
+            if (live.isEmpty()) {
+                if (!postIfMissing) {
+                    return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, threads)
                 }
                 val post = slack.postChapter(text)
                 hash = post.hash
-                threadTs = post.threadTs
-                markRequested(ctx, slug, chapter, hash)
-                rememberWait(ctx, folder, dirName, slug, chapter, hash, threadTs)
-            } else {
-                threadTs = waitThread(ctx, hash)
+                markRequested(ctx, folder, slug, chapter, hash, post.threadTs)
             }
+            val all = store.imageReqs(folder, slug, chapter)
+            val poll = all.map { it.threadTs }.filter { it.isNotEmpty() }
+            val started = all.maxOfOrNull { it.startedAt }?.takeIf { it > 0L }
+                ?: System.currentTimeMillis()
             if (!inflight.add(hash)) return Result.success(false)
             try {
-                val started = waitStarted(ctx, hash) ?: System.currentTimeMillis()
                 val remain = (started + GIVE_UP_MS - System.currentTimeMillis())
                     .coerceAtMost(SlackPoster.MAX_WAIT_MS)
                 if (expired(started) || remain <= 0L) {
-                    return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, threadTs)
+                    return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, poll)
                 }
-                val png = slack.waitForImage(hash, threadTs, remain)
+                val png = slack.waitForImage(hash, poll, remain)
                 savePng(ctx, folder, dirName, slug, chapter, png)
-                forgetWait(ctx, hash)
                 Result.success(true)
             } finally {
                 inflight.remove(hash)
             }
         } catch (e: Exception) {
-            val h = prefs.getString(postedKey(slug, chapter), null)
-            if (h != null && expired(waitStarted(ctx, h) ?: 0L)) {
+            val reqs = store.imageReqs(folder, slug, chapter)
+            val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
+            val started = reqs.minOfOrNull { it.startedAt } ?: 0L
+            if (hash != null && expired(started)) {
                 val slack = SlackPoster(token, channel)
                 return lastLook(
-                    ctx, slack, folder, dirName, slug, chapter, h, waitThread(ctx, h),
+                    ctx, slack, folder, dirName, slug, chapter, hash,
+                    reqs.map { it.threadTs },
                 )
             }
             Result.failure(e)
@@ -216,80 +248,51 @@ object ChapterImages {
     }
 
     fun resumeWaiting(ctx: Context, scope: CoroutineScope) {
-        val waits = waiting(ctx)
-        if (waits.length() == 0) return
+        importLegacyWaits(ctx)
+        val store = DownloadStore(ctx)
+        val waiting = store.waitingImageReqs()
+        if (waiting.isEmpty()) return
         val app = ctx.applicationContext
         scope.launch(Dispatchers.IO) {
-            for (i in 0 until waits.length()) {
-                val w = waits.optJSONObject(i) ?: continue
-                val folder = w.optString("folder")
-                val dir = w.optString("dir")
-                val slug = w.optString("slug")
-                val chapter = w.optString("chapter")
-                if (folder.isEmpty() || dir.isEmpty() || slug.isEmpty() || chapter.isEmpty()) continue
-                try { request(app, folder, dir, slug, chapter) } catch (e: Exception) {}
+            val seen = mutableSetOf<String>()
+            for (w in waiting) {
+                val key = "${w.folder}\u0000${w.slug}\u0000${w.chapter}"
+                if (!seen.add(key)) continue
+                val dir = try { store.dirNameFor(w.folder, w.slug) } catch (e: Exception) { null }
+                    ?: continue
+                if (dir.isEmpty()) continue
+                try {
+                    request(app, w.folder, dir, w.slug, w.chapter, postIfMissing = false)
+                } catch (e: Exception) {}
             }
         }
     }
 
-    private fun rememberWait(
-        ctx: Context,
-        folder: String,
-        dirName: String,
-        slug: String,
-        chapter: String,
-        hash: String,
-        threadTs: String?,
-    ) {
+    /* Prefs wait list from builds before the database rows. Fold it
+       in once so a kill mid-poll still resumes. */
+    private fun importLegacyWaits(ctx: Context) {
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-        val arr = waiting(ctx)
-        for (i in 0 until arr.length()) {
-            if (arr.optJSONObject(i)?.optString("hash") == hash) return
-        }
-        arr.put(
-            JSONObject()
-                .put("folder", folder)
-                .put("dir", dirName)
-                .put("slug", slug)
-                .put("chapter", chapter)
-                .put("hash", hash)
-                .put("threadTs", threadTs ?: "")
-                .put("startedAt", System.currentTimeMillis()),
-        )
-        prefs.edit().putString(WAIT_KEY, arr.toString()).apply()
-    }
-
-    private fun forgetWait(ctx: Context, hash: String) {
-        val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-        val arr = waiting(ctx)
-        val next = JSONArray()
+        val raw = prefs.getString(WAIT_KEY, "") ?: ""
+        if (raw.isEmpty()) return
+        val arr = try { JSONArray(raw.ifEmpty { "[]" }) } catch (e: Exception) { JSONArray() }
+        val store = DownloadStore(ctx)
         for (i in 0 until arr.length()) {
             val w = arr.optJSONObject(i) ?: continue
-            if (w.optString("hash") != hash) next.put(w)
+            val folder = w.optString("folder")
+            val slug = w.optString("slug")
+            val chapter = w.optString("chapter")
+            if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) continue
+            val started = w.optLong("startedAt", 0L)
+            store.rememberImageReq(
+                folder, slug, chapter,
+                w.optString("hash"), w.optString("threadTs"),
+                if (started > 0L) started else System.currentTimeMillis(),
+            )
         }
-        prefs.edit().putString(WAIT_KEY, next.toString()).apply()
+        prefs.edit().remove(WAIT_KEY).apply()
     }
 
-    private fun waitOf(ctx: Context, hash: String): JSONObject? {
-        val arr = waiting(ctx)
-        for (i in 0 until arr.length()) {
-            val w = arr.optJSONObject(i) ?: continue
-            if (w.optString("hash") == hash) return w
-        }
-        return null
-    }
-
-    private fun waitThread(ctx: Context, hash: String): String? =
-        waitOf(ctx, hash)?.optString("threadTs")?.takeIf { it.isNotEmpty() }
-
-    private fun waitStarted(ctx: Context, hash: String): Long? {
-        val w = waitOf(ctx, hash) ?: return null
-        val at = w.optLong("startedAt", 0L)
-        return if (at > 0L) at else null
-    }
-
-    /* One Slack lookup, then drop the wait if the png is still missing.
-       Callers must not drop first — that is the 2-hour-closed loss. */
+    /* One Slack lookup. Request threads stay unless the png is saved. */
     private fun lastLook(
         ctx: Context,
         slack: SlackPoster,
@@ -298,33 +301,19 @@ object ChapterImages {
         slug: String,
         chapter: String,
         hash: String,
-        threadTs: String?,
+        threads: Collection<String>,
     ): Result<Boolean> {
-        val png = try { slack.findExistingImage(hash, threadTs) } catch (e: Exception) { null }
+        val png = try { slack.findExistingImage(hash, threads) } catch (e: Exception) { null }
         if (png != null) {
             savePng(ctx, folder, dirName, slug, chapter, png)
-            forgetWait(ctx, hash)
             return Result.success(true)
         }
-        val started = waitStarted(ctx, hash) ?: 0L
+        val started = DownloadStore(ctx).imageReqs(folder, slug, chapter)
+            .minOfOrNull { it.startedAt } ?: 0L
         if (mayDrop(started, looked = true)) {
-            giveUp(ctx, slug, chapter, hash)
             return Result.failure(IOException("Gave up waiting for the image."))
         }
         return Result.failure(IOException("No image came back from Slack."))
-    }
-
-    private fun giveUp(ctx: Context, slug: String, chapter: String, hash: String) {
-        forgetWait(ctx, hash)
-        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
-            .remove(postedKey(slug, chapter))
-            .apply()
-    }
-
-    private fun waiting(ctx: Context): JSONArray {
-        val raw = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-            .getString(WAIT_KEY, "") ?: ""
-        return try { JSONArray(raw.ifEmpty { "[]" }) } catch (e: Exception) { JSONArray() }
     }
 
     fun chapterText(
@@ -347,14 +336,70 @@ object ChapterImages {
         } catch (e: Exception) { null }
     }
 
-    fun hasLocalImage(ctx: Context, folder: String, dirName: String, chapter: String): Boolean {
-        val dir = scenesDir(ctx, folder, dirName, create = false) ?: return false
-        return dir.findFile(Scenes.imageName(chapter)) != null
+    /* One listing of scenes/ when the novel opens — not per chapter.
+       DocumentFile.findFile lists the parent; doing that on the library
+       tree for every readAt is what made opening a chapter hang. */
+    fun rememberScenes(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapters: List<String>,
+    ) {
+        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty() || chapters.isEmpty()) return
+        val tree = Uri.parse(folder)
+        val scenesId = imageDocId(Saf.rootId(tree), dirName, "")
+            .trimEnd('/')
+        val kids = try {
+            Saf.children(ctx.contentResolver, tree, scenesId, includeSize = false)
+        } catch (e: Exception) {
+            return
+        }
+        if (kids.isEmpty()) return
+        val byImage = chapters.associateBy { Scenes.imageName(it) }
+        val store = DownloadStore(ctx)
+        for (k in kids) {
+            if (k.isDir) continue
+            val chapter = byImage[k.name] ?: continue
+            if (!store.chapterImage(folder, slug, chapter).isNullOrEmpty()) continue
+            store.setChapterImage(folder, slug, chapter, k.name)
+        }
     }
 
-    fun chapterUri(ctx: Context, folder: String, dirName: String, chapter: String): Uri? {
-        val dir = scenesDir(ctx, folder, dirName, create = false) ?: return null
-        return dir.findFile(Scenes.imageName(chapter))?.uri
+    fun linkedImage(ctx: Context, folder: String, slug: String, chapter: String): String? {
+        if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
+        return try { DownloadStore(ctx).chapterImage(folder, slug, chapter) } catch (e: Exception) { null }
+    }
+
+    fun hasLocalImage(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        chapter: String,
+        slug: String = "",
+    ): Boolean = !linkedImage(ctx, folder, slug, chapter).isNullOrEmpty()
+
+    fun imageDocId(rootId: String, dirName: String, image: String): String {
+        val base = "$rootId/$dirName/${Scenes.DIR}"
+        return if (image.isEmpty()) base else "$base/$image"
+    }
+
+    fun chapterUri(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        chapter: String,
+        slug: String = "",
+    ): Uri? {
+        val name = linkedImage(ctx, folder, slug, chapter) ?: return null
+        val tree = Uri.parse(folder)
+        return DocumentsContract.buildDocumentUriUsingTree(
+            tree, imageDocId(Saf.rootId(tree), dirName, name),
+        )
+    }
+
+    fun forgetMissingImage(ctx: Context, folder: String, slug: String, chapter: String) {
+        try { DownloadStore(ctx).clearChapterImage(folder, slug, chapter) } catch (e: Exception) {}
     }
 
     fun thumb(ctx: Context, uri: Uri, edgePx: Int): android.graphics.Bitmap? {
@@ -384,10 +429,14 @@ object ChapterImages {
     ) {
         val dir = scenesDir(ctx, folder, dirName, create = true)
             ?: throw IOException("Could not create scenes/.")
-        if (!writeBytes(ctx, dir, Scenes.imageName(chapter), "image/png", bytes)) {
+        val name = Scenes.imageName(chapter)
+        if (!writeBytes(ctx, dir, name, "image/png", bytes)) {
             throw IOException("Could not save the image.")
         }
-        try { DownloadStore(ctx).forgetDiskBytes(folder, slug) } catch (e: Exception) {}
+        val store = DownloadStore(ctx)
+        store.setChapterImage(folder, slug, chapter, name)
+        store.clearImageReqs(folder, slug, chapter)
+        try { store.forgetDiskBytes(folder, slug) } catch (e: Exception) {}
     }
 
     private fun scenesDir(
