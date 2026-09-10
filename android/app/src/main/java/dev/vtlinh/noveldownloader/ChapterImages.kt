@@ -641,6 +641,50 @@ object ChapterImages {
         } catch (e: Exception) { null }
     }
 
+    data class Saved(
+        val chapter: String,
+        val number: Int,
+        val label: String,
+        val uri: Uri,
+    )
+
+    /* chapter_image rows for this novel, lowest chapter number first.
+       One exists-query per row — not a listing of scenes/. */
+    fun listSaved(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+    ): List<Saved> {
+        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty()) return emptyList()
+        val tree = Uri.parse(folder)
+        val rootId = Saf.rootId(tree)
+        val rows = try { DownloadStore(ctx).chapterImages(folder, slug) } catch (e: Exception) {
+            emptyList()
+        }
+        val out = mutableListOf<Saved>()
+        for ((chapter, stored) in rows) {
+            if (!imageOnDisk(ctx, folder, dirName, stored)) {
+                forgetMissingImage(ctx, folder, slug, chapter)
+                continue
+            }
+            val uri = DocumentsContract.buildDocumentUriUsingTree(
+                tree, resolveImageDocId(rootId, dirName, stored),
+            )
+            out.add(savedOf(chapter, uri))
+        }
+        return sortSaved(out)
+    }
+
+    fun savedOf(chapter: String, uri: Uri): Saved {
+        val number = Scenes.chapterNumber(chapter) ?: Int.MAX_VALUE
+        val label = if (number == Int.MAX_VALUE) Scenes.chapterStem(chapter) else number.toString()
+        return Saved(chapter, number, label, uri)
+    }
+
+    fun sortSaved(items: List<Saved>): List<Saved> =
+        items.sortedWith(compareBy<Saved> { it.number }.thenBy { it.chapter })
+
     fun linkedImage(ctx: Context, folder: String, slug: String, chapter: String): String? {
         if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
         return try { DownloadStore(ctx).chapterImage(folder, slug, chapter) } catch (e: Exception) { null }

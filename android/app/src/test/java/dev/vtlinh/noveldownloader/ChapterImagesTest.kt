@@ -143,6 +143,18 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `synopsis grid sorts pictures by chapter number`() {
+        val names = listOf("Chapter 400.txt", "Chapter 374.txt", "Chapter 10.txt", "notes.txt")
+        val sorted = names.sortedWith(
+            compareBy<String> { Scenes.chapterNumber(it) ?: Int.MAX_VALUE }.thenBy { it },
+        )
+        assertEquals(
+            listOf("Chapter 10.txt", "Chapter 374.txt", "Chapter 400.txt", "notes.txt"),
+            sorted,
+        )
+    }
+
+    @Test
     fun `Generate image looks up the chapter png by id not by listing scenes`() {
         assertEquals(
             "primary:Novels/The Novel/scenes/Chapter 12.png",
