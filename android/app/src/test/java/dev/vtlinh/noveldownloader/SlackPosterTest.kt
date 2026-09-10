@@ -127,6 +127,73 @@ class SlackPosterTest {
         assertEquals("", SlackPoster.fileAlt("", "$hash.png", ""))
     }
 
+    /* files.info example from docs.slack.dev — alt_txt is present
+       and equals the filename when there is no Image description.
+       The field is there, so do not ask files.info again. */
+    @Test
+    fun `files info filename placeholder counts as empty`() {
+        assertEquals("", SlackPoster.fileAlt("tedair.gif", "tedair.gif", "tedair.gif"))
+        assertFalse(SlackPoster.needsFileInfo("F0S43PZDF", "", hasAltField = true))
+    }
+
+    /* files.list example omits alt_txt entirely, even when the Slack
+       UI shows Image description. Catalog hydrate used to stop here. */
+    @Test
+    fun `files list without alt_txt needs files info`() {
+        val hash = "d5061ff1cf483c6cab285c9489dd3d8253ef05d6cd6733b4f49918560905f67b"
+        assertEquals("", SlackPoster.fileAlt("", "$hash.png", "$hash.png"))
+        assertTrue(SlackPoster.needsFileInfo("F0C11BMN49G", "", hasAltField = false))
+        assertFalse(SlackPoster.needsFileInfo("", "", hasAltField = false))
+    }
+
+    /* ChatGPT's Image description as files.info returns it — the
+       field Slack's UI labels Image description. */
+    @Test
+    fun `files info image description is stored and shown`() {
+        val hash = "d5061ff1cf483c6cab285c9489dd3d8253ef05d6cd6733b4f49918560905f67b"
+        val desc = "Prince Roland orders his officers to drive their steel " +
+            "river gunboat at full speed ahead from its compact command room."
+        assertEquals(desc, SlackPoster.fileAlt(desc, "$hash.png", "$hash.png"))
+        assertFalse(SlackPoster.needsFileInfo("F0C11BMN49G", desc, hasAltField = true))
+    }
+
+    @Test
+    fun `file alt reads alt_text when alt_txt is missing`() {
+        val hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        assertEquals(
+            "A lantern in the rain",
+            SlackPoster.fileAlt("", "A lantern in the rain", "$hash.png", "$hash.png"),
+        )
+        assertEquals(
+            "A lantern in the rain",
+            SlackPoster.fileAlt("A lantern in the rain", "other", "$hash.png", "$hash.png"),
+        )
+        assertFalse(
+            SlackPoster.needsFileInfo(
+                "F123",
+                "A lantern in the rain",
+                hasAltField = true,
+            ),
+        )
+    }
+
+    /* Image blocks store the caption as alt_text, not on the slim
+       slack_file stub. Copy it across so fileAlt / needsFileInfo
+       see it without a second files.info look. */
+    @Test
+    fun `an image block alt_text is copied onto the file stub`() {
+        assertEquals(
+            "A lantern in the rain",
+            SlackPoster.blockAltToCopy("", "", "A lantern in the rain"),
+        )
+        assertEquals("", SlackPoster.blockAltToCopy("already", "", "A lantern in the rain"))
+        assertEquals("", SlackPoster.blockAltToCopy("", "already", "A lantern in the rain"))
+        assertEquals("", SlackPoster.blockAltToCopy("", "", "   "))
+        val alt = SlackPoster.blockAltToCopy("", "", "A lantern in the rain")
+        assertEquals(alt, SlackPoster.fileAlt("", alt, "", ""))
+        assertFalse(SlackPoster.needsFileInfo("F123", alt, hasAltField = true))
+    }
+
     @Test
     fun `a denied look is a png miss with a read error`() {
         assertTrue(SlackPoster.lookDenied(null, "missing_scope"))

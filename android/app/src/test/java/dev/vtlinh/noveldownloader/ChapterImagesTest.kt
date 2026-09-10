@@ -153,13 +153,31 @@ class ChapterImagesTest {
         assertFalse(ChapterImages.showAlt(""))
         assertFalse(ChapterImages.showAlt("   "))
         assertTrue(ChapterImages.showAlt("A lantern in the rain"))
+        assertTrue(
+            ChapterImages.showAlt(
+                "Prince Roland orders his officers to drive their steel " +
+                    "river gunboat at full speed ahead from its compact command room.",
+            ),
+        )
+    }
+
+    @Test
+    fun `a saved png with no caption still asks Slack`() {
+        assertTrue(ChapterImages.needsAltRefresh(true, ""))
+        assertTrue(ChapterImages.needsAltRefresh(true, "   "))
+        assertFalse(ChapterImages.needsAltRefresh(true, "A lantern in the rain"))
+        assertFalse(ChapterImages.needsAltRefresh(false, ""))
     }
 
     @Test
     fun `savedOf keeps a trimmed alt`() {
+        val desc = "Prince Roland orders his officers to drive their steel " +
+            "river gunboat at full speed ahead from its compact command room."
         assertEquals("A lantern in the rain", ChapterImages.altText("  A lantern in the rain  "))
+        assertEquals(desc, ChapterImages.altText("  $desc  "))
         assertEquals("", ChapterImages.altText(""))
         assertFalse(ChapterImages.showAlt(ChapterImages.altText("")))
+        assertTrue(ChapterImages.showAlt(ChapterImages.altText(desc)))
     }
 
     @Test

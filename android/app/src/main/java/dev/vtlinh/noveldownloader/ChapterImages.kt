@@ -148,7 +148,8 @@ object ChapterImages {
         val looks = mutableListOf<Triple<String, String, List<String>>>()
         for (chapter in chapters.distinct()) {
             if (chapter.isEmpty()) continue
-            if (adoptDiskImage(ctx, folder, dirName, slug, chapter) != null) continue
+            val onDisk = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
+            if (onDisk && !needsAltRefresh(true, linkedAlt(ctx, folder, slug, chapter))) continue
             val reqs = try { store.imageReqs(folder, slug, chapter) } catch (e: Exception) {
                 emptyList()
             }
@@ -158,7 +159,7 @@ object ChapterImages {
             looks.add(Triple(chapter, hash, reqs.map { it.threadTs }.filter { it.isNotEmpty() }))
         }
         if (looks.isEmpty()) return
-        log("catalog look ${looks.size} missing")
+        log("catalog look ${looks.size}")
         val found = try {
             slack.findExistingMany(looks.map { it.second to it.third })
         } catch (e: Exception) {
@@ -173,7 +174,7 @@ object ChapterImages {
             }
             if (ex.png != null) {
                 try {
-                    savePng(ctx, folder, dirName, slug, chapter, ex.png, ex.alt)
+                    keepImage(ctx, folder, dirName, slug, chapter, ex.png, ex.alt)
                 } catch (e: Exception) {
                     log("$chapter catalog save fail ${e.message}")
                 }
@@ -202,9 +203,11 @@ object ChapterImages {
             .putLong(AUTO_LAST_KEY, at).apply()
     }
 
-    /* Opening a novel (list or reader) asks Slack for the next due
-       chapter that has no local picture and has not already been
-       posted. At most one auto post every 15 minutes. */
+    /* Opening a novel (list or reader) asks Slack for pictures that
+       are already there, including a description on a png we already
+       saved with a blank caption. Auto-generate then posts the next
+       due chapter that has no local picture. At most one auto post
+       every 15 minutes. */
     fun autoSweep(
         ctx: Context,
         folder: String,
@@ -214,18 +217,28 @@ object ChapterImages {
         scope: CoroutineScope,
     ) {
         if (slug.isEmpty() || folder.isEmpty() || dirName.isEmpty()) return
-        if (!autoEnabled(ctx, slug) || !slackReady(ctx)) return
+        if (!slackReady(ctx)) return
+        val autoOn = autoEnabled(ctx, slug)
         val every = autoEvery(ctx, slug)
         val from = autoFrom(ctx, slug)
         val app = ctx.applicationContext
         work.launch {
             slackPoster(app)?.let { slack ->
-                val dueCh = chapters.filter { ch ->
-                    val n = Scenes.chapterNumber(ch) ?: return@filter false
-                    due(n, from, every)
+                val dueCh = if (autoOn) {
+                    chapters.filter { ch ->
+                        val n = Scenes.chapterNumber(ch) ?: return@filter false
+                        due(n, from, every)
+                    }
+                } else {
+                    emptyList()
                 }
-                adoptFromSlack(app, slack, folder, dirName, slug, dueCh)
+                val blankAlt = chapters.filter { ch ->
+                    adoptDiskImage(app, folder, dirName, slug, ch) != null &&
+                        needsAltRefresh(true, linkedAlt(app, folder, slug, ch))
+                }
+                adoptFromSlack(app, slack, folder, dirName, slug, (dueCh + blankAlt).distinct())
             }
+            if (!autoOn) return@launch
             val posted = autoTakeOne(app, folder, dirName, slug, chapters, every, from)
             if (!autoEnabled(app, slug) || !slackReady(app)) return@launch
             val wait = when {
@@ -381,7 +394,8 @@ object ChapterImages {
         val store = DownloadStore(ctx)
         return try {
             log("request $chapter post=$postIfMissing")
-            if (adoptDiskImage(ctx, folder, dirName, slug, chapter) != null) {
+            val onDisk = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
+            if (onDisk && !needsAltRefresh(true, linkedAlt(ctx, folder, slug, chapter))) {
                 log("$chapter already on disk")
                 return Result.success(true)
             }
@@ -408,7 +422,11 @@ object ChapterImages {
             log("$chapter look png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
             deniedLook(found)?.let { return it }
             if (found.png != null) {
-                savePng(ctx, folder, dirName, slug, chapter, found.png, found.alt)
+                keepImage(ctx, folder, dirName, slug, chapter, found.png, found.alt)
+                return Result.success(true)
+            }
+            if (onDisk) {
+                log("$chapter already on disk")
                 return Result.success(true)
             }
             for (ts in found.threads) {
@@ -550,7 +568,8 @@ object ChapterImages {
         val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
         importLegacyWaits(ctx)
         log("poll $chapter")
-        if (adoptDiskImage(ctx, folder, dirName, slug, chapter) != null) {
+        val onDisk = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
+        if (onDisk && !needsAltRefresh(true, linkedAlt(ctx, folder, slug, chapter))) {
             log("$chapter already on disk")
             return Result.success(true)
         }
@@ -576,7 +595,11 @@ object ChapterImages {
         log("$chapter look png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
         deniedLook(found)?.let { return it }
         if (found.png != null) {
-            savePng(ctx, folder, dirName, slug, chapter, found.png, found.alt)
+            keepImage(ctx, folder, dirName, slug, chapter, found.png, found.alt)
+            return Result.success(true)
+        }
+        if (onDisk) {
+            log("$chapter already on disk")
             return Result.success(true)
         }
         for (ts in found.threads) {
@@ -605,7 +628,7 @@ object ChapterImages {
         log("$chapter lastLook png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
         deniedLook(found)?.let { return it }
         if (found.png != null) {
-            savePng(ctx, folder, dirName, slug, chapter, found.png, found.alt)
+            keepImage(ctx, folder, dirName, slug, chapter, found.png, found.alt)
             return Result.success(true)
         }
         for (ts in found.threads) {
@@ -655,6 +678,11 @@ object ChapterImages {
     /* Empty / whitespace is not a caption — hide it so an older
        row or a disk-adopted png does not draw a blank line. */
     fun showAlt(alt: String): Boolean = altText(alt).isNotEmpty()
+
+    /* A png already on disk with no caption should still ask Slack.
+       Poll / adopt / resume fill chapter_image.alt and leave the file. */
+    fun needsAltRefresh(hasImage: Boolean, storedAlt: String): Boolean =
+        hasImage && !showAlt(storedAlt)
 
     /* chapter_image rows for this novel, lowest chapter number first.
        One exists-query per row — not a listing of scenes/. */
@@ -798,6 +826,28 @@ object ChapterImages {
                 android.graphics.BitmapFactory.decodeStream(it, null, dec)
             }
         } catch (e: Exception) { null }
+    }
+
+    /* Write a new png, or only the caption when the file is already
+       on disk. A blank incoming alt keeps a stored caption. */
+    private fun keepImage(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapter: String,
+        bytes: ByteArray,
+        alt: String,
+    ) {
+        val existing = linkedImage(ctx, folder, slug, chapter)
+        if (!existing.isNullOrEmpty() && imageOnDisk(ctx, folder, dirName, existing)) {
+            DownloadStore(ctx).setChapterImage(folder, slug, chapter, existing, alt)
+            if (altText(alt).isNotEmpty()) {
+                log("$chapter caption ${altText(alt).length}c")
+            }
+            return
+        }
+        savePng(ctx, folder, dirName, slug, chapter, bytes, alt)
     }
 
     private fun savePng(
