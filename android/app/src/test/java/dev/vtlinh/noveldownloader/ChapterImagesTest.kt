@@ -8,7 +8,8 @@ import org.junit.Test
 
 /* Auto-generate picks chapters N ≥ from where (N − from) is a
    multiple of every. A wait older than an hour is dropped only
-   after Slack has been looked at once more. */
+   after Slack has been looked at once more. A posted chapter
+   shows Poll image instead of Generate. */
 class ChapterImagesTest {
 
     @Test
@@ -73,16 +74,14 @@ class ChapterImagesTest {
     }
 
     @Test
-    fun `generate stays off until the hour is up and Slack has been looked at`() {
-        val start = 1_000_000L
-        val hour = start + ChapterImages.GIVE_UP_MS
-        assertTrue(ChapterImages.lockGenerate(false, listOf(start to false), start + 1))
-        assertTrue(ChapterImages.lockGenerate(false, listOf(start to false), hour))
-        assertTrue(ChapterImages.lockGenerate(false, listOf(start to true), start + 1))
-        assertFalse(ChapterImages.lockGenerate(false, listOf(start to true), hour))
-        assertTrue(ChapterImages.lockGenerate(true, emptyList(), start))
-        assertTrue(ChapterImages.lockGenerate(true, listOf(start to true), hour))
-        assertFalse(ChapterImages.lockGenerate(false, emptyList(), start))
+    fun `a waiting chapter offers Poll image instead of Generate`() {
+        assertEquals(ChapterImages.ImageAction.HIDE, ChapterImages.imageAction(true, false))
+        assertEquals(ChapterImages.ImageAction.HIDE, ChapterImages.imageAction(true, true))
+        assertEquals(ChapterImages.ImageAction.POLL, ChapterImages.imageAction(false, true))
+        assertEquals(ChapterImages.ImageAction.GENERATE, ChapterImages.imageAction(false, false))
+        assertTrue(ChapterImages.lockGenerate(true, false))
+        assertTrue(ChapterImages.lockGenerate(false, true))
+        assertFalse(ChapterImages.lockGenerate(false, false))
     }
 
     @Test

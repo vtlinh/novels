@@ -26,7 +26,8 @@ import kotlinx.coroutines.withContext
    The ≡ button opens the novel's chapter list. A right-edge swipe still
    opens the in-reader drawer for jumping anywhere. EN/VI switches between
    the English translation and the Vietnamese source; the ⚙ menu also has
-   the language toggle, Font size +/−, and Generate image.
+   the language toggle, Font size +/−, and Generate image
+   (or Poll image while Slack still owes a picture).
    Language and font persist. */
 class ReaderActivity : AppCompatActivity() {
 
@@ -2291,7 +2292,7 @@ class ReaderActivity : AppCompatActivity() {
         gen.setTextColor(getColor(if (on) R.color.accent else R.color.muted))
     }
 
-    private fun requestChapterImage(gen: TextView) {
+    private fun requestChapterImage(gen: TextView, card: android.view.View) {
         val folder = prefs.getString("tree", null)
         val dir = intent.getStringExtra("dir")
         val slug = intent.getStringExtra("slug")
@@ -2318,9 +2319,6 @@ class ReaderActivity : AppCompatActivity() {
                     }
                 },
                 onFailure = {
-                    if (!ChapterImages.alreadyRequested(this@ReaderActivity, dir, slug, chapter)) {
-                        setGenerateEnabled(gen, true)
-                    }
                     android.widget.Toast.makeText(
                         this@ReaderActivity,
                         it.message ?: "Could not generate an image.",
@@ -2328,6 +2326,64 @@ class ReaderActivity : AppCompatActivity() {
                     ).show()
                 },
             )
+            bindImageAction(gen, card)
+        }
+    }
+
+    private fun pollChapterImage(gen: TextView, card: android.view.View) {
+        val folder = prefs.getString("tree", null)
+        val dir = intent.getStringExtra("dir")
+        val slug = intent.getStringExtra("slug")
+        val chapter = currentChapterFile()
+        if (folder.isNullOrEmpty() || dir.isNullOrEmpty() || slug.isNullOrEmpty() || chapter == null) {
+            android.widget.Toast.makeText(this, "Could not read this chapter.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        setGenerateEnabled(gen, false)
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                ChapterImages.poll(this@ReaderActivity, folder, dir, slug, chapter)
+            }
+            outcome.fold(
+                onSuccess = { saved ->
+                    android.widget.Toast.makeText(
+                        this@ReaderActivity,
+                        if (saved) "Image saved." else "No image yet.",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                    if (saved && !asDocument()) {
+                        val pos = currentChapterIdx
+                        if (pos >= 0) openAt(pos)
+                    }
+                },
+                onFailure = {
+                    android.widget.Toast.makeText(
+                        this@ReaderActivity,
+                        it.message ?: "No image yet.",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            )
+            bindImageAction(gen, card)
+        }
+    }
+
+    private fun bindImageAction(gen: TextView, card: android.view.View) {
+        val folder = prefs.getString("tree", "") ?: ""
+        val dir = intent.getStringExtra("dir") ?: ""
+        val slug = intent.getStringExtra("slug") ?: ""
+        val chapter = currentChapterFile() ?: ""
+        val action = ChapterImages.imageAction(this, folder, dir, slug, chapter)
+        if (action == ChapterImages.ImageAction.HIDE) {
+            card.visibility = android.view.View.GONE
+            return
+        }
+        card.visibility = android.view.View.VISIBLE
+        val poll = action == ChapterImages.ImageAction.POLL
+        gen.text = if (poll) "Poll image" else "Generate image"
+        setGenerateEnabled(gen, true)
+        gen.setOnClickListener {
+            if (poll) pollChapterImage(gen, card) else requestChapterImage(gen, card)
         }
     }
 
@@ -2395,8 +2451,6 @@ class ReaderActivity : AppCompatActivity() {
         )
 
         if (!asDocument()) {
-            val slug = intent.getStringExtra("slug")
-            val chapter = currentChapterFile()
             val img = card()
             val gen = TextView(ctx).apply {
                 text = "Generate image"
@@ -2406,13 +2460,7 @@ class ReaderActivity : AppCompatActivity() {
                 isFocusable = true
             }
             img.addView(gen)
-            val dir = intent.getStringExtra("dir")
-            val locked = slug != null && chapter != null && !dir.isNullOrEmpty() &&
-                ChapterImages.alreadyRequested(this, dir, slug, chapter)
-            setGenerateEnabled(gen, !locked)
-            if (!locked) {
-                gen.setOnClickListener { requestChapterImage(gen) }
-            }
+            bindImageAction(gen, img)
         }
 
         /* ── Display: language + font ── */

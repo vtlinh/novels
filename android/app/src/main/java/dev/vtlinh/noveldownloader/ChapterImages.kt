@@ -132,10 +132,35 @@ object ChapterImages {
         return alreadyRequested(ctx, folder, dirName, slug, chapter)
     }
 
-    /* Locked while the png is on disk and in the database, or a
-       request is still waiting — inside the hour, or past it before
-       the last Slack look. A stale image row whose file is gone does
-       not lock — Generate image can be tapped again. */
+    enum class ImageAction { HIDE, GENERATE, POLL }
+
+    /* Hide when the png is already saved. Poll when Slack already
+       has this chapter's post — do not offer Generate again. */
+    fun imageAction(hasImage: Boolean, hasReq: Boolean): ImageAction = when {
+        hasImage -> ImageAction.HIDE
+        hasReq -> ImageAction.POLL
+        else -> ImageAction.GENERATE
+    }
+
+    fun imageAction(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapter: String,
+    ): ImageAction {
+        if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) {
+            return ImageAction.GENERATE
+        }
+        importLegacyWaits(ctx)
+        return imageAction(
+            hasImage = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null,
+            hasReq = DownloadStore(ctx).imageReqs(folder, slug, chapter).isNotEmpty(),
+        )
+    }
+
+    /* True when Generate must not post again — the picture is saved
+       or a Slack request row already exists. */
     fun alreadyRequested(
         ctx: Context,
         folder: String,
@@ -144,22 +169,11 @@ object ChapterImages {
         chapter: String,
     ): Boolean {
         if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return false
-        importLegacyWaits(ctx)
-        val store = DownloadStore(ctx)
-        return lockGenerate(
-            hasImage = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null,
-            waits = store.imageReqs(folder, slug, chapter).map { it.startedAt to it.looked },
-        )
+        return imageAction(ctx, folder, dirName, slug, chapter) != ImageAction.GENERATE
     }
 
-    fun lockGenerate(
-        hasImage: Boolean,
-        waits: List<Pair<Long, Boolean>>,
-        now: Long = System.currentTimeMillis(),
-    ): Boolean {
-        if (hasImage) return true
-        return waits.any { (startedAt, looked) -> !mayDrop(startedAt, looked, now) }
-    }
+    fun lockGenerate(hasImage: Boolean, hasReq: Boolean): Boolean =
+        imageAction(hasImage, hasReq) != ImageAction.GENERATE
 
     /* A chapter that already has a Slack {hash}.txt must not get another.
        "No png downloaded" is not "nothing posted" — Chapter 374 posted
@@ -304,6 +318,46 @@ object ChapterImages {
             )
         }
         prefs.edit().remove(WAIT_KEY).apply()
+    }
+
+    /* One Slack lookup, no new post. Poll image uses this so a missed
+       png can be fetched without uploading the chapter again. */
+    fun poll(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapter: String,
+    ): Result<Boolean> {
+        val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+        val token = (prefs.getString("slackBotToken", "") ?: "").trim()
+        val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
+        importLegacyWaits(ctx)
+        if (adoptDiskImage(ctx, folder, dirName, slug, chapter) != null) {
+            return Result.success(true)
+        }
+        if (token.isEmpty() || channel.isEmpty()) {
+            return Result.failure(IOException("Set Slack in Settings."))
+        }
+        val store = DownloadStore(ctx)
+        val reqs = store.imageReqs(folder, slug, chapter)
+        val threads = reqs.map { it.threadTs }.filter { it.isNotEmpty() }
+        val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
+            ?: chapterText(ctx, folder, dirName, slug, chapter)?.let { Scenes.contentHash(it) }
+            ?: return Result.failure(IOException("Could not read this chapter."))
+        val slack = SlackPoster(token, channel)
+        val found = try { slack.findExisting(hash, threads) } catch (e: Exception) {
+            return Result.failure(e)
+        }
+        if (found.png != null) {
+            savePng(ctx, folder, dirName, slug, chapter, found.png)
+            return Result.success(true)
+        }
+        for (ts in found.threads) {
+            if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+        }
+        store.markImageReqLooked(folder, slug, chapter)
+        return Result.failure(IOException("No image yet."))
     }
 
     /* One Slack lookup. Request threads stay unless the png is saved. */

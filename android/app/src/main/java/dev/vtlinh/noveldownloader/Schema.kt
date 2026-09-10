@@ -291,7 +291,8 @@ object Schema {
             db.exec(CHAPTER_IMAGE_TABLE)
         }
         /* Whether the hour give-up's last Slack look has run. 0 until
-           lastLook finishes — Generate image stays off until then. */
+           lastLook finishes — the reader offers Poll image until the
+           png is saved. */
         if (oldVersion < 25) {
             db.soft("ALTER TABLE chapter_image_req ADD COLUMN looked INTEGER DEFAULT 0")
         }
