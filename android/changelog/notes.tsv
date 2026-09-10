@@ -5,7 +5,8 @@
 # (tools/seal-changelog.py).
 
 	Use simpler words in the in-app help
-	Set auto-generate image cadence before turning it on
+1.37.24	Open synopsis pictures full screen
+1.37.23	Set auto-generate image cadence before turning it on
 1.37.22	Show generated chapter images under the synopsis
 1.37.21	Reuse one Slack file list for every missing chapter image
 1.37.20	Post only one auto-generated chapter image every 15 minutes
