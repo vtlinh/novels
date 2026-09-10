@@ -7,9 +7,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /* Auto-generate picks chapters N ≥ from where (N − from) is a
-   multiple of every. A wait older than an hour is dropped only
-   after Slack has been looked at once more. A posted chapter
-   shows Poll image instead of Generate. */
+   multiple of every, at most one every 15 minutes. A wait older
+   than an hour is dropped only after Slack has been looked at
+   once more. A posted chapter shows Poll image instead of Generate. */
 class ChapterImagesTest {
 
     @Test
@@ -31,6 +31,20 @@ class ChapterImagesTest {
         assertTrue(ChapterImages.mayDrop(start, looked = true, twoHours))
         assertFalse(ChapterImages.mayDrop(start, looked = true, start + ChapterImages.GIVE_UP_MS - 1))
         assertFalse(ChapterImages.mayDrop(start, looked = false, start))
+    }
+
+    @Test
+    fun `auto-generate waits 15 minutes between chapters`() {
+        val start = 1_000_000L
+        assertEquals("autoImageLastAt", ChapterImages.autoLastKey())
+        assertEquals(15L * 60L * 1000L, ChapterImages.AUTO_GAP_MS)
+        assertTrue(ChapterImages.autoReady(0L, start))
+        assertFalse(ChapterImages.autoReady(start, start))
+        assertFalse(ChapterImages.autoReady(start, start + ChapterImages.AUTO_GAP_MS - 1))
+        assertTrue(ChapterImages.autoReady(start, start + ChapterImages.AUTO_GAP_MS))
+        assertEquals(0L, ChapterImages.autoWaitMs(0L, start))
+        assertEquals(ChapterImages.AUTO_GAP_MS, ChapterImages.autoWaitMs(start, start))
+        assertEquals(0L, ChapterImages.autoWaitMs(start, start + ChapterImages.AUTO_GAP_MS))
     }
 
     @Test
