@@ -37,4 +37,14 @@ class ScenesTest {
         assertFalse(Scenes.slackFileName("abc").contains("scene"))
         assertFalse(Scenes.slackFileName("abc").startsWith("scene-"))
     }
+
+    @Test
+    fun `chapter number is read from the Chapter N name`() {
+        assertEquals("Chapter 12", Scenes.chapterStem("Chapter 12.png"))
+        assertEquals(12, Scenes.chapterNumber("Chapter 12.png"))
+        assertEquals(374, Scenes.chapterNumber("Chapter 374.jpg"))
+        assertEquals(1, Scenes.chapterNumber("Chapter 1.txt.gz"))
+        assertEquals(21, Scenes.chapterNumber("Chapter 21.txt"))
+        assertTrue((Scenes.chapterNumber("Chapter 2.png") ?: 0) < (Scenes.chapterNumber("Chapter 10.png") ?: 0))
+    }
 }

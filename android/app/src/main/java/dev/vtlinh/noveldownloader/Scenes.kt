@@ -32,6 +32,23 @@ object Scenes {
     fun slackImageName(hash: String) = hash + ".png"
     fun imageName(filename: String) = chapterBase(filename) + ".png"
 
+    /* "Chapter 12.png" / "Chapter 12.txt" → "Chapter 12". Auto-generate
+       reads the number so every-X-from-Y can pick the right files. */
+    fun chapterStem(filename: String): String {
+        var n = filename.removeSuffix(".gz")
+        for (ext in listOf(".png", ".jpg", ".jpeg", ".webp", ".json", ".txt")) {
+            if (n.endsWith(ext, ignoreCase = true)) {
+                n = n.dropLast(ext.length)
+                break
+            }
+        }
+        return n
+    }
+
+    fun chapterNumber(filename: String): Int? =
+        Regex("""Chapter (\d+)""", RegexOption.IGNORE_CASE)
+            .find(chapterStem(filename))?.groupValues?.get(1)?.toIntOrNull()
+
     fun isSceneFile(name: String): Boolean {
         val n = name.removeSuffix(".gz").lowercase()
         return n.endsWith(".json") || n.endsWith(".png") || n.endsWith(".jpg") ||

@@ -508,6 +508,14 @@ class ReaderActivity : AppCompatActivity() {
                 ).show()
                 return@launch
             }
+            if (!asDocument()) {
+                intent.getStringExtra("slug")?.let { slug ->
+                    ChapterImages.autoSweep(
+                        this@ReaderActivity, folder, dirName, slug,
+                        ch.ordered, lifecycleScope,
+                    )
+                }
+            }
             /* inline chapter list in the right drawer, current one highlighted */
             drawerAdapter = object : ArrayAdapter<String>(
                 this@ReaderActivity, android.R.layout.simple_list_item_1,
