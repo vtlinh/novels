@@ -68,6 +68,16 @@ class CachedChapterList(
     val stamp: Folder.Stamp? = null,
 )
 
+/* One Slack {hash}.txt post we are waiting on for a chapter image. */
+data class ChapterImageReq(
+    val folder: String,
+    val slug: String,
+    val chapter: String,
+    val hash: String,
+    val threadTs: String,
+    val startedAt: Long,
+)
+
 class DownloadStore(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "downloads.db", null, Schema.VERSION) {
 
@@ -633,6 +643,109 @@ class DownloadStore(context: Context) :
 
     fun removeNovel(folder: String, slug: String) {
         writableDatabase.delete("novels", "folder=? AND slug=?", arrayOf(folder, slug))
+        writableDatabase.delete("chapter_image_req", "folder=? AND slug=?", arrayOf(folder, slug))
+        writableDatabase.delete("chapter_image", "folder=? AND slug=?", arrayOf(folder, slug))
+    }
+
+    /* ---- Slack chapter images (request threads + file→image link) ---- */
+
+    fun rememberImageReq(
+        folder: String,
+        slug: String,
+        chapter: String,
+        hash: String,
+        threadTs: String,
+        startedAt: Long,
+    ) {
+        writableDatabase.execSQL(
+            "INSERT OR REPLACE INTO chapter_image_req(" +
+                "folder,slug,chapter,hash,thread_ts,started_at) VALUES(?,?,?,?,?,?)",
+            arrayOf(folder, slug, chapter, hash, threadTs, startedAt),
+        )
+    }
+
+    fun imageReqs(folder: String, slug: String, chapter: String): List<ChapterImageReq> {
+        val out = ArrayList<ChapterImageReq>()
+        readableDatabase.query(
+            "chapter_image_req",
+            arrayOf("hash", "thread_ts", "started_at"),
+            "folder=? AND slug=? AND chapter=?",
+            arrayOf(folder, slug, chapter),
+            null, null, "started_at ASC",
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    ChapterImageReq(
+                        folder, slug, chapter,
+                        c.getString(0) ?: "",
+                        c.getString(1) ?: "",
+                        c.getLong(2),
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    /* Chapters that still have a Slack thread and no saved image. */
+    fun waitingImageReqs(): List<ChapterImageReq> {
+        val out = ArrayList<ChapterImageReq>()
+        readableDatabase.rawQuery(
+            "SELECT r.folder, r.slug, r.chapter, r.hash, r.thread_ts, r.started_at " +
+                "FROM chapter_image_req r LEFT JOIN chapter_image i " +
+                "ON i.folder=r.folder AND i.slug=r.slug AND i.chapter=r.chapter " +
+                "WHERE i.image IS NULL OR i.image=''",
+            null,
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    ChapterImageReq(
+                        c.getString(0) ?: "",
+                        c.getString(1) ?: "",
+                        c.getString(2) ?: "",
+                        c.getString(3) ?: "",
+                        c.getString(4) ?: "",
+                        c.getLong(5),
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    fun setChapterImage(folder: String, slug: String, chapter: String, image: String) {
+        writableDatabase.execSQL(
+            "INSERT OR REPLACE INTO chapter_image(folder,slug,chapter,image) VALUES(?,?,?,?)",
+            arrayOf(folder, slug, chapter, image),
+        )
+    }
+
+    fun chapterImage(folder: String, slug: String, chapter: String): String? {
+        readableDatabase.query(
+            "chapter_image", arrayOf("image"),
+            "folder=? AND slug=? AND chapter=? AND image<>''",
+            arrayOf(folder, slug, chapter),
+            null, null, null,
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return c.getString(0)?.takeIf { it.isNotEmpty() }
+        }
+    }
+
+    fun clearImageReqs(folder: String, slug: String, chapter: String) {
+        writableDatabase.delete(
+            "chapter_image_req",
+            "folder=? AND slug=? AND chapter=?",
+            arrayOf(folder, slug, chapter),
+        )
+    }
+
+    fun clearChapterImage(folder: String, slug: String, chapter: String) {
+        writableDatabase.delete(
+            "chapter_image",
+            "folder=? AND slug=? AND chapter=?",
+            arrayOf(folder, slug, chapter),
+        )
     }
 
     fun setAuthor(folder: String, slug: String, author: String) {
@@ -1107,6 +1220,8 @@ class DownloadStore(context: Context) :
 
     fun clear(folder: String, slug: String) {
         writableDatabase.delete("chapters", "folder=? AND slug=?", arrayOf(folder, slug))
+        writableDatabase.delete("chapter_image_req", "folder=? AND slug=?", arrayOf(folder, slug))
+        writableDatabase.delete("chapter_image", "folder=? AND slug=?", arrayOf(folder, slug))
         clearChapterList(folder, slug)
     }
 }

@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Keep Slack image threads in the database until the picture arrives
 	Look for an existing Slack image before posting a chapter again
 1.37.9	Show the Slack chapter image under the heading
 1.37.9	Ask Slack for the file name when a thread reply only has an id
