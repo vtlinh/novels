@@ -6,6 +6,7 @@ import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -29,6 +30,9 @@ object ChapterImages {
     const val AUTO_FROM_DEFAULT = 1
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val autoLock = Any()
+    /* Polls must outlive the chapter list: opening the reader finishes
+       that screen and would cancel a lifecycle-scoped wait. */
+    private val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun postedKey(slug: String, chapter: String) = "imgPosted:$slug:$chapter"
 
@@ -108,7 +112,7 @@ object ChapterImages {
         val every = autoEvery(ctx, slug)
         val from = autoFrom(ctx, slug)
         val app = ctx.applicationContext
-        scope.launch(Dispatchers.IO) {
+        work.launch {
             for (chapter in chapters) {
                 val n = Scenes.chapterNumber(chapter) ?: continue
                 if (!due(n, from, every)) continue
@@ -334,6 +338,28 @@ object ChapterImages {
     fun hasLocalImage(ctx: Context, folder: String, dirName: String, chapter: String): Boolean {
         val dir = scenesDir(ctx, folder, dirName, create = false) ?: return false
         return dir.findFile(Scenes.imageName(chapter)) != null
+    }
+
+    fun chapterUri(ctx: Context, folder: String, dirName: String, chapter: String): Uri? {
+        val dir = scenesDir(ctx, folder, dirName, create = false) ?: return null
+        return dir.findFile(Scenes.imageName(chapter))?.uri
+    }
+
+    fun thumb(ctx: Context, uri: Uri, edgePx: Int): android.graphics.Bitmap? {
+        return try {
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, opts)
+            }
+            val w = opts.outWidth
+            val h = opts.outHeight
+            if (w <= 0 || h <= 0) return null
+            val sample = maxOf(1, minOf(w, h) / edgePx.coerceAtLeast(1))
+            val dec = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            ctx.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, dec)
+            }
+        } catch (e: Exception) { null }
     }
 
     private fun savePng(
