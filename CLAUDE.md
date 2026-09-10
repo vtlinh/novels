@@ -58,6 +58,14 @@
   (committed, personal-app trade-off) signs every build so updates install
   over existing installs.
 
+## In-app explanations
+
+Explanations shown to the user — help dialogs, help icons, and status
+lines they are meant to read — must stay simple. Say what happens for
+the reader in everyday words. No implementation details, no
+API / Slack / selector / cadence jargon, and no formulas (Y+X, Y+2X).
+Name money or a setting only when the reader needs it to act.
+
 ## Adding a supported site
 
 - **Capture the pages BEFORE writing the adapter.** Always, and in that order.

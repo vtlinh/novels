@@ -81,7 +81,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="18dp"
-                android:text="A personal novel reader and downloader. Fetches chapters straight from the source sites, optionally translates them to English with Claude, and reads them aloud with text-to-speech — all offline once downloaded."
+                android:text="A personal novel reader and downloader. It downloads chapters from the websites, can translate them to English, and can read them aloud — all offline once downloaded."
                 android:textSize="15sp"
                 android:lineSpacingMultiplier="1.3"
                 android:textColor="@color/fg" />

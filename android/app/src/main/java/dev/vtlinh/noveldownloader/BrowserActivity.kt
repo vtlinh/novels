@@ -459,7 +459,7 @@ class BrowserActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Anthropic API key")
-            .setMessage("Translating runs the chapters through Claude, which needs your own API key.")
+            .setMessage("Translation needs your Anthropic API key. It costs money, charged to your Anthropic account.")
             .setView(view)
             .setPositiveButton("Save") { _, _ ->
                 val k = input.text.toString().trim()
