@@ -29,6 +29,8 @@ class ScenesTest {
         val abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         assertEquals(abc, Scenes.contentHash("abc"))
         assertEquals("$abc.txt", Scenes.slackFileName("abc"))
+        assertEquals("$abc.png", Scenes.slackImageName(abc))
+        assertEquals("Chapter 12.png", Scenes.imageName("Chapter 12.txt"))
         assertEquals(Scenes.contentHash("abc"), Scenes.contentHash("abc"))
         assertTrue(Scenes.contentHash("abc") != Scenes.contentHash("abc\n"))
         assertEquals(64, Scenes.contentHash("any chapter text").length)
