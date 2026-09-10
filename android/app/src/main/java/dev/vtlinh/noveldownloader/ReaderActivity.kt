@@ -2279,7 +2279,6 @@ class ReaderActivity : AppCompatActivity() {
             android.content.Intent(this, ChapterSceneActivity::class.java)
                 .putExtra("dir", intent.getStringExtra("dir"))
                 .putExtra("slug", intent.getStringExtra("slug"))
-                .putExtra("title", intent.getStringExtra("title"))
                 .putExtra("chapter", chapter),
         )
     }
@@ -2352,7 +2351,7 @@ class ReaderActivity : AppCompatActivity() {
             cardTitle(scene, "Chapter scene")
             scene.addView(
                 TextView(ctx).apply {
-                    text = "Summarize this chapter"
+                    text = "Post chapter to Slack"
                     textSize = 15f; setTextColor(getColor(R.color.accent))
                     setTypeface(null, android.graphics.Typeface.BOLD)
                     setPadding(0, dp(12), 0, dp(6))
@@ -2363,7 +2362,7 @@ class ReaderActivity : AppCompatActivity() {
                     }
                 },
             )
-            hint(scene, "A short summary, character descriptions, and setting. An image is generated only if you ask.")
+            hint(scene, "Uploads this chapter as {sha256}.txt so a Slack watcher can read it.")
         }
 
         /* ── Display: language + font ── */

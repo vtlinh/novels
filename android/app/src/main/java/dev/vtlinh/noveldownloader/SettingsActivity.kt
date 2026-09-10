@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /* App settings: the Storage card (download folder, library size, and
-   "Compress my novels"), the Anthropic, Cursor, and Slack keys, library auto
+   "Compress my novels"), the Anthropic API key and Slack bot token, library auto
    status-check interval, and reading options. Toggling compression starts
    a background pass that converts every novel to match; new downloads
    follow the same flag. The keys are saved on focus loss and when leaving.
@@ -67,18 +67,6 @@ class SettingsActivity : AppCompatActivity() {
             try {
                 startActivity(
                     Intent(Intent.ACTION_VIEW, Uri.parse("https://console.anthropic.com/settings/keys")),
-                )
-            } catch (e: Exception) {}
-        }
-        val cursorKey = findViewById<EditText>(R.id.cursorApiKeyInput)
-        cursorKey.setText(prefs.getString("cursorApiKey", ""))
-        cursorKey.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) saveKeys()
-        }
-        findViewById<TextView>(R.id.cursorApiKeyLink).setOnClickListener {
-            try {
-                startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse("https://cursor.com/dashboard/api")),
                 )
             } catch (e: Exception) {}
         }
@@ -162,10 +150,6 @@ class SettingsActivity : AppCompatActivity() {
             "Lets the app translate chapters into English. Translation costs money, charged to your Anthropic account.",
         )
         bindHelp(
-            R.id.cursorApiKeyHelp, "Cursor API key",
-            "Lets the app summarize a chapter and, when you ask, generate an image of it. Uses your Cursor plan's included usage first, then on-demand if that pool is empty.",
-        )
-        bindHelp(
             R.id.slackHelp, "Slack",
             "Posts the unzipped chapter as {sha256}.txt. The hash is SHA-256 of those UTF-8 bytes only — no title, slug, or prefix.\n\n" +
                 "1. Create an app at api.slack.com/apps\n" +
@@ -197,7 +181,6 @@ class SettingsActivity : AppCompatActivity() {
     private fun saveKeys() {
         prefs.edit()
             .putString("apiKey", findViewById<EditText>(R.id.apiKeyInput).text.toString().trim())
-            .putString("cursorApiKey", findViewById<EditText>(R.id.cursorApiKeyInput).text.toString().trim())
             .putString("slackBotToken", findViewById<EditText>(R.id.slackTokenInput).text.toString().trim())
             .putString("slackChannelId", findViewById<EditText>(R.id.slackChannelInput).text.toString().trim())
             .apply()
