@@ -768,6 +768,12 @@ class ChapterListActivity : AppCompatActivity() {
                 return@launch
             }
             status.text = if (ordered.size == 1) "1 chapter" else "${ordered.size} chapters"
+            if (!slug.isNullOrEmpty()) {
+                ChapterImages.autoSweep(
+                    this@ChapterListActivity, folder, dirName, slug,
+                    chapters.ordered, lifecycleScope,
+                )
+            }
             val lastRenderedCount = renderedCount
             renderedCount = ordered.size
             /* the chapter currently being read: highlighted and scrolled into
