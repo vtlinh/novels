@@ -23,7 +23,10 @@ import java.io.IOException
    Both calls use the Cursor API key from Settings and spend that
    account's included Ultra usage first. The picture is never started
    by the summary. Results live in scenes/ next to the chapters so a
-   re-open is free. A .work.json lets a killed poll finish on return. */
+   re-open is free. A .work.json lets a killed poll finish on return.
+
+   Slack posts the unzipped chapter as {sha256}.txt — hash of the
+   chapter UTF-8 bytes only — so a watcher can key off the filename. */
 class ChapterSceneActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -49,6 +52,7 @@ class ChapterSceneActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.sceneTitle).text = Scenes.chapterBase(chapter)
         findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
         findViewById<Button>(R.id.summarizeBtn).setOnClickListener { summarize() }
+        findViewById<Button>(R.id.slackBtn).setOnClickListener { postSlack() }
         findViewById<Button>(R.id.imageBtn).setOnClickListener { illustrate() }
     }
 
@@ -62,6 +66,8 @@ class ChapterSceneActivity : AppCompatActivity() {
     }
 
     private fun cursorKey() = (prefs.getString("cursorApiKey", "") ?: "").trim()
+    private fun slackToken() = (prefs.getString("slackBotToken", "") ?: "").trim()
+    private fun slackChannel() = (prefs.getString("slackChannelId", "") ?: "").trim()
 
     private fun load() {
         if (busy) return
@@ -260,9 +266,45 @@ class ChapterSceneActivity : AppCompatActivity() {
         }
     }
 
+    private fun postSlack() {
+        val token = slackToken()
+        val channel = slackChannel()
+        if (token.isEmpty() || channel.isEmpty()) {
+            status("Set the Slack bot token and channel ID in Settings.")
+            return
+        }
+        if (busy) return
+        setBusy(true)
+        status("Posting the unzipped chapter as {hash}.txt…")
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                try {
+                    val text = chapterText()
+                        ?: return@withContext Result.failure<String>(
+                            IOException("Could not read this chapter."),
+                        )
+                    if (text.isEmpty()) {
+                        return@withContext Result.failure<String>(
+                            IOException("This chapter is empty."),
+                        )
+                    }
+                    Result.success(SlackPoster(token, channel).postChapter(text))
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+            setBusy(false)
+            outcome.fold(
+                onSuccess = { status("Posted $it to Slack.") },
+                onFailure = { status(it.message ?: "Could not post to Slack.") },
+            )
+        }
+    }
+
     private fun setBusy(b: Boolean) {
         busy = b
         findViewById<Button>(R.id.summarizeBtn).isEnabled = !b
+        findViewById<Button>(R.id.slackBtn).isEnabled = !b
         findViewById<Button>(R.id.imageBtn).isEnabled = !b && scene != null
     }
 

@@ -3,7 +3,7 @@
   API 31+ equivalent of backup_rules.xml. Both destinations have to be listed
   separately here: cloud-backup covers Google Drive backup, device-transfer
   covers a direct phone-to-phone move. The "app" preferences file is excluded
-  from both because it stores the Anthropic and Cursor API keys in cleartext, plus the
+  from both because it stores the Anthropic, Cursor, and Slack keys in cleartext, plus the
   persisted SAF tree URI, which is meaningless on another device.
 -->
 <data-extraction-rules>
