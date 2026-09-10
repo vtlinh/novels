@@ -14,17 +14,28 @@ import java.io.IOException
 /* One chapter image: post {hash}.txt, remember that chapter so Generate
    image stays off, then poll Slack for {hash}.png in that thread and
    save it under scenes/. Prefs hold the wait list so a kill mid-poll
-   resumes on the next foreground. */
+   resumes on the next foreground. A wait older than an hour is dropped
+   so a missing picture does not retry forever. */
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
+    const val GIVE_UP_MS = 60L * 60L * 1000L
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     fun postedKey(slug: String, chapter: String) = "imgPosted:$slug:$chapter"
 
+    fun expired(startedAt: Long, now: Long = System.currentTimeMillis()) =
+        now - startedAt >= GIVE_UP_MS
+
     fun alreadyRequested(ctx: Context, slug: String, chapter: String): Boolean {
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-        return !prefs.getString(postedKey(slug, chapter), null).isNullOrEmpty()
+        val hash = prefs.getString(postedKey(slug, chapter), null) ?: return false
+        val started = waitStarted(ctx, hash) ?: 0L
+        if (expired(started)) {
+            giveUp(ctx, slug, chapter, hash)
+            return false
+        }
+        return true
     }
 
     fun markRequested(ctx: Context, slug: String, chapter: String, hash: String) {
@@ -66,11 +77,23 @@ object ChapterImages {
                 markRequested(ctx, slug, chapter, hash)
                 rememberWait(ctx, folder, dirName, slug, chapter, hash, threadTs)
             } else {
+                val started = waitStarted(ctx, hash) ?: 0L
+                if (expired(started)) {
+                    giveUp(ctx, slug, chapter, hash)
+                    return Result.failure(IOException("Gave up waiting for the image."))
+                }
                 threadTs = waitThread(ctx, hash)
             }
             if (!inflight.add(hash)) return Result.success(false)
             try {
-                val png = slack.waitForImage(hash, threadTs)
+                val started = waitStarted(ctx, hash) ?: System.currentTimeMillis()
+                val remain = (started + GIVE_UP_MS - System.currentTimeMillis())
+                    .coerceAtMost(SlackPoster.MAX_WAIT_MS)
+                if (remain < SlackPoster.POLL_MS || expired(started)) {
+                    giveUp(ctx, slug, chapter, hash)
+                    return Result.failure(IOException("Gave up waiting for the image."))
+                }
+                val png = slack.waitForImage(hash, threadTs, remain)
                 savePng(ctx, folder, dirName, slug, chapter, png)
                 forgetWait(ctx, hash)
                 Result.success(true)
@@ -78,6 +101,10 @@ object ChapterImages {
                 inflight.remove(hash)
             }
         } catch (e: Exception) {
+            val h = prefs.getString(postedKey(slug, chapter), null)
+            if (h != null && expired(waitStarted(ctx, h) ?: 0L)) {
+                giveUp(ctx, slug, chapter, h)
+            }
             Result.failure(e)
         }
     }
@@ -120,7 +147,8 @@ object ChapterImages {
                 .put("slug", slug)
                 .put("chapter", chapter)
                 .put("hash", hash)
-                .put("threadTs", threadTs ?: ""),
+                .put("threadTs", threadTs ?: "")
+                .put("startedAt", System.currentTimeMillis()),
         )
         prefs.edit().putString(WAIT_KEY, arr.toString()).apply()
     }
@@ -136,15 +164,29 @@ object ChapterImages {
         prefs.edit().putString(WAIT_KEY, next.toString()).apply()
     }
 
-    private fun waitThread(ctx: Context, hash: String): String? {
+    private fun waitOf(ctx: Context, hash: String): JSONObject? {
         val arr = waiting(ctx)
         for (i in 0 until arr.length()) {
             val w = arr.optJSONObject(i) ?: continue
-            if (w.optString("hash") == hash) {
-                return w.optString("threadTs").takeIf { it.isNotEmpty() }
-            }
+            if (w.optString("hash") == hash) return w
         }
         return null
+    }
+
+    private fun waitThread(ctx: Context, hash: String): String? =
+        waitOf(ctx, hash)?.optString("threadTs")?.takeIf { it.isNotEmpty() }
+
+    private fun waitStarted(ctx: Context, hash: String): Long? {
+        val w = waitOf(ctx, hash) ?: return null
+        val at = w.optLong("startedAt", 0L)
+        return if (at > 0L) at else 0L
+    }
+
+    private fun giveUp(ctx: Context, slug: String, chapter: String, hash: String) {
+        forgetWait(ctx, hash)
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
+            .remove(postedKey(slug, chapter))
+            .apply()
     }
 
     private fun waiting(ctx: Context): JSONArray {
