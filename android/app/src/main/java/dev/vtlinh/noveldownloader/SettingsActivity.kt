@@ -151,9 +151,9 @@ class SettingsActivity : AppCompatActivity() {
         )
         bindHelp(
             R.id.slackHelp, "Slack",
-            "Posts the unzipped chapter as {sha256}.txt. The hash is SHA-256 of those UTF-8 bytes only — no title, slug, or prefix.\n\n" +
+            "Generate image posts this chapter to Slack and saves the picture Slack sends back.\n\n" +
                 "1. Create an app at api.slack.com/apps\n" +
-                "2. Bot Token Scopes: files:write and channels:join\n" +
+                "2. Bot Token Scopes: files:write, files:read, channels:join, channels:history\n" +
                 "3. Install the app to your workspace and copy the Bot User OAuth Token (xoxb-…)\n" +
                 "4. Create a public channel and invite the bot\n" +
                 "5. Channel ID is the C… in the channel's Slack link",

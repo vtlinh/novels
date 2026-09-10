@@ -29,6 +29,8 @@ object Scenes {
     }
 
     fun slackFileName(text: String) = contentHash(text) + ".txt"
+    fun slackImageName(hash: String) = hash + ".png"
+    fun imageName(filename: String) = chapterBase(filename) + ".png"
 
     fun isSceneFile(name: String): Boolean {
         val n = name.removeSuffix(".gz").lowercase()

@@ -67,10 +67,6 @@
             android:name=".NovelSettingsActivity"
             android:exported="false" />
 
-        <activity
-            android:name=".ChapterSceneActivity"
-            android:exported="false" />
-
         <!-- Rotating must NOT recreate the reader: a rebuild runs onDestroy,
              which shuts the TTS engine down and stops the reading service.
              Handling these config changes in-place keeps playback going (the

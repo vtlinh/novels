@@ -26,7 +26,7 @@ import kotlinx.coroutines.withContext
    The ≡ button opens the novel's chapter list. A right-edge swipe still
    opens the in-reader drawer for jumping anywhere. EN/VI switches between
    the English translation and the Vietnamese source; the ⚙ menu also has
-   the language toggle, Font size +/−, and the chapter-scene entry.
+   the language toggle, Font size +/−, and Generate image.
    Language and font persist. */
 class ReaderActivity : AppCompatActivity() {
 
@@ -2273,14 +2273,52 @@ class ReaderActivity : AppCompatActivity() {
         return ch.ordered.getOrNull(firstIdx) ?: ch.ordered.firstOrNull()
     }
 
-    private fun openChapterScene() {
-        val chapter = currentChapterFile() ?: return
-        startActivity(
-            android.content.Intent(this, ChapterSceneActivity::class.java)
-                .putExtra("dir", intent.getStringExtra("dir"))
-                .putExtra("slug", intent.getStringExtra("slug"))
-                .putExtra("chapter", chapter),
-        )
+    private fun setGenerateEnabled(gen: TextView, on: Boolean) {
+        gen.isClickable = on
+        gen.isEnabled = on
+        gen.setTextColor(getColor(if (on) R.color.accent else R.color.muted))
+    }
+
+    private fun requestChapterImage(gen: TextView) {
+        val folder = prefs.getString("tree", null)
+        val dir = intent.getStringExtra("dir")
+        val slug = intent.getStringExtra("slug")
+        val chapter = currentChapterFile()
+        if (folder.isNullOrEmpty() || dir.isNullOrEmpty() || slug.isNullOrEmpty() || chapter == null) {
+            android.widget.Toast.makeText(this, "Could not read this chapter.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val token = (prefs.getString("slackBotToken", "") ?: "").trim()
+        val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
+        if (token.isEmpty() || channel.isEmpty()) {
+            android.widget.Toast.makeText(this, "Set Slack in Settings.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        setGenerateEnabled(gen, false)
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                ChapterImages.request(this@ReaderActivity, folder, dir, slug, chapter)
+            }
+            outcome.fold(
+                onSuccess = { saved ->
+                    android.widget.Toast.makeText(
+                        this@ReaderActivity,
+                        if (saved) "Image saved." else "Waiting for the image…",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
+                onFailure = {
+                    if (!ChapterImages.alreadyRequested(this@ReaderActivity, slug, chapter)) {
+                        setGenerateEnabled(gen, true)
+                    }
+                    android.widget.Toast.makeText(
+                        this@ReaderActivity,
+                        it.message ?: "Could not generate an image.",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            )
+        }
     }
 
     /* ---- full-page reader settings (styled like the main app Settings) ---- */
@@ -2347,22 +2385,23 @@ class ReaderActivity : AppCompatActivity() {
         )
 
         if (!asDocument()) {
-            val scene = card()
-            cardTitle(scene, "Chapter scene")
-            scene.addView(
-                TextView(ctx).apply {
-                    text = "Post chapter to Slack"
-                    textSize = 15f; setTextColor(getColor(R.color.accent))
-                    setTypeface(null, android.graphics.Typeface.BOLD)
-                    setPadding(0, dp(12), 0, dp(6))
-                    isClickable = true; isFocusable = true
-                    setOnClickListener {
-                        dialog.dismiss()
-                        openChapterScene()
-                    }
-                },
-            )
-            hint(scene, "Uploads this chapter as {sha256}.txt so a Slack watcher can read it.")
+            val slug = intent.getStringExtra("slug")
+            val chapter = currentChapterFile()
+            val img = card()
+            val gen = TextView(ctx).apply {
+                text = "Generate image"
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(0, 0, 0, dp(2))
+                isFocusable = true
+            }
+            img.addView(gen)
+            val locked = slug != null && chapter != null &&
+                ChapterImages.alreadyRequested(this, slug, chapter)
+            setGenerateEnabled(gen, !locked)
+            if (!locked) {
+                gen.setOnClickListener { requestChapterImage(gen) }
+            }
         }
 
         /* ── Display: language + font ── */
