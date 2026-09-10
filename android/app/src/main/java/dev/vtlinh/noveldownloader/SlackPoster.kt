@@ -135,13 +135,25 @@ class SlackPoster(
         }
 
         /* Copy a Block Kit alt_text onto a file stub that has none. */
+        fun blockAltToCopy(
+            existingAltTxt: String,
+            existingAltText: String,
+            blockAlt: String,
+        ): String {
+            val t = blockAlt.trim()
+            if (t.isEmpty()) return ""
+            if (existingAltTxt.isNotEmpty() || existingAltText.isNotEmpty()) return ""
+            return t
+        }
+
         fun withBlockAlt(file: JSONObject, altText: String): JSONObject {
-            val t = altText.trim()
-            if (t.isEmpty()) return file
-            if (file.optString("alt_txt").isNotEmpty() ||
-                file.optString("alt_text").isNotEmpty()
-            ) return file
-            return file.put("alt_text", t)
+            val copied = blockAltToCopy(
+                file.optString("alt_txt"),
+                file.optString("alt_text"),
+                altText,
+            )
+            if (copied.isEmpty()) return file
+            return file.put("alt_text", copied)
         }
 
         private fun addMessageFiles(arr: JSONArray?, out: MutableList<JSONObject>) {
@@ -195,8 +207,16 @@ class SlackPoster(
             return ""
         }
 
+        fun fileAlt(
+            altTxt: String,
+            altText: String,
+            title: String,
+            name: String,
+        ): String = fileAlt(altTxt.ifEmpty { altText }, title, name)
+
         fun fileAlt(file: JSONObject): String = fileAlt(
-            file.optString("alt_txt").ifEmpty { file.optString("alt_text") },
+            file.optString("alt_txt"),
+            file.optString("alt_text"),
             file.optString("title"),
             file.optString("name"),
         )
@@ -205,12 +225,18 @@ class SlackPoster(
            omit alt_txt. Image description is on files.info. Skip a
            second look when the object already carried alt_txt /
            alt_text — even a filename placeholder. */
-        fun needsFileInfo(file: JSONObject): Boolean {
-            if (file.optString("id").isEmpty()) return false
-            if (fileAlt(file).isNotEmpty()) return false
-            if (file.has("alt_txt") || file.has("alt_text")) return false
+        fun needsFileInfo(id: String, alt: String, hasAltField: Boolean): Boolean {
+            if (id.isEmpty()) return false
+            if (alt.isNotEmpty()) return false
+            if (hasAltField) return false
             return true
         }
+
+        fun needsFileInfo(file: JSONObject): Boolean = needsFileInfo(
+            file.optString("id"),
+            fileAlt(file),
+            file.has("alt_txt") || file.has("alt_text"),
+        )
 
         fun describe(code: String): String = when (code) {
             "invalid_auth", "not_authed", "token_revoked", "account_inactive" ->
