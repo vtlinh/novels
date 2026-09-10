@@ -201,16 +201,10 @@ class NovelSettingsActivity : AppCompatActivity() {
         autoCheck.isChecked = ChapterImages.autoEnabled(this, slug)
         everyInput.setText(ChapterImages.autoEvery(this, slug).toString())
         fromInput.setText(ChapterImages.autoFrom(this, slug).toString())
-        fun syncAutoFields() {
-            val on = autoCheck.isChecked
-            everyInput.isEnabled = on
-            fromInput.isEnabled = on
-            everyInput.alpha = if (on) 1f else 0.5f
-            fromInput.alpha = if (on) 1f else 0.5f
-        }
+        /* Every / from stay editable while the box is off so the cadence
+           can be set before anything is posted. */
         autoCheck.setOnCheckedChangeListener { _, checked ->
             saveAutoImage()
-            syncAutoFields()
             if (checked) {
                 val token = (prefs.getString("slackBotToken", "") ?: "").trim()
                 val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
@@ -225,7 +219,6 @@ class NovelSettingsActivity : AppCompatActivity() {
         fromInput.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) saveAutoImage()
         }
-        syncAutoFields()
     }
 
     private fun saveAutoImage() {
