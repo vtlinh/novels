@@ -152,7 +152,8 @@ class SettingsActivity : AppCompatActivity() {
         )
         bindHelp(
             R.id.slackHelp, "Slack",
-            "Generate image posts this chapter to Slack and saves the picture Slack sends back.\n\n" +
+            "Generate image posts this chapter to Slack and saves the picture Slack sends back. " +
+                "Poll image looks for that picture without posting again.\n\n" +
                 "1. Create an app at api.slack.com/apps\n" +
                 "2. Bot Token Scopes: files:write, files:read, channels:join, channels:history\n" +
                 "3. Install the app to your workspace and copy the Bot User OAuth Token (xoxb-…)\n" +
