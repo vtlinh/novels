@@ -685,6 +685,12 @@ object ChapterImages {
     fun sortSaved(items: List<Saved>): List<Saved> =
         items.sortedWith(compareBy<Saved> { it.number }.thenBy { it.chapter })
 
+    /* What tapping a synopsis-grid picture does. Expand — never
+       open the chapter. */
+    enum class SynopsisTap { EXPAND, OPEN_CHAPTER }
+
+    fun synopsisTap(): SynopsisTap = SynopsisTap.EXPAND
+
     fun linkedImage(ctx: Context, folder: String, slug: String, chapter: String): String? {
         if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
         return try { DownloadStore(ctx).chapterImage(folder, slug, chapter) } catch (e: Exception) { null }
