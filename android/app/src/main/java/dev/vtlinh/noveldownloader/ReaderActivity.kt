@@ -3017,7 +3017,8 @@ class ReaderActivity : AppCompatActivity() {
         if (asDocument()) return raw
         val folder = prefs.getString("tree", null) ?: return raw
         val dir = intent.getStringExtra("dir") ?: return raw
-        val uri = ChapterImages.chapterUri(this, folder, dir, chapter) ?: return raw
+        val slug = intent.getStringExtra("slug") ?: ""
+        val uri = ChapterImages.chapterUri(this, folder, dir, chapter, slug) ?: return raw
         val maxW = (text.width - text.paddingLeft - text.paddingRight)
             .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }
         val bmp = ChapterImages.thumb(this, uri, maxW) ?: return raw
