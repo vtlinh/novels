@@ -110,4 +110,14 @@ class ChapterImagesTest {
             ChapterImages.imageDocId("primary:Novels", "The Novel", ""),
         )
     }
+
+    @Test
+    fun `Generate image looks up the chapter png by id not by listing scenes`() {
+        assertEquals(
+            "primary:Novels/The Novel/scenes/Chapter 12.png",
+            ChapterImages.imageDocId(
+                "primary:Novels", "The Novel", Scenes.imageName("Chapter 12.txt"),
+            ),
+        )
+    }
 }

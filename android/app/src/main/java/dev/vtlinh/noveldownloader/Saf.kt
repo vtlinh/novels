@@ -48,6 +48,17 @@ object Saf {
 
     fun rootId(treeUri: Uri): String = DocumentsContract.getTreeDocumentId(treeUri)
 
+    /* One document, by id — not a children listing of its parent. */
+    fun exists(cr: ContentResolver, treeUri: Uri, docId: String): Boolean = try {
+        cr.query(
+            DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+            null, null, null,
+        )?.use { c -> c.moveToFirst() } ?: false
+    } catch (e: Exception) {
+        false
+    }
+
     /* One document's last-modified time, as a single-row query.
 
        For a DIRECTORY this moves whenever a child is added or removed, which
