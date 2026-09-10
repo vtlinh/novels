@@ -121,20 +121,11 @@ class NovelListActivity : AppCompatActivity() {
         /* navigation drawer */
         Nav.bindDrawer(this, Nav.Screen.LIBRARY)
 
-        ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
-
         /* share target (and trampoline from the old Home activity name) */
         if (savedInstanceState == null) handleIncomingShare(intent)
 
-        /* inline download feedback: live status while a download runs, and a
-           re-render when it finishes so the chapter counts refresh */
-        lifecycleScope.launch {
-            DownloadService.statusFlow.collectLatest { s ->
-                if (DownloadService.runningFlow.value && s.isNotEmpty()) {
-                    findViewById<TextView>(R.id.statusText).text = s
-                }
-            }
-        }
+        /* Re-render when a download finishes so the chapter counts refresh.
+           Live lines go to Logs, not the status strip. */
         var seenRunning = false
         lifecycleScope.launch {
             DownloadService.runningFlow.collectLatest { r ->
@@ -261,7 +252,7 @@ class NovelListActivity : AppCompatActivity() {
     }
 
     /* Share / deep-link download: same gates as the browser (folder, garbage,
-       API key). Stays on Library so the console footer shows progress. */
+       API key). Stays on Library; progress is in Logs. */
     private fun startShareDownload(typed: String) {
         val site = Sites.forUrl(typed)
         if (site == null) {
@@ -1089,8 +1080,9 @@ class NovelListActivity : AppCompatActivity() {
                 .putExtra("translate", prefs.getBoolean("translate", false))
                 .putExtra("apiKey", prefs.getString("apiKey", "") ?: ""),
         )
-        findViewById<TextView>(R.id.statusText).text =
-            if (wasRunning) "Queued for download." else "Download started…"
+        val msg = if (wasRunning) "Queued for download." else "Download started…"
+        findViewById<TextView>(R.id.statusText).text = msg
+        DownloadService.appendLog(msg)
     }
 
     /* Ask each site for its chapter count, finished flag, and author. A row
@@ -1104,8 +1096,7 @@ class NovelListActivity : AppCompatActivity() {
         btn.isEnabled = false
         /* Check status discarded everything the engine had to say. Its notes
            — which listed links carry no chapter number, and so can never be
-           downloaded — go to the same log the console footer prints, otherwise
-           the only way to see them is to run a full download. */
+           downloaded — go to Logs. */
         val engine = DownloadEngine(
             this,
             { line -> DownloadService.appendLog(line) },
@@ -1151,12 +1142,12 @@ class NovelListActivity : AppCompatActivity() {
                 btn.isEnabled = true
                 return@launch
             }
+            status.text = "Checking…"
+            DownloadService.appendLog("Checking ${targets.size} novel(s).")
             val result = NovelCheck.sweep(
                 this@NovelListActivity, engine, store, folder, targets,
             ) { n, total ->
-                withContext(Dispatchers.Main) {
-                    status.text = "Checking… $n/$total"
-                }
+                DownloadService.appendLog("Checking… $n/$total")
             }
             /* A manual sweep counts as "checked recently" for the automatic
                interval — otherwise opening the app tomorrow would re-hit every
@@ -1165,7 +1156,7 @@ class NovelListActivity : AppCompatActivity() {
             btn.isEnabled = true
             /* through render, not before it — render overwrites the status
                twice in the same turn, so a message set here was never seen */
-            render(
+            val summary =
                 "Status checked (${result.asked} novel(s))." + when {
                     result.fetchUrls.isEmpty() -> ""
                     result.started == result.fetchUrls.size ->
@@ -1175,8 +1166,9 @@ class NovelListActivity : AppCompatActivity() {
                     else ->
                         " ${result.started} of ${result.fetchUrls.size} downloads started" +
                             " — the rest were refused; open the app and check again."
-                },
-            )
+                }
+            DownloadService.appendLog(summary)
+            render(summary)
         }
     }
 

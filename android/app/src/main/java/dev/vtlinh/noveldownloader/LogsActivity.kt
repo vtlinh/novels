@@ -13,9 +13,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-/* The same lines the console footer shows — downloads, status checks,
-   and Slack image lookups — on their own screen so they stay readable
-   after the footer is dismissed. */
+/* Download, status-check, and Slack image lines. The library no longer
+   prints them inline — open this screen from the drawer. */
 class LogsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {

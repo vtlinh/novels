@@ -155,8 +155,6 @@ class BrowserActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_browser)
 
-        ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
-
         val web = findViewById<WebView>(R.id.webview)
         val urlEdit = findViewById<EditText>(R.id.browseUrl)
         val downloadBtn = findViewById<Button>(R.id.browseDownload)
