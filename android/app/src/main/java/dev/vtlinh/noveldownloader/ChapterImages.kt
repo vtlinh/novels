@@ -6,7 +6,6 @@ import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -19,10 +18,12 @@ import java.io.IOException
    chapter→image row is how the reader knows to draw a picture. Request
    threads stay until that save — an hour give-up only stops polling.
 
-   Auto-generate (this novel's ⚙): when enabled, opening that novel
+   Auto-generate (this novel's ⚙): when enabled, a foreground service
    posts chapter N ≥ from where (N − from) is a multiple of every,
-   at most one chapter every 15 minutes. A chapter already posted
-   is not posted again. */
+   at most one chapter every 15 minutes, including while the app is
+   in the background. Novels are always tried in last-read order —
+   the book opened most recently in the reader goes first. A chapter
+   already posted is not posted again. */
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
@@ -33,10 +34,50 @@ object ChapterImages {
     private const val AUTO_LAST_KEY = "autoImageLastAt"
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val autoLock = Any()
-    private var autoFollow: Job? = null
-    /* Polls must outlive the chapter list: opening the reader finishes
-       that screen and would cancel a lifecycle-scoped wait. */
+    /* Polls and auto posts must outlive the chapter list: opening the
+       reader finishes that screen and would cancel a lifecycle-scoped
+       wait. The service owns the long loop; this scope is only the
+       short adopt-on-open pass. */
     private val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /* One novel the auto pass can post for. lastRead is 0 if the
+       reader has never opened it — those sit after every book that
+       has been read. */
+    data class AutoNovel(
+        val slug: String,
+        val lastRead: Long,
+        val from: Int,
+        val every: Int,
+        val chapters: List<String> = emptyList(),
+    )
+
+    data class AutoPick(val slug: String, val chapter: String)
+
+    /* Newest lastRead first. Never-read (0) falls to the end.
+       Equal times keep a stable slug order. */
+    fun <T> byLastRead(
+        items: List<T>,
+        lastReadOf: (T) -> Long,
+        tieOf: (T) -> String = { "" },
+    ): List<T> =
+        items.sortedWith(compareByDescending(lastReadOf).thenBy(tieOf))
+
+    /* First due chapter across novels already in last-read order.
+       skip is "already has a picture / already posted / already tried". */
+    fun nextAuto(
+        novels: List<AutoNovel>,
+        skip: (slug: String, chapter: String) -> Boolean,
+    ): AutoPick? {
+        for (novel in byLastRead(novels, { it.lastRead }, { it.slug })) {
+            for (chapter in novel.chapters) {
+                val n = Scenes.chapterNumber(chapter) ?: continue
+                if (!due(n, novel.from, novel.every)) continue
+                if (skip(novel.slug, chapter)) continue
+                return AutoPick(novel.slug, chapter)
+            }
+        }
+        return null
+    }
 
     private fun log(msg: String) {
         DownloadService.appendLog("image: $msg")
@@ -109,13 +150,8 @@ object ChapterImages {
             .putBoolean(autoEnabledKey(slug), enabled)
             .putInt(autoEveryKey(slug), every.coerceAtLeast(1))
             .putInt(autoFromKey(slug), from.coerceAtLeast(1))
-            .apply()
-        if (!enabled) {
-            synchronized(autoLock) {
-                autoFollow?.cancel()
-                autoFollow = null
-            }
-        }
+            .commit()
+        if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
     }
 
     private fun slackReady(ctx: Context): Boolean {
@@ -205,9 +241,10 @@ object ChapterImages {
 
     /* Opening a novel (list or reader) asks Slack for pictures that
        are already there, including a description on a png we already
-       saved with a blank caption. Auto-generate then posts the next
-       due chapter that has no local picture. At most one auto post
-       every 15 minutes. */
+       saved with a blank caption. Auto-generate itself runs in
+       ImageService, across every novel that has it on, last-read
+       first — so leaving the app does not stop it, and opening a
+       less-recent book does not jump the queue. */
     fun autoSweep(
         ctx: Context,
         folder: String,
@@ -238,16 +275,126 @@ object ChapterImages {
                 }
                 adoptFromSlack(app, slack, folder, dirName, slug, (dueCh + blankAlt).distinct())
             }
-            if (!autoOn) return@launch
-            val posted = autoTakeOne(app, folder, dirName, slug, chapters, every, from)
-            if (!autoEnabled(app, slug) || !slackReady(app)) return@launch
+            ImageService.startIfNeeded(app)
+        }
+    }
+
+    /* Slack is set and there is either a waiting download or at least
+       one novel with auto-generate on. The service uses this to decide
+       whether to start; the loop itself stops when a pass finds nothing
+       left to post or fetch. */
+    fun hasBackgroundWork(ctx: Context): Boolean {
+        if (!slackReady(ctx)) return false
+        val store = try { DownloadStore(ctx) } catch (e: Exception) { return false }
+        val waiting = try { store.waitingImageReqs() } catch (e: Exception) { emptyList() }
+        if (waiting.isNotEmpty()) return true
+        val folder = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getString("tree", "") ?: ""
+        if (folder.isEmpty()) return false
+        val novels = try { store.novels(folder) } catch (e: Exception) { emptyList() }
+        return novels.any { autoEnabled(ctx, it.slug) }
+    }
+
+    /* Keeps posting and fetching while the service holds the process.
+       One auto post every 15 minutes, always the next due chapter of
+       the most recently read novel that still has one. */
+    suspend fun runBackground(ctx: Context, status: (String) -> Unit = {}) {
+        val app = ctx.applicationContext
+        while (true) {
+            if (!slackReady(app)) return
+            status("Saving chapter pictures")
+            resumeWaitingNow(app)
+            val posted = runAutoPass(app, status)
+            if (!hasBackgroundWork(app)) return
             val wait = when {
                 posted -> AUTO_GAP_MS
                 !autoReady(autoLastAt(app)) -> autoWaitMs(autoLastAt(app))
                 else -> 0L
             }
-            if (wait > 0L) scheduleAutoFollow(wait, app, folder, dirName, slug, chapters)
+            if (wait > 0L) {
+                status("Waiting to make the next picture")
+                delay(wait)
+                continue
+            }
+            return
         }
+    }
+
+    private fun runAutoPass(app: Context, status: (String) -> Unit): Boolean {
+        if (!autoReady(autoLastAt(app))) return false
+        val slack = slackPoster(app)
+        for (novel in loadAutoNovels(app)) {
+            if (!autoEnabled(app, novel.slug) || !slackReady(app)) continue
+            val chapters = loadChapters(app, novel.folder, novel.dirName, novel.slug)
+            if (chapters.isEmpty()) continue
+            slack?.let {
+                val dueCh = chapters.filter { ch ->
+                    val n = Scenes.chapterNumber(ch) ?: return@filter false
+                    due(n, novel.from, novel.every)
+                }
+                val blankAlt = chapters.filter { ch ->
+                    adoptDiskImage(app, novel.folder, novel.dirName, novel.slug, ch) != null &&
+                        needsAltRefresh(true, linkedAlt(app, novel.folder, novel.slug, ch))
+                }
+                adoptFromSlack(
+                    app, it, novel.folder, novel.dirName, novel.slug,
+                    (dueCh + blankAlt).distinct(),
+                )
+            }
+            status("Making a chapter picture")
+            if (autoTakeOne(
+                    app, novel.folder, novel.dirName, novel.slug,
+                    chapters, novel.every, novel.from,
+                )
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private data class AutoTarget(
+        val folder: String,
+        val dirName: String,
+        val slug: String,
+        val lastRead: Long,
+        val from: Int,
+        val every: Int,
+    )
+
+    private fun loadAutoNovels(app: Context): List<AutoTarget> {
+        val folder = app.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getString("tree", "") ?: ""
+        if (folder.isEmpty()) return emptyList()
+        val store = try { DownloadStore(app) } catch (e: Exception) { return emptyList() }
+        val recs = try { store.novels(folder) } catch (e: Exception) { return emptyList() }
+        val out = ArrayList<AutoTarget>()
+        for (rec in recs) {
+            if (!autoEnabled(app, rec.slug)) continue
+            val dir = try {
+                store.dirNameOrGuess(folder, rec.slug, rec.title)
+            } catch (e: Exception) { "" }
+            if (dir.isEmpty()) continue
+            out.add(
+                AutoTarget(folder, dir, rec.slug, rec.lastRead, autoFrom(app, rec.slug), autoEvery(app, rec.slug)),
+            )
+        }
+        return byLastRead(out, { it.lastRead }, { it.slug })
+    }
+
+    private fun loadChapters(
+        app: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+    ): List<String> {
+        val order = try { DownloadStore(app).getChapterOrder(folder, slug) } catch (e: Exception) {
+            emptyMap()
+        }
+        val ch = try {
+            ChapterListActivity.chapterNames(app, Uri.parse(folder), dirName, order, slug)
+        } catch (e: Exception) { null } ?: return emptyList()
+        return ch.ordered
     }
 
     /* True when this sweep started a request. False when the gap is
@@ -289,25 +436,6 @@ object ChapterImages {
             return true
         }
         return false
-    }
-
-    private fun scheduleAutoFollow(
-        waitMs: Long,
-        ctx: Context,
-        folder: String,
-        dirName: String,
-        slug: String,
-        chapters: List<String>,
-    ) {
-        if (waitMs <= 0L) return
-        synchronized(autoLock) {
-            autoFollow?.cancel()
-            autoFollow = work.launch {
-                delay(waitMs)
-                autoSweep(ctx, folder, dirName, slug, chapters, work)
-            }
-        }
-        log("auto next in ${waitMs}ms")
     }
 
     fun alreadyRequested(ctx: Context, dirName: String, slug: String, chapter: String): Boolean {
@@ -483,49 +611,65 @@ object ChapterImages {
     }
 
     fun resumeWaiting(ctx: Context, scope: CoroutineScope) {
+        ImageService.startIfNeeded(ctx)
+    }
+
+    /* Waiting downloads first, novels last-read first, then the next
+       auto post. Called from the service so a backgrounded app still
+       finishes a png that landed after we left. */
+    private fun resumeWaitingNow(ctx: Context) {
         importLegacyWaits(ctx)
         val store = DownloadStore(ctx)
-        val waiting = store.waitingImageReqs()
+        val waiting = try { store.waitingImageReqs() } catch (e: Exception) { emptyList() }
         if (waiting.isEmpty()) return
-        log("resume ${waiting.size} waiting")
         val app = ctx.applicationContext
-        scope.launch(Dispatchers.IO) {
-            slackPoster(app)?.let { slack ->
-                val byNovel = linkedMapOf<String, MutableList<String>>()
-                val loc = mutableMapOf<String, Triple<String, String, String>>()
-                for (w in waiting) {
-                    val found = try { store.imageResumeDir(w.folder, w.slug) } catch (e: Exception) {
-                        null
-                    } ?: continue
-                    val (folder, dir) = found
-                    val key = "${folder}\u0000${w.slug}\u0000${dir}"
-                    loc[key] = Triple(folder, dir, w.slug)
-                    byNovel.getOrPut(key) { mutableListOf() }.add(w.chapter)
-                }
-                for ((key, chapters) in byNovel) {
-                    val (folder, dir, slug) = loc[key] ?: continue
-                    adoptFromSlack(app, slack, folder, dir, slug, chapters)
-                }
-            }
-            val seen = mutableSetOf<String>()
-            for (w in waiting) {
-                val key = "${w.folder}\u0000${w.slug}\u0000${w.chapter}"
-                if (!seen.add(key)) continue
+        val lastRead = HashMap<String, Long>()
+        for (folder in waiting.map { it.folder }.distinct()) {
+            if (folder.isEmpty()) continue
+            val recs = try { store.novels(folder) } catch (e: Exception) { emptyList() }
+            for (rec in recs) lastRead["$folder\u0000${rec.slug}"] = rec.lastRead
+        }
+        val ordered = byLastRead(
+            waiting,
+            { lastRead["${it.folder}\u0000${it.slug}"] ?: 0L },
+            { "${it.slug}\u0000${it.chapter}" },
+        )
+        log("resume ${ordered.size} waiting")
+        slackPoster(app)?.let { slack ->
+            val byNovel = linkedMapOf<String, MutableList<String>>()
+            val loc = mutableMapOf<String, Triple<String, String, String>>()
+            for (w in ordered) {
                 val found = try { store.imageResumeDir(w.folder, w.slug) } catch (e: Exception) {
-                    log("${w.chapter} resume dir fail ${e.message}")
                     null
-                }
-                if (found == null) {
-                    log("${w.chapter} resume skip no folder slug=${w.slug}")
-                    continue
-                }
+                } ?: continue
                 val (folder, dir) = found
-                log("${w.chapter} resume $dir")
-                try {
-                    request(app, folder, dir, w.slug, w.chapter, postIfMissing = false)
-                } catch (e: Exception) {
-                    log("${w.chapter} resume fail ${e.message}")
-                }
+                val key = "${folder}\u0000${w.slug}\u0000${dir}"
+                loc[key] = Triple(folder, dir, w.slug)
+                byNovel.getOrPut(key) { mutableListOf() }.add(w.chapter)
+            }
+            for ((key, chapters) in byNovel) {
+                val (folder, dir, slug) = loc[key] ?: continue
+                adoptFromSlack(app, slack, folder, dir, slug, chapters)
+            }
+        }
+        val seen = mutableSetOf<String>()
+        for (w in ordered) {
+            val key = "${w.folder}\u0000${w.slug}\u0000${w.chapter}"
+            if (!seen.add(key)) continue
+            val found = try { store.imageResumeDir(w.folder, w.slug) } catch (e: Exception) {
+                log("${w.chapter} resume dir fail ${e.message}")
+                null
+            }
+            if (found == null) {
+                log("${w.chapter} resume skip no folder slug=${w.slug}")
+                continue
+            }
+            val (folder, dir) = found
+            log("${w.chapter} resume $dir")
+            try {
+                request(app, folder, dir, w.slug, w.chapter, postIfMissing = false)
+            } catch (e: Exception) {
+                log("${w.chapter} resume fail ${e.message}")
             }
         }
     }

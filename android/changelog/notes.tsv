@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Save image descriptions on chapter pictures
+	Make chapter pictures in the background, last-read novels first
+1.37.27	Save image descriptions on chapter pictures
 1.37.26	Use simpler words in the in-app help
 1.37.25	Show chapter image alt text
 1.37.24	Open synopsis pictures full screen

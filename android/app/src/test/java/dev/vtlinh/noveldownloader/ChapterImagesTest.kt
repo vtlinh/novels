@@ -48,6 +48,95 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `auto-generate prefers the novel read most recently`() {
+        val older = ChapterImages.AutoNovel(
+            slug = "older", lastRead = 10, from = 1, every = 20,
+            chapters = listOf("Chapter 1.txt", "Chapter 21.txt"),
+        )
+        val newer = ChapterImages.AutoNovel(
+            slug = "newer", lastRead = 50, from = 1, every = 20,
+            chapters = listOf("Chapter 1.txt", "Chapter 21.txt"),
+        )
+        val unread = ChapterImages.AutoNovel(
+            slug = "unread", lastRead = 0, from = 1, every = 20,
+            chapters = listOf("Chapter 1.txt"),
+        )
+        assertEquals(
+            listOf("newer", "older", "unread"),
+            ChapterImages.byLastRead(
+                listOf(unread, older, newer),
+                { it.lastRead },
+                { it.slug },
+            ).map { it.slug },
+        )
+        assertEquals(
+            ChapterImages.AutoPick("newer", "Chapter 1.txt"),
+            ChapterImages.nextAuto(listOf(unread, older, newer)) { _, _ -> false },
+        )
+        assertEquals(
+            ChapterImages.AutoPick("older", "Chapter 1.txt"),
+            ChapterImages.nextAuto(listOf(unread, older, newer)) { slug, _ -> slug == "newer" },
+        )
+        assertEquals(
+            ChapterImages.AutoPick("newer", "Chapter 21.txt"),
+            ChapterImages.nextAuto(listOf(older, newer)) { _, chapter ->
+                chapter == "Chapter 1.txt"
+            },
+        )
+    }
+
+    @Test
+    fun `a never-read novel waits behind every novel that has been read`() {
+        val read = ChapterImages.AutoNovel(
+            slug = "read", lastRead = 1, from = 1, every = 1,
+            chapters = listOf("Chapter 5.txt"),
+        )
+        val unread = ChapterImages.AutoNovel(
+            slug = "unread", lastRead = 0, from = 1, every = 1,
+            chapters = listOf("Chapter 1.txt"),
+        )
+        assertEquals(
+            ChapterImages.AutoPick("read", "Chapter 5.txt"),
+            ChapterImages.nextAuto(listOf(unread, read)) { _, _ -> false },
+        )
+    }
+
+    @Test
+    fun `auto-generate picks nothing when every due chapter is already done`() {
+        val novel = ChapterImages.AutoNovel(
+            slug = "done", lastRead = 9, from = 1, every = 20,
+            chapters = listOf("Chapter 1.txt", "Chapter 2.txt", "Chapter 21.txt"),
+        )
+        assertEquals(
+            null,
+            ChapterImages.nextAuto(listOf(novel)) { _, chapter ->
+                chapter == "Chapter 1.txt" || chapter == "Chapter 21.txt"
+            },
+        )
+        assertEquals(
+            null,
+            ChapterImages.nextAuto(
+                listOf(novel.copy(chapters = listOf("Chapter 2.txt", "notes.txt"))),
+            ) { _, _ -> false },
+        )
+    }
+
+    @Test
+    fun `waiting downloads use the same last-read order`() {
+        data class Wait(val slug: String, val chapter: String, val lastRead: Long)
+        val waits = listOf(
+            Wait("old", "Chapter 1.txt", 10),
+            Wait("new", "Chapter 40.txt", 80),
+            Wait("mid", "Chapter 2.txt", 40),
+            Wait("never", "Chapter 3.txt", 0),
+        )
+        assertEquals(
+            listOf("new", "mid", "old", "never"),
+            ChapterImages.byLastRead(waits, { it.lastRead }, { it.slug }).map { it.slug },
+        )
+    }
+
+    @Test
     fun `auto-generate prefs are keyed by novel slug`() {
         assertEquals("autoImage:than-y", ChapterImages.autoEnabledKey("than-y"))
         assertEquals("autoImageEvery:than-y", ChapterImages.autoEveryKey("than-y"))
