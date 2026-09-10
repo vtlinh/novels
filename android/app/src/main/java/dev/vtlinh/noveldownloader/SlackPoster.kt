@@ -22,6 +22,12 @@ class SlackPoster(
 
     data class Post(val hash: String, val threadTs: String?)
     data class Existing(val png: ByteArray?, val threads: List<String>)
+    data class NamedFile(val name: String, val title: String = "")
+    data class HistoryMsg(
+        val ts: String,
+        val threadTs: String = "",
+        val files: List<NamedFile>,
+    )
 
     companion object {
         private const val API = "https://slack.com/api"
@@ -39,6 +45,56 @@ class SlackPoster(
            find every copy of that file and walk each thread. */
         fun fileMatchesTxt(hash: String, name: String, title: String) =
             fileMatchesExt(hash, "txt", name, title)
+
+        /* Channel history is the source of truth for "did we already
+           post this hash". files.list missed Chapter 374's first
+           {hash}.txt and the app posted the same bytes again. The
+           message ts is the thread — do not wait on shares. */
+        fun historyTxtThreads(messages: Iterable<HistoryMsg>, hash: String): List<String> {
+            val seen = linkedSetOf<String>()
+            for (m in messages) {
+                if (m.files.none { fileMatchesTxt(hash, it.name, it.title) }) continue
+                val ts = m.threadTs.ifEmpty { m.ts }
+                if (ts.isNotEmpty()) seen.add(ts)
+            }
+            return seen.toList()
+        }
+
+        fun historyMsgOf(m: JSONObject): HistoryMsg {
+            val files = mutableListOf<JSONObject>()
+            collectMessageFiles(m, files)
+            return HistoryMsg(
+                ts = m.optString("ts"),
+                threadTs = m.optString("thread_ts"),
+                files = files.map { NamedFile(it.optString("name"), it.optString("title")) },
+            )
+        }
+
+        fun collectMessageFiles(m: JSONObject, out: MutableList<JSONObject>) {
+            addMessageFiles(m.optJSONArray("files"), out)
+            m.optJSONObject("file")?.let { out.add(it) }
+            val blocks = m.optJSONArray("blocks")
+            if (blocks != null) {
+                for (i in 0 until blocks.length()) {
+                    val b = blocks.optJSONObject(i) ?: continue
+                    b.optJSONObject("file")?.let { out.add(it) }
+                    b.optJSONObject("slack_file")?.let { out.add(it) }
+                    val id = b.optString("file_id")
+                    if (id.isNotEmpty()) out.add(JSONObject().put("id", id))
+                }
+            }
+            val atts = m.optJSONArray("attachments") ?: return
+            for (i in 0 until atts.length()) {
+                val a = atts.optJSONObject(i) ?: continue
+                addMessageFiles(a.optJSONArray("files"), out)
+                a.optJSONObject("file")?.let { out.add(it) }
+            }
+        }
+
+        private fun addMessageFiles(arr: JSONArray?, out: MutableList<JSONObject>) {
+            if (arr == null) return
+            for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { out.add(it) }
+        }
 
         fun fileMatchesExt(
             hash: String,
@@ -60,7 +116,8 @@ class SlackPoster(
             "not_in_channel" ->
                 "Invite the bot to that public channel, or add the channels:join scope."
             "missing_scope" ->
-                "The Slack app needs files:write, files:read, channels:join, and channels:history."
+                "The Slack app needs files:write, files:read, channels:join, " +
+                    "and channels:history or groups:history."
             "file_uploads_disabled" ->
                 "This Slack workspace has file uploads turned off."
             else -> "Slack error: $code"
@@ -153,56 +210,38 @@ class SlackPoster(
         return null
     }
 
-    /* Stored request threads first, then every {hash}.txt Slack still
-       lists. Used on a retry tap and on the hour-end last look.
-       Threads are returned even when the png cannot be downloaded, so
-       a miss does not post a second {hash}.txt. */
+    /* Stored request threads, then every {hash}.txt in channel
+       history, then files.list. History first — files.list missed
+       Chapter 374's first upload of the same hash. Threads are
+       returned even when the png cannot be downloaded, so a miss
+       does not post a second {hash}.txt. */
     fun findExistingImage(hash: String, knownThreads: Collection<String> = emptyList()): ByteArray? =
         findExisting(hash, knownThreads).png
 
     fun findExisting(hash: String, knownThreads: Collection<String> = emptyList()): Existing {
         val seen = linkedSetOf<String>()
         for (ts in knownThreads) if (ts.isNotEmpty()) seen.add(ts)
-        var png: ByteArray? = null
-        for (ts in seen) {
-            try {
-                val got = pickImage(hash, replies(ts))
-                if (got != null) {
-                    png = got
-                    break
-                }
-            } catch (e: ApiException) {
-                if (e.code != "missing_scope" && e.code != "thread_not_found" &&
-                    e.code != "message_not_found"
-                ) {
-                    throw e
-                }
-            }
+        for (ts in historyTxtThreads(channelHistory().map { historyMsgOf(it) }, hash)) {
+            seen.add(ts)
         }
-        if (png == null) {
-            try {
-                for (stub in listedFilesAll()) {
-                    val file = hydrate(stub)
-                    val name = file.optString("name")
-                    val title = file.optString("title")
-                    if (fileMatchesHash(hash, name, title)) {
-                        val got = download(file)
-                        if (got != null) {
-                            png = got
-                            break
-                        }
-                    }
-                    if (fileMatchesTxt(hash, name, title)) {
-                        threadTsOf(file)?.let { seen.add(it) }
-                    }
+        var png: ByteArray? = null
+        try {
+            for (stub in listedFilesAll()) {
+                val file = hydrate(stub)
+                val name = file.optString("name")
+                val title = file.optString("title")
+                if (fileMatchesHash(hash, name, title) && png == null) {
+                    png = download(file)
                 }
-            } catch (e: ApiException) {
-                if (e.code != "missing_scope") throw e
+                if (fileMatchesTxt(hash, name, title)) {
+                    threadTsOf(file)?.let { seen.add(it) }
+                }
             }
+        } catch (e: ApiException) {
+            if (e.code != "missing_scope") throw e
         }
         if (png == null) {
             for (ts in seen) {
-                if (knownThreads.contains(ts)) continue
                 try {
                     val got = pickImage(hash, replies(ts))
                     if (got != null) {
@@ -270,7 +309,7 @@ class SlackPoster(
         val msgs = json.optJSONArray("messages") ?: return out
         for (i in 0 until msgs.length()) {
             val m = msgs.optJSONObject(i) ?: continue
-            collectFiles(m, out)
+            collectMessageFiles(m, out)
         }
         return out
     }
@@ -320,27 +359,38 @@ class SlackPoster(
         return shareTs(fileInfo(id))
     }
 
-    /* Thread replies list `files`, sometimes a singular `file`, and
-       Block Kit `file` / `file_id` blocks that carry only an id. */
-    private fun collectFiles(m: JSONObject, out: MutableList<JSONObject>) {
-        addFiles(m.optJSONArray("files"), out)
-        m.optJSONObject("file")?.let { out.add(it) }
-        val blocks = m.optJSONArray("blocks")
-        if (blocks != null) {
-            for (i in 0 until blocks.length()) {
-                val b = blocks.optJSONObject(i) ?: continue
-                b.optJSONObject("file")?.let { out.add(it) }
-                b.optJSONObject("slack_file")?.let { out.add(it) }
-                val id = b.optString("file_id")
-                if (id.isNotEmpty()) out.add(JSONObject().put("id", id))
+    /* Top-level channel messages. The png lives in the txt thread,
+       so history is only used to find {hash}.txt and its ts. */
+    private fun channelHistory(): List<JSONObject> {
+        val out = mutableListOf<JSONObject>()
+        try {
+            var cursor = ""
+            var pages = 0
+            while (pages < 10) {
+                pages++
+                val body = FormBody.Builder()
+                    .add("channel", channelId)
+                    .add("limit", "200")
+                if (cursor.isNotEmpty()) body.add("cursor", cursor)
+                val json = apiForm("conversations.history", body.build())
+                val msgs = json.optJSONArray("messages") ?: JSONArray()
+                for (i in 0 until msgs.length()) {
+                    msgs.optJSONObject(i)?.let { out.add(it) }
+                }
+                val next = json.optJSONObject("response_metadata")
+                    ?.optString("next_cursor").orEmpty()
+                if (next.isEmpty()) break
+                cursor = next
+            }
+        } catch (e: ApiException) {
+            if (e.code != "missing_scope" && e.code != "not_in_channel" &&
+                e.code != "channel_not_found" &&
+                e.code != "method_not_supported_for_channel_type"
+            ) {
+                throw e
             }
         }
-        val atts = m.optJSONArray("attachments") ?: return
-        for (i in 0 until atts.length()) {
-            val a = atts.optJSONObject(i) ?: continue
-            addFiles(a.optJSONArray("files"), out)
-            a.optJSONObject("file")?.let { out.add(it) }
-        }
+        return out
     }
 
     private fun addFiles(arr: JSONArray?, out: MutableList<JSONObject>) {
