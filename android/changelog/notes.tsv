@@ -4,8 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Look once more on Slack before giving up a chapter image
-	Auto-generate chapter images every N chapters
+1.37.7	Look once more on Slack before giving up a chapter image
+1.37.7	Auto-generate chapter images every N chapters
 1.37.6	Generate image posts the chapter and waits for Slack
 1.37.5	Post a chapter as {hash}.txt to Slack; drop Cursor key
 1.37.4	Cursor key: chapter summary, on-demand image
