@@ -231,6 +231,68 @@
                 android:focusable="true" />
         </LinearLayout>
 
+        <!-- ══ Cursor API key ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:padding="18dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Cursor API key"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/fg" />
+
+                <ImageView
+                    android:id="@+id/cursorApiKeyHelp"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginStart="4dp"
+                    android:padding="5dp"
+                    android:src="@drawable/ic_help"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:contentDescription="About Cursor API key" />
+            </LinearLayout>
+
+            <EditText
+                android:id="@+id/cursorApiKeyInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_input"
+                android:padding="11dp"
+                android:hint="key_…"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                android:textColorHint="@color/muted"
+                android:inputType="textPassword"
+                android:importantForAutofill="no" />
+
+            <TextView
+                android:id="@+id/cursorApiKeyLink"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Get an API key ↗"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+
         <!-- ══ Library ══ -->
         <LinearLayout
             android:layout_width="match_parent"

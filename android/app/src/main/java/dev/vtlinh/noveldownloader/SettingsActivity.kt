@@ -18,11 +18,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /* App settings: the Storage card (download folder, library size, and
-   "Compress my novels"), the Anthropic API key, library auto status-check
-   interval, and reading options. Toggling compression starts a background
-   pass that converts every novel to match; new downloads follow the same
-   flag. The key is saved on focus loss and when leaving. Descriptions live
-   behind each setting's help icon. */
+   "Compress my novels"), the Anthropic and Cursor API keys, library auto
+   status-check interval, and reading options. Toggling compression starts
+   a background pass that converts every novel to match; new downloads
+   follow the same flag. The keys are saved on focus loss and when leaving.
+   Descriptions live behind each setting's help icon. */
 class SettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -48,7 +48,7 @@ class SettingsActivity : AppCompatActivity() {
        nothing, with no error anywhere to explain it. */
     override fun onPause() {
         super.onPause()
-        try { saveKey() } catch (e: Exception) {}
+        try { saveKeys() } catch (e: Exception) {}
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,7 +61,7 @@ class SettingsActivity : AppCompatActivity() {
         val key = findViewById<EditText>(R.id.apiKeyInput)
         key.setText(prefs.getString("apiKey", ""))
         key.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) saveKey()
+            if (!hasFocus) saveKeys()
         }
         findViewById<TextView>(R.id.apiKeyLink).setOnClickListener {
             try {
@@ -70,10 +70,22 @@ class SettingsActivity : AppCompatActivity() {
                 )
             } catch (e: Exception) {}
         }
+        val cursorKey = findViewById<EditText>(R.id.cursorApiKeyInput)
+        cursorKey.setText(prefs.getString("cursorApiKey", ""))
+        cursorKey.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveKeys()
+        }
+        findViewById<TextView>(R.id.cursorApiKeyLink).setOnClickListener {
+            try {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://cursor.com/dashboard/api")),
+                )
+            } catch (e: Exception) {}
+        }
         updateFolderLabel()
         bindHelp(
             R.id.storageUsedHelp, "Used",
-            "How much space your downloaded novels take up, including any translations.",
+            "How much space your downloaded novels take up, including translations and chapter scenes.",
         )
 
         /* single "Compress my novels" switch: on → compress every novel and
@@ -133,6 +145,10 @@ class SettingsActivity : AppCompatActivity() {
             "Lets the app translate chapters into English. Translation costs money, charged to your Anthropic account.",
         )
         bindHelp(
+            R.id.cursorApiKeyHelp, "Cursor API key",
+            "Lets the app summarize a chapter and, when you ask, generate an image of it. Uses your Cursor plan's included usage first, then on-demand if that pool is empty.",
+        )
+        bindHelp(
             R.id.statusCheckHelp, "Automatic status check",
             "How often the app looks for new chapters in your novels.",
         )
@@ -152,9 +168,11 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun saveKey() {
-        val key = findViewById<EditText>(R.id.apiKeyInput).text.toString().trim()
-        prefs.edit().putString("apiKey", key).apply()
+    private fun saveKeys() {
+        prefs.edit()
+            .putString("apiKey", findViewById<EditText>(R.id.apiKeyInput).text.toString().trim())
+            .putString("cursorApiKey", findViewById<EditText>(R.id.cursorApiKeyInput).text.toString().trim())
+            .apply()
     }
 
     override fun onResume() {
@@ -245,6 +263,8 @@ class SettingsActivity : AppCompatActivity() {
             val stamp = Folder.Stamp(dir.docId, dirMod, translated?.ref ?: "", trNow)
             var got = Storage.of(listing)
             if (translated != null) got += Storage.of(kids(translated.ref))
+            val scenes = listing.firstOrNull { it.isDir && it.name == Scenes.DIR }
+            if (scenes != null) got += Storage.ofScenes(kids(scenes.ref))
             acc += got
             if (got.files == 0 || got.files != got.unknown) {
                 try { store.setDiskBytes(tree, row.slug, got.bytes, stamp) } catch (e: Exception) {}
