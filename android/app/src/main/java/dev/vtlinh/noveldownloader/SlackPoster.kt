@@ -29,6 +29,36 @@ class SlackPoster(
         const val POLL_MS = 10_000L
         const val MAX_WAIT_MS = 8L * 60_000L
 
+        fun fileLooksLikeImage(name: String, title: String, mimetype: String): Boolean {
+            val mime = mimetype.lowercase()
+            if (mime.startsWith("image/")) return true
+            for (n in listOf(name, title)) {
+                val lower = n.lowercase()
+                if (lower.endsWith(".png") || lower.endsWith(".jpg") ||
+                    lower.endsWith(".jpeg") || lower.endsWith(".webp")
+                ) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        /* ChatGPT is asked to name the file {hash}.png, but the upload
+           Slack stores is often image.png or a generated title. A hash
+           in the name still counts; a thread-scoped look can take any
+           image. */
+        fun fileMatchesHash(hash: String, name: String, title: String): Boolean {
+            val h = hash.lowercase()
+            if (h.isEmpty()) return false
+            val want = "$h.png"
+            val n = name.lowercase()
+            val t = title.lowercase()
+            if (n == want || t == want) return true
+            if (n.contains(h) && fileLooksLikeImage(name, title, "")) return true
+            if (t.contains(h) && fileLooksLikeImage(name, title, "")) return true
+            return false
+        }
+
         fun describe(code: String): String = when (code) {
             "invalid_auth", "not_authed", "token_revoked", "account_inactive" ->
                 "Slack rejected the bot token. Check it in Settings."
@@ -84,11 +114,19 @@ class SlackPoster(
         if (!done.optBoolean("ok", true)) {
             throw ApiException(done.optString("error", "unknown"))
         }
-        return Post(hash, shareTs(done))
+        /* completeUpload often omits shares — the thread ChatGPT replies
+           in is then unknown and we only scan the channel file list, which
+           misses an image named anything but {hash}.png. files.info is the
+           second look for that share timestamp. */
+        var ts = shareTs(done)
+        if (ts.isNullOrEmpty()) ts = shareTs(fileInfo(fileId))
+        return Post(hash, ts)
     }
 
-    /* ChatGPT posts {hash}.png in the .txt thread. Walk that thread first;
-       files.list is the fallback when Slack omitted the share timestamp. */
+    /* ChatGPT replies in the .txt thread. Walk that thread first; any
+       image there is the picture (the name is often not {hash}.png).
+       files.list is the fallback when Slack omitted the share timestamp,
+       and then the hash has to appear in the filename. */
     fun waitForImage(hash: String, threadTs: String?, timeoutMs: Long = MAX_WAIT_MS): ByteArray {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
@@ -101,10 +139,9 @@ class SlackPoster(
     }
 
     fun findImage(hash: String, threadTs: String?): ByteArray? {
-        val want = Scenes.slackImageName(hash)
         if (!threadTs.isNullOrEmpty()) {
             try {
-                fileNamed(want, replies(threadTs))?.let { return download(it) }
+                pickImage(hash, replies(threadTs), threadScoped = true)?.let { return download(it) }
             } catch (e: ApiException) {
                 if (e.code != "missing_scope" && e.code != "thread_not_found" &&
                     e.code != "message_not_found"
@@ -114,11 +151,24 @@ class SlackPoster(
             }
         }
         try {
-            fileNamed(want, listedImages())?.let { return download(it) }
+            pickImage(hash, listedImages(), threadScoped = false)?.let { return download(it) }
         } catch (e: ApiException) {
             if (e.code != "missing_scope") throw e
         }
         return null
+    }
+
+    private fun pickImage(hash: String, files: List<JSONObject>, threadScoped: Boolean): JSONObject? {
+        val hashed = files.firstOrNull {
+            fileMatchesHash(hash, it.optString("name"), it.optString("title"))
+        }
+        if (hashed != null) return hashed
+        if (!threadScoped) return null
+        return files.firstOrNull {
+            fileLooksLikeImage(
+                it.optString("name"), it.optString("title"), it.optString("mimetype"),
+            )
+        }
     }
 
     private fun replies(threadTs: String): List<JSONObject> {
@@ -135,7 +185,7 @@ class SlackPoster(
         val msgs = json.optJSONArray("messages") ?: return out
         for (i in 0 until msgs.length()) {
             val m = msgs.optJSONObject(i) ?: continue
-            addFiles(m.optJSONArray("files"), out)
+            collectFiles(m, out)
         }
         return out
     }
@@ -154,15 +204,18 @@ class SlackPoster(
         return out
     }
 
+    private fun collectFiles(m: JSONObject, out: MutableList<JSONObject>) {
+        addFiles(m.optJSONArray("files"), out)
+        val atts = m.optJSONArray("attachments") ?: return
+        for (i in 0 until atts.length()) {
+            addFiles(atts.optJSONObject(i)?.optJSONArray("files"), out)
+        }
+    }
+
     private fun addFiles(arr: JSONArray?, out: MutableList<JSONObject>) {
         if (arr == null) return
         for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { out.add(it) }
     }
-
-    private fun fileNamed(name: String, files: List<JSONObject>): JSONObject? =
-        files.firstOrNull {
-            it.optString("name") == name || it.optString("title") == name
-        }
 
     private fun download(file: JSONObject): ByteArray {
         val url = file.optString("url_private_download").ifEmpty {
@@ -179,9 +232,25 @@ class SlackPoster(
         }
     }
 
+    private fun fileInfo(fileId: String): JSONObject {
+        return try {
+            apiForm(
+                "files.info",
+                FormBody.Builder().add("file", fileId).build(),
+            )
+        } catch (e: Exception) {
+            JSONObject()
+        }
+    }
+
     private fun shareTs(done: JSONObject): String? {
+        done.optJSONObject("file")?.let { shareTsOf(it)?.let { ts -> return ts } }
         val files = done.optJSONArray("files") ?: return null
         val f = files.optJSONObject(0) ?: return null
+        return shareTsOf(f)
+    }
+
+    private fun shareTsOf(f: JSONObject): String? {
         val shares = f.optJSONObject("shares") ?: return null
         for (kind in listOf("public", "private")) {
             val byChan = shares.optJSONObject(kind) ?: continue
