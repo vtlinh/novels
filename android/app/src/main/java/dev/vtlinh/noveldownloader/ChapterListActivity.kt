@@ -203,7 +203,6 @@ class ChapterListActivity : AppCompatActivity() {
             .setDrawerLockMode(androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
         findViewById<ImageView>(R.id.backBtn).setOnClickListener { goBack() }
 
-        ConsoleFooter.attach(this, findViewById(R.id.consoleFooter))
         onInfoTab = savedInstanceState?.let { state ->
             if (state.getString(STATE_TAB_SLUG) == intent.getStringExtra("slug")) {
                 state.getBoolean(STATE_ON_INFO_TAB, false)

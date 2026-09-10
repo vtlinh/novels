@@ -142,7 +142,6 @@
             </LinearLayout>
         </LinearLayout>
 
-        <include layout="@layout/console_footer" />
     </LinearLayout>
 
     <include layout="@layout/drawer_menu" />

@@ -14,16 +14,29 @@
         android:gravity="center_vertical">
 
         <TextView
+            android:id="@+id/backBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="←"
+            android:textSize="24sp"
+            android:textColor="@color/fg"
+            android:paddingEnd="14dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Console"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:textColor="@color/fg" />
+            android:text="Logs"
+            android:textSize="22sp"
+            android:textColor="@color/fg"
+            android:textStyle="bold" />
 
         <Button
-            android:id="@+id/consoleStopBtn"
+            android:id="@+id/logsStopBtn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Stop"
@@ -36,7 +49,7 @@
     </LinearLayout>
 
     <TextView
-        android:id="@+id/consoleSheetStatus"
+        android:id="@+id/logsStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
@@ -44,7 +57,7 @@
         android:textColor="@color/muted" />
 
     <ScrollView
-        android:id="@+id/consoleSheetScroll"
+        android:id="@+id/logsScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
@@ -53,11 +66,12 @@
         android:padding="12dp">
 
         <TextView
-            android:id="@+id/consoleSheetLog"
+            android:id="@+id/logsText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
             android:textSize="11sp"
-            android:textColor="@color/fg" />
+            android:textColor="@color/fg"
+            android:textIsSelectable="true" />
     </ScrollView>
 </LinearLayout>

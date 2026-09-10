@@ -8,7 +8,8 @@ import androidx.drawerlayout.widget.DrawerLayout
 
 /* The hamburger destinations shared by Library and Documents. One place
    so a new section cannot be added to the XML and missed on one of the
-   screens. The chapter list is a drill-in and uses ← instead. */
+   screens. Logs sits above Settings. The chapter list is a drill-in
+   and uses ← instead. */
 object Nav {
 
     enum class Screen { LIBRARY, DOCUMENTS }
@@ -43,6 +44,10 @@ object Nav {
                 Intent(activity, DocumentListActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
+        }
+        activity.findViewById<TextView>(R.id.navLogs).setOnClickListener {
+            close()
+            activity.startActivity(Intent(activity, LogsActivity::class.java))
         }
         activity.findViewById<TextView>(R.id.navSettings).setOnClickListener {
             close()

@@ -229,9 +229,10 @@ object ChapterImages {
             val reqs = store.imageReqs(folder, slug, chapter)
             val threads = reqs.map { it.threadTs }.filter { it.isNotEmpty() }
             val text = chapterText(ctx, folder, dirName, slug, chapter)
-                ?: return Result.failure(IOException("Could not read this chapter.")).also {
-                    log("$chapter no text")
-                }
+            if (text == null) {
+                log("$chapter no text")
+                return Result.failure(IOException("Could not read this chapter."))
+            }
             if (text.isEmpty()) {
                 log("$chapter empty")
                 return Result.failure(IOException("This chapter is empty."))
@@ -375,9 +376,10 @@ object ChapterImages {
         val threads = reqs.map { it.threadTs }.filter { it.isNotEmpty() }
         val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
             ?: chapterText(ctx, folder, dirName, slug, chapter)?.let { Scenes.contentHash(it) }
-            ?: return Result.failure(IOException("Could not read this chapter.")).also {
-                log("$chapter no text")
-            }
+        if (hash == null) {
+            log("$chapter no text")
+            return Result.failure(IOException("Could not read this chapter."))
+        }
         log("$chapter hash=${shortHash(hash)} storedThreads=${threads.size}")
         val slack = SlackPoster(token, channel)
         val found = try { slack.findExisting(hash, threads) } catch (e: Exception) {
@@ -558,9 +560,10 @@ object ChapterImages {
             ?: throw IOException("Could not create scenes/.")
         val name = Scenes.imageName(chapter)
         val docId = writeBytes(ctx, dir, name, "image/png", bytes)
-            ?: throw IOException("Could not save the image.").also {
-                log("$chapter save fail ${bytes.size}B")
-            }
+        if (docId == null) {
+            log("$chapter save fail ${bytes.size}B")
+            throw IOException("Could not save the image.")
+        }
         val store = DownloadStore(ctx)
         store.setChapterImage(folder, slug, chapter, docId)
         log("$chapter saved ${bytes.size}B id=$docId")
