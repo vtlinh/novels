@@ -248,6 +248,11 @@ object ChapterImages {
         return out.sortedWith(compareBy<Saved> { it.number }.thenBy { it.name })
     }
 
+    fun chapterUri(ctx: Context, folder: String, dirName: String, chapter: String): Uri? {
+        val dir = scenesDir(ctx, folder, dirName, create = false) ?: return null
+        return dir.findFile(Scenes.imageName(chapter))?.uri
+    }
+
     fun thumb(ctx: Context, uri: Uri, edgePx: Int): android.graphics.Bitmap? {
         return try {
             val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
