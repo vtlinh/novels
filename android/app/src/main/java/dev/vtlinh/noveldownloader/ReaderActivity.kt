@@ -3005,7 +3005,7 @@ class ReaderActivity : AppCompatActivity() {
             val raw = when {
                 Zips.isGzRef(ref) -> Zips.readGz(contentResolver, treeUri!!, Zips.gzDocId(ref))
                 else -> Saf.readText(contentResolver, treeUri!!, ref)
-            }
+            } ?: return@withContext null
             decorateChapter(name, raw)
         }
     }
