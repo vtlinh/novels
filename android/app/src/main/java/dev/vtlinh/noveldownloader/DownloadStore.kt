@@ -730,6 +730,24 @@ class DownloadStore(context: Context) :
         )
     }
 
+    fun chapterImages(folder: String, slug: String): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>()
+        readableDatabase.query(
+            "chapter_image",
+            arrayOf("chapter", "image"),
+            "folder=? AND slug=? AND image<>''",
+            arrayOf(folder, slug),
+            null, null, null,
+        ).use { c ->
+            while (c.moveToNext()) {
+                val chapter = c.getString(0).orEmpty()
+                val image = c.getString(1).orEmpty()
+                if (chapter.isNotEmpty() && image.isNotEmpty()) out.add(chapter to image)
+            }
+        }
+        return out
+    }
+
     fun chapterImage(folder: String, slug: String, chapter: String): String? {
         readableDatabase.query(
             "chapter_image", arrayOf("image"),

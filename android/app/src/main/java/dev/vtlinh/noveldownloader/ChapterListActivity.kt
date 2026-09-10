@@ -492,6 +492,99 @@ class ChapterListActivity : AppCompatActivity() {
                 },
             )
         }
+        bindSceneGrid()
+    }
+
+    /* Pictures under the synopsis, chapter number ascending. Rows come
+       from chapter_image — not a listing of scenes/. */
+    private fun bindSceneGrid() {
+        val grid = findViewById<android.widget.LinearLayout>(R.id.sceneGrid)
+        val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null)
+        val dirName = intent.getStringExtra("dir")
+        val slug = intent.getStringExtra("slug")
+        if (folder.isNullOrEmpty() || dirName.isNullOrEmpty() || slug.isNullOrEmpty()) {
+            grid.removeAllViews()
+            grid.visibility = android.view.View.GONE
+            return
+        }
+        lifecycleScope.launch {
+            val cols = 3
+            val edge = ((resources.displayMetrics.widthPixels - dp(12 + 12 + 14 + 14)) / cols)
+                .coerceAtLeast(dp(80))
+            val thumbs = withContext(Dispatchers.IO) {
+                val items = ChapterImages.listSaved(this@ChapterListActivity, folder, dirName, slug)
+                items.map { it to ChapterImages.thumb(this@ChapterListActivity, it.uri, edge) }
+            }
+            grid.removeAllViews()
+            if (thumbs.isEmpty()) {
+                grid.visibility = android.view.View.GONE
+                return@launch
+            }
+            grid.visibility = android.view.View.VISIBLE
+            var row: android.widget.LinearLayout? = null
+            thumbs.forEachIndexed { i, (item, bmp) ->
+                if (i % cols == 0) {
+                    row = android.widget.LinearLayout(this@ChapterListActivity).apply {
+                        orientation = android.widget.LinearLayout.HORIZONTAL
+                        layoutParams = android.widget.LinearLayout.LayoutParams(
+                            android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                        )
+                    }
+                    grid.addView(row)
+                }
+                val cell = android.widget.LinearLayout(this@ChapterListActivity).apply {
+                    orientation = android.widget.LinearLayout.VERTICAL
+                    gravity = android.view.Gravity.CENTER_HORIZONTAL
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        0,
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f,
+                    ).apply {
+                        marginStart = dp(4)
+                        marginEnd = dp(4)
+                        bottomMargin = dp(10)
+                    }
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { openChapter(item.chapter) }
+                }
+                cell.addView(
+                    ImageView(this@ChapterListActivity).apply {
+                        layoutParams = android.widget.LinearLayout.LayoutParams(
+                            android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                            edge,
+                        )
+                        scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                        setBackgroundResource(R.drawable.bg_scene_thumb)
+                        setPadding(dp(3), dp(3), dp(3), dp(3))
+                        clipToOutline = true
+                        if (bmp != null) setImageBitmap(bmp)
+                        contentDescription = item.label
+                    },
+                )
+                cell.addView(
+                    TextView(this@ChapterListActivity).apply {
+                        text = item.label
+                        textSize = 12f
+                        setTextColor(getColor(R.color.muted))
+                        gravity = android.view.Gravity.CENTER
+                        setPadding(0, dp(4), 0, 0)
+                    },
+                )
+                row?.addView(cell)
+            }
+            val leftover = thumbs.size % cols
+            if (leftover != 0) {
+                repeat(cols - leftover) {
+                    row?.addView(
+                        android.view.View(this@ChapterListActivity).apply {
+                            layoutParams = android.widget.LinearLayout.LayoutParams(0, 0, 1f)
+                        },
+                    )
+                }
+            }
+        }
     }
 
     /* A new intent can retarget this instance (single-top or
@@ -520,6 +613,7 @@ class ChapterListActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         load()
+        bindSceneGrid()
         startLiveRefresh()
     }
 
