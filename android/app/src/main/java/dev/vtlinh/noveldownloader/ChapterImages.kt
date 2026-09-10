@@ -161,6 +161,12 @@ object ChapterImages {
         return waits.any { (startedAt, looked) -> !mayDrop(startedAt, looked, now) }
     }
 
+    /* A chapter that already has a Slack {hash}.txt must not get another.
+       "No png downloaded" is not "nothing posted" — Chapter 400 posted
+       twice that way (6b1884… then 9dbbc0…) after the hour. */
+    fun shouldPost(postIfMissing: Boolean, alreadyPosted: Boolean): Boolean =
+        postIfMissing && !alreadyPosted
+
     fun markRequested(
         ctx: Context,
         folder: String,
@@ -190,7 +196,6 @@ object ChapterImages {
         val store = DownloadStore(ctx)
         return try {
             if (adoptDiskImage(ctx, folder, dirName, slug, chapter) != null) {
-                store.clearImageReqs(folder, slug, chapter)
                 return Result.success(true)
             }
             if (token.isEmpty() || channel.isEmpty()) {
@@ -206,14 +211,19 @@ object ChapterImages {
             }
             var hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
                 ?: Scenes.contentHash(text)
-            slack.findExistingImage(hash, threads)?.let { png ->
-                savePng(ctx, folder, dirName, slug, chapter, png)
+            val found = slack.findExisting(hash, threads)
+            if (found.png != null) {
+                savePng(ctx, folder, dirName, slug, chapter, found.png)
                 return Result.success(true)
             }
-            val live = reqs.filter { !expired(it.startedAt) }
+            for (ts in found.threads) {
+                if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+            }
+            val posted = reqs.isNotEmpty() || found.threads.isNotEmpty()
+            val live = store.imageReqs(folder, slug, chapter).filter { !expired(it.startedAt) }
             if (live.isEmpty()) {
-                if (!postIfMissing) {
-                    return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, threads)
+                if (!shouldPost(postIfMissing, posted)) {
+                    return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, threads + found.threads)
                 }
                 val post = slack.postChapter(text)
                 hash = post.hash
@@ -307,10 +317,15 @@ object ChapterImages {
         hash: String,
         threads: Collection<String>,
     ): Result<Boolean> {
-        val png = try { slack.findExistingImage(hash, threads) } catch (e: Exception) { null }
-        if (png != null) {
-            savePng(ctx, folder, dirName, slug, chapter, png)
+        val found = try { slack.findExisting(hash, threads) } catch (e: Exception) {
+            SlackPoster.Existing(null, emptyList())
+        }
+        if (found.png != null) {
+            savePng(ctx, folder, dirName, slug, chapter, found.png)
             return Result.success(true)
+        }
+        for (ts in found.threads) {
+            if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
         }
         val store = DownloadStore(ctx)
         store.markImageReqLooked(folder, slug, chapter)
@@ -381,13 +396,20 @@ object ChapterImages {
         if (folder.isEmpty() || dirName.isEmpty() || image.isEmpty()) return false
         val tree = Uri.parse(folder)
         return try {
-            Saf.exists(ctx.contentResolver, tree, imageDocId(Saf.rootId(tree), dirName, image))
+            Saf.exists(ctx.contentResolver, tree, resolveImageDocId(Saf.rootId(tree), dirName, image))
         } catch (e: Exception) { false }
     }
 
     fun imageDocId(rootId: String, dirName: String, image: String): String {
         val base = "$rootId/$dirName/${Scenes.DIR}"
         return if (image.isEmpty()) base else "$base/$image"
+    }
+
+    /* A stored value with a slash is the provider's document id from
+       the write. A bare filename is the older row — guess the path. */
+    fun resolveImageDocId(rootId: String, dirName: String, stored: String): String {
+        if (stored.contains('/')) return stored
+        return imageDocId(rootId, dirName, stored)
     }
 
     fun chapterUri(
@@ -400,7 +422,7 @@ object ChapterImages {
         val name = linkedImage(ctx, folder, slug, chapter) ?: return null
         val tree = Uri.parse(folder)
         return DocumentsContract.buildDocumentUriUsingTree(
-            tree, imageDocId(Saf.rootId(tree), dirName, name),
+            tree, resolveImageDocId(Saf.rootId(tree), dirName, name),
         )
     }
 
@@ -436,12 +458,13 @@ object ChapterImages {
         val dir = scenesDir(ctx, folder, dirName, create = true)
             ?: throw IOException("Could not create scenes/.")
         val name = Scenes.imageName(chapter)
-        if (!writeBytes(ctx, dir, name, "image/png", bytes)) {
-            throw IOException("Could not save the image.")
-        }
+        val docId = writeBytes(ctx, dir, name, "image/png", bytes)
+            ?: throw IOException("Could not save the image.")
         val store = DownloadStore(ctx)
-        store.setChapterImage(folder, slug, chapter, name)
-        store.clearImageReqs(folder, slug, chapter)
+        store.setChapterImage(folder, slug, chapter, docId)
+        /* Keep the Slack threads. Clearing them was why Chapter 400
+           posted a second {hash}.txt after the saved png could not be
+           opened — the hash was gone, so the next tap hashed new text. */
         try { store.forgetDiskBytes(folder, slug) } catch (e: Exception) {}
     }
 
@@ -466,10 +489,10 @@ object ChapterImages {
         name: String,
         mime: String,
         bytes: ByteArray,
-    ): Boolean {
+    ): String? {
         return try {
             dir.findFile(name)?.delete()
-            val f = dir.createFile(mime, Zips.partName(name)) ?: return false
+            val f = dir.createFile(mime, Zips.partName(name)) ?: return null
             try {
                 ctx.contentResolver.openOutputStream(f.uri)?.use { it.write(bytes) }
                     ?: throw IOException("could not open $name")
@@ -478,15 +501,15 @@ object ChapterImages {
                 val got = Zips.docName(ctx.contentResolver, done)
                 if (got != null && got != name) {
                     try { DocumentsContract.deleteDocument(ctx.contentResolver, done) } catch (e: Exception) {}
-                    return false
+                    return null
                 }
-                true
+                try { DocumentsContract.getDocumentId(done) } catch (e: Exception) { name }
             } catch (e: Exception) {
                 try { f.delete() } catch (e2: Exception) {}
-                false
+                null
             }
         } catch (e: Exception) {
-            false
+            null
         }
     }
 }

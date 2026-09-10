@@ -21,6 +21,7 @@ class SlackPoster(
     class ApiException(val code: String) : IOException(describe(code))
 
     data class Post(val hash: String, val threadTs: String?)
+    data class Existing(val png: ByteArray?, val threads: List<String>)
 
     companion object {
         private const val API = "https://slack.com/api"
@@ -153,13 +154,23 @@ class SlackPoster(
     }
 
     /* Stored request threads first, then every {hash}.txt Slack still
-       lists. Used on a retry tap and on the hour-end last look. */
-    fun findExistingImage(hash: String, knownThreads: Collection<String> = emptyList()): ByteArray? {
+       lists. Used on a retry tap and on the hour-end last look.
+       Threads are returned even when the png cannot be downloaded, so
+       a miss does not post a second {hash}.txt. */
+    fun findExistingImage(hash: String, knownThreads: Collection<String> = emptyList()): ByteArray? =
+        findExisting(hash, knownThreads).png
+
+    fun findExisting(hash: String, knownThreads: Collection<String> = emptyList()): Existing {
         val seen = linkedSetOf<String>()
         for (ts in knownThreads) if (ts.isNotEmpty()) seen.add(ts)
+        var png: ByteArray? = null
         for (ts in seen) {
             try {
-                pickImage(hash, replies(ts))?.let { return it }
+                val got = pickImage(hash, replies(ts))
+                if (got != null) {
+                    png = got
+                    break
+                }
             } catch (e: ApiException) {
                 if (e.code != "missing_scope" && e.code != "thread_not_found" &&
                     e.code != "message_not_found"
@@ -168,34 +179,46 @@ class SlackPoster(
                 }
             }
         }
-        try {
-            for (stub in listedFilesAll()) {
-                val file = hydrate(stub)
-                val name = file.optString("name")
-                val title = file.optString("title")
-                if (fileMatchesHash(hash, name, title)) {
-                    download(file)?.let { return it }
-                }
-                if (fileMatchesTxt(hash, name, title)) {
-                    threadTsOf(file)?.let { seen.add(it) }
-                }
-            }
-        } catch (e: ApiException) {
-            if (e.code != "missing_scope") throw e
-        }
-        for (ts in seen) {
-            if (knownThreads.contains(ts)) continue
+        if (png == null) {
             try {
-                pickImage(hash, replies(ts))?.let { return it }
+                for (stub in listedFilesAll()) {
+                    val file = hydrate(stub)
+                    val name = file.optString("name")
+                    val title = file.optString("title")
+                    if (fileMatchesHash(hash, name, title)) {
+                        val got = download(file)
+                        if (got != null) {
+                            png = got
+                            break
+                        }
+                    }
+                    if (fileMatchesTxt(hash, name, title)) {
+                        threadTsOf(file)?.let { seen.add(it) }
+                    }
+                }
             } catch (e: ApiException) {
-                if (e.code != "missing_scope" && e.code != "thread_not_found" &&
-                    e.code != "message_not_found"
-                ) {
-                    throw e
+                if (e.code != "missing_scope") throw e
+            }
+        }
+        if (png == null) {
+            for (ts in seen) {
+                if (knownThreads.contains(ts)) continue
+                try {
+                    val got = pickImage(hash, replies(ts))
+                    if (got != null) {
+                        png = got
+                        break
+                    }
+                } catch (e: ApiException) {
+                    if (e.code != "missing_scope" && e.code != "thread_not_found" &&
+                        e.code != "message_not_found"
+                    ) {
+                        throw e
+                    }
                 }
             }
         }
-        return null
+        return Existing(png, seen.toList())
     }
 
     fun findImage(hash: String, threads: Collection<String>): ByteArray? {

@@ -3013,7 +3013,7 @@ class ReaderActivity : AppCompatActivity() {
         val folder = prefs.getString("tree", null) ?: return raw
         val dir = intent.getStringExtra("dir") ?: return raw
         val slug = intent.getStringExtra("slug") ?: ""
-        if (ChapterImages.linkedImage(this, folder, slug, chapter) == null) return raw
+        if (ChapterImages.adoptDiskImage(this, folder, dir, slug, chapter) == null) return raw
         val uri = ChapterImages.chapterUri(this, folder, dir, chapter, slug) ?: return raw
         val maxW = (text.width - text.paddingLeft - text.paddingRight)
             .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }

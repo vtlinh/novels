@@ -86,6 +86,14 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `do not post again when this chapter already has a Slack file`() {
+        assertFalse(ChapterImages.shouldPost(postIfMissing = true, alreadyPosted = true))
+        assertFalse(ChapterImages.shouldPost(postIfMissing = false, alreadyPosted = true))
+        assertFalse(ChapterImages.shouldPost(postIfMissing = false, alreadyPosted = false))
+        assertTrue(ChapterImages.shouldPost(postIfMissing = true, alreadyPosted = false))
+    }
+
+    @Test
     fun `a zero or negative step matches nothing`() {
         assertFalse(ChapterImages.due(1, 1, 0))
         assertFalse(ChapterImages.due(21, 1, 0))
@@ -103,6 +111,21 @@ class ChapterImagesTest {
         assertEquals(
             "primary:Novels/The Novel/scenes",
             ChapterImages.imageDocId("primary:Novels", "The Novel", ""),
+        )
+    }
+
+    @Test
+    fun `a stored document id is used as-is`() {
+        assertEquals(
+            "primary:Novels/The Novel/scenes/Chapter 1.png",
+            ChapterImages.resolveImageDocId(
+                "primary:Novels", "Other Name",
+                "primary:Novels/The Novel/scenes/Chapter 1.png",
+            ),
+        )
+        assertEquals(
+            "primary:Novels/The Novel/scenes/Chapter 1.png",
+            ChapterImages.resolveImageDocId("primary:Novels", "The Novel", "Chapter 1.png"),
         )
     }
 
