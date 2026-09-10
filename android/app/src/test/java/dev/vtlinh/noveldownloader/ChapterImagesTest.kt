@@ -16,7 +16,8 @@ class ChapterImagesTest {
         assertFalse(ChapterImages.expired(start, start + ChapterImages.GIVE_UP_MS - 1))
         assertTrue(ChapterImages.expired(start, start + ChapterImages.GIVE_UP_MS))
         assertTrue(ChapterImages.expired(start, start + ChapterImages.GIVE_UP_MS + 60_000L))
-        assertTrue(ChapterImages.expired(0L, start))
+        assertFalse(ChapterImages.expired(0L, ChapterImages.GIVE_UP_MS - 1))
+        assertTrue(ChapterImages.expired(0L, ChapterImages.GIVE_UP_MS))
     }
 
     @Test
