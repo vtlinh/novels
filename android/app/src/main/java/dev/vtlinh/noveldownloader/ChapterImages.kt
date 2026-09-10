@@ -113,7 +113,7 @@ object ChapterImages {
                 val n = Scenes.chapterNumber(chapter) ?: continue
                 if (!due(n, from, every)) continue
                 if (hasLocalImage(app, folder, dirName, chapter, slug)) continue
-                if (alreadyRequested(app, folder, slug, chapter)) {
+                if (alreadyRequested(app, folder, dirName, slug, chapter)) {
                     markAutoTried(app, slug, chapter)
                     continue
                 }
@@ -126,21 +126,27 @@ object ChapterImages {
         }
     }
 
-    fun alreadyRequested(ctx: Context, slug: String, chapter: String): Boolean {
+    fun alreadyRequested(ctx: Context, dirName: String, slug: String, chapter: String): Boolean {
         val folder = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
             .getString("tree", "") ?: ""
-        return alreadyRequested(ctx, folder, slug, chapter)
+        return alreadyRequested(ctx, folder, dirName, slug, chapter)
     }
 
-    /* Locked while a picture is on disk, or a request is still inside
-       the hour. After give-up the thread rows stay, but this is false
-       so Generate image can be tapped again. */
-    fun alreadyRequested(ctx: Context, folder: String, slug: String, chapter: String): Boolean {
+    /* Locked while the png is on disk and in the database, or a
+       request is still inside the hour. A stale row whose file is
+       gone does not lock — Generate image can be tapped again. */
+    fun alreadyRequested(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapter: String,
+    ): Boolean {
         if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return false
         importLegacyWaits(ctx)
         val store = DownloadStore(ctx)
         return lockGenerate(
-            hasImage = !store.chapterImage(folder, slug, chapter).isNullOrEmpty(),
+            hasImage = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null,
             reqStarts = store.imageReqs(folder, slug, chapter).map { it.startedAt },
         )
     }
@@ -344,10 +350,11 @@ object ChapterImages {
         dirName: String,
         chapter: String,
         slug: String = "",
-    ): Boolean = !linkedImage(ctx, folder, slug, chapter).isNullOrEmpty()
+    ): Boolean = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
 
     /* One document query for scenes/{chapter}.png — not a listing of
-       scenes/. Generate image does this before any Slack call. */
+       scenes/. Generate image does this before any Slack call. A
+       database row whose file is gone is dropped. */
     fun adoptDiskImage(
         ctx: Context,
         folder: String,
@@ -355,14 +362,24 @@ object ChapterImages {
         slug: String,
         chapter: String,
     ): String? {
-        linkedImage(ctx, folder, slug, chapter)?.let { return it }
         if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
+        val linked = linkedImage(ctx, folder, slug, chapter)
+        if (!linked.isNullOrEmpty()) {
+            if (imageOnDisk(ctx, folder, dirName, linked)) return linked
+            forgetMissingImage(ctx, folder, slug, chapter)
+        }
         val name = Scenes.imageName(chapter)
-        val tree = Uri.parse(folder)
-        val id = imageDocId(Saf.rootId(tree), dirName, name)
-        if (!Saf.exists(ctx.contentResolver, tree, id)) return null
+        if (!imageOnDisk(ctx, folder, dirName, name)) return null
         try { DownloadStore(ctx).setChapterImage(folder, slug, chapter, name) } catch (e: Exception) { return null }
         return name
+    }
+
+    fun imageOnDisk(ctx: Context, folder: String, dirName: String, image: String): Boolean {
+        if (folder.isEmpty() || dirName.isEmpty() || image.isEmpty()) return false
+        val tree = Uri.parse(folder)
+        return try {
+            Saf.exists(ctx.contentResolver, tree, imageDocId(Saf.rootId(tree), dirName, image))
+        } catch (e: Exception) { false }
     }
 
     fun imageDocId(rootId: String, dirName: String, image: String): String {

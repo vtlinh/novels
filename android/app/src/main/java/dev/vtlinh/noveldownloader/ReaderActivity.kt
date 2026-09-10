@@ -2318,7 +2318,7 @@ class ReaderActivity : AppCompatActivity() {
                     }
                 },
                 onFailure = {
-                    if (!ChapterImages.alreadyRequested(this@ReaderActivity, slug, chapter)) {
+                    if (!ChapterImages.alreadyRequested(this@ReaderActivity, dir, slug, chapter)) {
                         setGenerateEnabled(gen, true)
                     }
                     android.widget.Toast.makeText(
@@ -2406,8 +2406,9 @@ class ReaderActivity : AppCompatActivity() {
                 isFocusable = true
             }
             img.addView(gen)
-            val locked = slug != null && chapter != null &&
-                ChapterImages.alreadyRequested(this, slug, chapter)
+            val dir = intent.getStringExtra("dir")
+            val locked = slug != null && chapter != null && !dir.isNullOrEmpty() &&
+                ChapterImages.alreadyRequested(this, dir, slug, chapter)
             setGenerateEnabled(gen, !locked)
             if (!locked) {
                 gen.setOnClickListener { requestChapterImage(gen) }
