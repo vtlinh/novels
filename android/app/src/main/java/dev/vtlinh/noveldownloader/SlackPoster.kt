@@ -130,6 +130,13 @@ class SlackPoster(
         .callTimeout(90, TimeUnit.SECONDS)
         .build()
 
+    private fun log(msg: String) {
+        DownloadService.appendLog("image: $msg")
+    }
+
+    private fun shortHash(hash: String) =
+        if (hash.length <= 12) hash else hash.take(12)
+
     fun postChapter(text: String): Post {
         val bytes = text.toByteArray(Charsets.UTF_8)
         val hash = Scenes.contentHash(text)
@@ -221,34 +228,50 @@ class SlackPoster(
     fun findExisting(hash: String, knownThreads: Collection<String> = emptyList()): Existing {
         val seen = linkedSetOf<String>()
         for (ts in knownThreads) if (ts.isNotEmpty()) seen.add(ts)
-        for (ts in historyTxtThreads(channelHistory().map { historyMsgOf(it) }, hash)) {
-            seen.add(ts)
-        }
+        log("look ${shortHash(hash)} known=${seen.size}")
+        val hist = channelHistory()
+        val fromHist = historyTxtThreads(hist.map { historyMsgOf(it) }, hash)
+        for (ts in fromHist) seen.add(ts)
+        log("history msgs=${hist.size} txt=${fromHist.size} threads=${seen.size}")
         var png: ByteArray? = null
         try {
-            for (stub in listedFilesAll()) {
+            val listed = listedFilesAll()
+            var listTxt = 0
+            for (stub in listed) {
                 val file = hydrate(stub)
                 val name = file.optString("name")
                 val title = file.optString("title")
                 if (fileMatchesHash(hash, name, title) && png == null) {
                     png = download(file)
+                    log("files.list png ${name.ifEmpty { title }} ${png?.size ?: 0}B")
                 }
                 if (fileMatchesTxt(hash, name, title)) {
+                    listTxt++
                     threadTsOf(file)?.let { seen.add(it) }
+                        ?: log("files.list txt $name no thread ts")
                 }
             }
+            log("files.list n=${listed.size} txt=$listTxt png=${png?.size ?: 0}B threads=${seen.size}")
         } catch (e: ApiException) {
+            log("files.list ${e.code}")
             if (e.code != "missing_scope") throw e
         }
         if (png == null) {
             for (ts in seen) {
                 try {
-                    val got = pickImage(hash, replies(ts))
+                    val files = replies(ts)
+                    val names = files.map {
+                        hydrate(it).optString("name").ifEmpty { it.optString("id") }
+                    }
+                    log("replies $ts files=${files.size} $names")
+                    val got = pickImage(hash, files)
                     if (got != null) {
                         png = got
+                        log("replies $ts png ${got.size}B")
                         break
                     }
                 } catch (e: ApiException) {
+                    log("replies $ts ${e.code}")
                     if (e.code != "missing_scope" && e.code != "thread_not_found" &&
                         e.code != "message_not_found"
                     ) {
@@ -257,6 +280,7 @@ class SlackPoster(
                 }
             }
         }
+        log("look done ${shortHash(hash)} png=${png?.size ?: 0}B threads=${seen.size}")
         return Existing(png, seen.toList())
     }
 
@@ -274,10 +298,13 @@ class SlackPoster(
             val id = stub.optString("id")
             if (id.isNotEmpty() && !seen.add(id)) continue
             val file = hydrate(stub)
-            if (!fileMatchesHash(hash, file.optString("name"), file.optString("title"))) {
+            val name = file.optString("name")
+            val title = file.optString("title")
+            if (!fileMatchesHash(hash, name, title)) {
                 continue
             }
             download(file)?.let { return it }
+            log("pick $id $name download empty")
         }
         return null
     }
@@ -383,6 +410,7 @@ class SlackPoster(
                 cursor = next
             }
         } catch (e: ApiException) {
+            log("history ${e.code} after ${out.size} msgs")
             if (e.code != "missing_scope" && e.code != "not_in_channel" &&
                 e.code != "channel_not_found" &&
                 e.code != "method_not_supported_for_channel_type"
@@ -402,13 +430,19 @@ class SlackPoster(
         val url = file.optString("url_private_download").ifEmpty {
             file.optString("url_private")
         }
-        if (url.isEmpty()) return null
+        if (url.isEmpty()) {
+            log("download ${file.optString("id")} ${file.optString("name")} no url")
+            return null
+        }
         val req = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $token")
             .build()
         client.newCall(req).execute().use { r ->
-            if (!r.isSuccessful) throw IOException("Could not download the Slack image (${r.code}).")
+            if (!r.isSuccessful) {
+                log("download ${file.optString("name")} http ${r.code}")
+                throw IOException("Could not download the Slack image (${r.code}).")
+            }
             return r.body?.bytes() ?: throw IOException("Slack image was empty.")
         }
     }
@@ -420,6 +454,8 @@ class SlackPoster(
                 FormBody.Builder().add("file", fileId).build(),
             )
         } catch (e: Exception) {
+            val why = if (e is ApiException) e.code else e.message
+            log("files.info $fileId $why")
             JSONObject()
         }
     }
@@ -481,7 +517,9 @@ class SlackPoster(
                 throw IOException("Slack returned a bad reply (${r.code}).")
             }
             if (!json.optBoolean("ok")) {
-                throw ApiException(json.optString("error", "http_${r.code}"))
+                val code = json.optString("error", "http_${r.code}")
+                log("slack ${req.url.encodedPath} $code")
+                throw ApiException(code)
             }
             return json
         }

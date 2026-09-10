@@ -3067,6 +3067,7 @@ class ReaderActivity : AppCompatActivity() {
             .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }
         val bmp = ChapterImages.thumb(this, uri, maxW)
         if (bmp == null) {
+            DownloadService.appendLog("image: $chapter thumb failed $uri")
             ChapterImages.forgetMissingImage(this, folder, slug, chapter)
             return raw
         }
