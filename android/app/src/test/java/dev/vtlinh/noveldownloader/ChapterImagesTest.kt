@@ -143,6 +143,12 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `synopsis grid tap expands the picture instead of opening the chapter`() {
+        assertEquals(ChapterImages.SynopsisTap.EXPAND, ChapterImages.synopsisTap())
+        assertNotEquals(ChapterImages.SynopsisTap.OPEN_CHAPTER, ChapterImages.synopsisTap())
+    }
+
+    @Test
     fun `synopsis grid sorts pictures by chapter number`() {
         val names = listOf("Chapter 400.txt", "Chapter 374.txt", "Chapter 10.txt", "notes.txt")
         val sorted = names.sortedWith(

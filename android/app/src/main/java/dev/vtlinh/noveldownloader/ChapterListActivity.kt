@@ -496,7 +496,8 @@ class ChapterListActivity : AppCompatActivity() {
     }
 
     /* Pictures under the synopsis, chapter number ascending. Rows come
-       from chapter_image — not a listing of scenes/. */
+       from chapter_image — not a listing of scenes/. A tap expands the
+       picture; it does not open the chapter. */
     private fun bindSceneGrid() {
         val grid = findViewById<android.widget.LinearLayout>(R.id.sceneGrid)
         val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null)
@@ -547,7 +548,7 @@ class ChapterListActivity : AppCompatActivity() {
                     }
                     isClickable = true
                     isFocusable = true
-                    setOnClickListener { openChapter(item.chapter) }
+                    setOnClickListener { showSceneFull(item, bmp) }
                 }
                 cell.addView(
                     ImageView(this@ChapterListActivity).apply {
@@ -583,6 +584,73 @@ class ChapterListActivity : AppCompatActivity() {
                         },
                     )
                 }
+            }
+        }
+    }
+
+    /* Full-screen picture on top of the info card. Back, a tap on
+       the picture, or a tap on the empty frame dismisses — same
+       cancelable Dialog the reader settings page uses. A missing
+       decode is a no-op so a broken file cannot crash the grid. */
+    private fun showSceneFull(item: ChapterImages.Saved, preview: android.graphics.Bitmap?) {
+        lifecycleScope.launch {
+            val edge = maxOf(
+                resources.displayMetrics.widthPixels,
+                resources.displayMetrics.heightPixels,
+            )
+            val shown = preview ?: withContext(Dispatchers.IO) {
+                ChapterImages.thumb(this@ChapterListActivity, item.uri, edge)
+            } ?: return@launch
+            if (isFinishing || isDestroyed) return@launch
+            val dialog = android.app.Dialog(
+                this@ChapterListActivity,
+                android.R.style.Theme_DeviceDefault_NoActionBar,
+            )
+            val root = android.widget.FrameLayout(this@ChapterListActivity).apply {
+                setBackgroundColor(getColor(R.color.bg))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { dialog.dismiss() }
+            }
+            val img = ImageView(this@ChapterListActivity).apply {
+                layoutParams = android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                )
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                contentDescription = item.label
+                setImageBitmap(shown)
+                isClickable = true
+                setOnClickListener { dialog.dismiss() }
+            }
+            root.addView(img)
+            root.addView(
+                TextView(this@ChapterListActivity).apply {
+                    text = "←"
+                    textSize = 24f
+                    setTextColor(getColor(R.color.fg))
+                    setPadding(dp(16), dp(16), dp(16), dp(16))
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { dialog.dismiss() }
+                },
+            )
+            dialog.setContentView(root)
+            dialog.setCancelable(true)
+            dialog.setCanceledOnTouchOutside(true)
+            dialog.window?.setLayout(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            dialog.window?.setBackgroundDrawable(
+                android.graphics.drawable.ColorDrawable(getColor(R.color.bg)),
+            )
+            dialog.show()
+            if (preview != null) {
+                val sharper = withContext(Dispatchers.IO) {
+                    ChapterImages.thumb(this@ChapterListActivity, item.uri, edge)
+                }
+                if (sharper != null && dialog.isShowing) img.setImageBitmap(sharper)
             }
         }
     }
