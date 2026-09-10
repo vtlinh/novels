@@ -1,6 +1,8 @@
 package dev.vtlinh.noveldownloader
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -28,6 +30,16 @@ class ChapterImagesTest {
         assertTrue(ChapterImages.mayDrop(start, looked = true, twoHours))
         assertFalse(ChapterImages.mayDrop(start, looked = true, start + ChapterImages.GIVE_UP_MS - 1))
         assertFalse(ChapterImages.mayDrop(start, looked = false, start))
+    }
+
+    @Test
+    fun `auto-generate prefs are keyed by novel slug`() {
+        assertEquals("autoImage:than-y", ChapterImages.autoEnabledKey("than-y"))
+        assertEquals("autoImageEvery:than-y", ChapterImages.autoEveryKey("than-y"))
+        assertEquals("autoImageFrom:than-y", ChapterImages.autoFromKey("than-y"))
+        assertNotEquals(ChapterImages.autoEnabledKey("a"), ChapterImages.autoEnabledKey("b"))
+        assertNotEquals(ChapterImages.autoEveryKey("a"), ChapterImages.autoEveryKey("b"))
+        assertNotEquals(ChapterImages.autoFromKey("a"), ChapterImages.autoFromKey("b"))
     }
 
     @Test
