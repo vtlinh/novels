@@ -293,6 +293,82 @@
                 android:focusable="true" />
         </LinearLayout>
 
+        <!-- ══ Slack ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:padding="18dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Slack"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/fg" />
+
+                <ImageView
+                    android:id="@+id/slackHelp"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginStart="4dp"
+                    android:padding="5dp"
+                    android:src="@drawable/ic_help"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:contentDescription="About Slack" />
+            </LinearLayout>
+
+            <EditText
+                android:id="@+id/slackTokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_input"
+                android:padding="11dp"
+                android:hint="xoxb-…"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                android:textColorHint="@color/muted"
+                android:inputType="textPassword"
+                android:importantForAutofill="no" />
+
+            <EditText
+                android:id="@+id/slackChannelInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_input"
+                android:padding="11dp"
+                android:hint="C…"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                android:textColorHint="@color/muted"
+                android:inputType="text"
+                android:importantForAutofill="no" />
+
+            <TextView
+                android:id="@+id/slackLink"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Create a Slack app ↗"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+
         <!-- ══ Library ══ -->
         <LinearLayout
             android:layout_width="match_parent"

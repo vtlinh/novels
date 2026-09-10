@@ -125,6 +125,18 @@
                 android:textColor="#ffffff"
                 app:backgroundTint="@color/accent"
                 app:cornerRadius="8dp" />
+
+            <Button
+                android:id="@+id/slackBtn"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Post chapter to Slack"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg"
+                app:backgroundTint="@color/btn_secondary"
+                app:cornerRadius="8dp" />
         </LinearLayout>
 
         <LinearLayout

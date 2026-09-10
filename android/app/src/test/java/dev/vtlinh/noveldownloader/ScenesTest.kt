@@ -105,6 +105,19 @@ class ScenesTest {
     }
 
     @Test
+    fun `Slack filename is SHA-256 of the chapter bytes and nothing else`() {
+        /* SHA-256("abc") — known vector, proves the digest is not salted. */
+        val abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        assertEquals(abc, Scenes.contentHash("abc"))
+        assertEquals("$abc.txt", Scenes.slackFileName("abc"))
+        assertEquals(Scenes.contentHash("abc"), Scenes.contentHash("abc"))
+        assertTrue(Scenes.contentHash("abc") != Scenes.contentHash("abc\n"))
+        assertEquals(64, Scenes.contentHash("any chapter text").length)
+        assertFalse(Scenes.slackFileName("abc").contains("scene"))
+        assertFalse(Scenes.slackFileName("abc").startsWith("scene-"))
+    }
+
+    @Test
     fun `a long chapter is clipped in the middle, not the end`() {
         val text = "A".repeat(1000) + "MID" + "B".repeat(1000)
         val clipped = Scenes.clipChapter(text, max = 400)

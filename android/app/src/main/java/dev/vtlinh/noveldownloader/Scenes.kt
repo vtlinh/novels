@@ -36,6 +36,22 @@ object Scenes {
     fun imageName(filename: String) = chapterBase(filename) + ".png"
     fun workName(filename: String) = chapterBase(filename) + ".work.json"
 
+    /* SHA-256 of the chapter bytes we upload, nothing else — no slug,
+       prefix, or comment. Slack filename is that hex + ".txt". */
+    fun contentHash(text: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(text.toByteArray(Charsets.UTF_8))
+        val sb = StringBuilder(digest.size * 2)
+        for (b in digest) {
+            val v = b.toInt() and 0xff
+            if (v < 16) sb.append('0')
+            sb.append(Integer.toHexString(v))
+        }
+        return sb.toString()
+    }
+
+    fun slackFileName(text: String) = contentHash(text) + ".txt"
+
     fun isSceneFile(name: String): Boolean {
         val n = name.removeSuffix(".gz").lowercase()
         return n.endsWith(".json") || n.endsWith(".png") || n.endsWith(".jpg") ||
