@@ -22,6 +22,12 @@ class SlackPoster(
 
     data class Post(val hash: String, val threadTs: String?)
     data class Existing(val png: ByteArray?, val threads: List<String>)
+    data class NamedFile(val name: String, val title: String = "")
+    data class HistoryMsg(
+        val ts: String,
+        val threadTs: String = "",
+        val files: List<NamedFile>,
+    )
 
     companion object {
         private const val API = "https://slack.com/api"
@@ -44,18 +50,24 @@ class SlackPoster(
            post this hash". files.list missed Chapter 374's first
            {hash}.txt and the app posted the same bytes again. The
            message ts is the thread — do not wait on shares. */
-        fun historyTxtThreads(messages: Iterable<JSONObject>, hash: String): List<String> {
+        fun historyTxtThreads(messages: Iterable<HistoryMsg>, hash: String): List<String> {
             val seen = linkedSetOf<String>()
             for (m in messages) {
-                val files = mutableListOf<JSONObject>()
-                collectMessageFiles(m, files)
-                if (files.none { fileMatchesTxt(hash, it.optString("name"), it.optString("title")) }) {
-                    continue
-                }
-                val ts = m.optString("thread_ts").ifEmpty { m.optString("ts") }
+                if (m.files.none { fileMatchesTxt(hash, it.name, it.title) }) continue
+                val ts = m.threadTs.ifEmpty { m.ts }
                 if (ts.isNotEmpty()) seen.add(ts)
             }
             return seen.toList()
+        }
+
+        fun historyMsgOf(m: JSONObject): HistoryMsg {
+            val files = mutableListOf<JSONObject>()
+            collectMessageFiles(m, files)
+            return HistoryMsg(
+                ts = m.optString("ts"),
+                threadTs = m.optString("thread_ts"),
+                files = files.map { NamedFile(it.optString("name"), it.optString("title")) },
+            )
         }
 
         fun collectMessageFiles(m: JSONObject, out: MutableList<JSONObject>) {
@@ -209,7 +221,9 @@ class SlackPoster(
     fun findExisting(hash: String, knownThreads: Collection<String> = emptyList()): Existing {
         val seen = linkedSetOf<String>()
         for (ts in knownThreads) if (ts.isNotEmpty()) seen.add(ts)
-        for (ts in historyTxtThreads(channelHistory(), hash)) seen.add(ts)
+        for (ts in historyTxtThreads(channelHistory().map { historyMsgOf(it) }, hash)) {
+            seen.add(ts)
+        }
         var png: ByteArray? = null
         try {
             for (stub in listedFilesAll()) {

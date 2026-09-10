@@ -1,7 +1,5 @@
 package dev.vtlinh.noveldownloader
 
-import org.json.JSONArray
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -42,30 +40,18 @@ class SlackPosterTest {
     @Test
     fun `channel history uses the message ts as the txt thread`() {
         val hash = "5dc9a2e5732e7789f3edd21debdfa4519c2c16003ba4ac3ccb800e6c2caca186"
-        val first = JSONObject()
-            .put("ts", "1789014134.537779")
-            .put(
-                "files",
-                JSONArray().put(
-                    JSONObject().put("id", "F0C0VAUNL8H").put("name", "$hash.txt"),
-                ),
-            )
-        val second = JSONObject()
-            .put("ts", "1789043986.891699")
-            .put(
-                "files",
-                JSONArray().put(
-                    JSONObject().put("id", "F0C0WNRSQV8").put("name", "$hash.txt"),
-                ),
-            )
-        val other = JSONObject()
-            .put("ts", "1789040000.000000")
-            .put(
-                "files",
-                JSONArray().put(
-                    JSONObject().put("name", "9dbbc0ca.txt"),
-                ),
-            )
+        val first = SlackPoster.HistoryMsg(
+            "1789014134.537779",
+            files = listOf(SlackPoster.NamedFile("$hash.txt")),
+        )
+        val second = SlackPoster.HistoryMsg(
+            "1789043986.891699",
+            files = listOf(SlackPoster.NamedFile("$hash.txt")),
+        )
+        val other = SlackPoster.HistoryMsg(
+            "1789040000.000000",
+            files = listOf(SlackPoster.NamedFile("9dbbc0ca.txt")),
+        )
         assertEquals(
             listOf("1789014134.537779", "1789043986.891699"),
             SlackPoster.historyTxtThreads(listOf(first, second, other), hash),
@@ -75,13 +61,11 @@ class SlackPosterTest {
     @Test
     fun `a reply with the txt uses the parent thread ts`() {
         val hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        val reply = JSONObject()
-            .put("ts", "1789015000.000001")
-            .put("thread_ts", "1789014134.537779")
-            .put(
-                "files",
-                JSONArray().put(JSONObject().put("name", "$hash.txt")),
-            )
+        val reply = SlackPoster.HistoryMsg(
+            ts = "1789015000.000001",
+            threadTs = "1789014134.537779",
+            files = listOf(SlackPoster.NamedFile("$hash.txt")),
+        )
         assertEquals(
             listOf("1789014134.537779"),
             SlackPoster.historyTxtThreads(listOf(reply), hash),
@@ -91,12 +75,10 @@ class SlackPosterTest {
     @Test
     fun `a png in history is not a posted chapter`() {
         val hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        val png = JSONObject()
-            .put("ts", "1789015000.000001")
-            .put(
-                "files",
-                JSONArray().put(JSONObject().put("name", "$hash.png")),
-            )
+        val png = SlackPoster.HistoryMsg(
+            "1789015000.000001",
+            files = listOf(SlackPoster.NamedFile("$hash.png")),
+        )
         assertEquals(emptyList<String>(), SlackPoster.historyTxtThreads(listOf(png), hash))
     }
 }
