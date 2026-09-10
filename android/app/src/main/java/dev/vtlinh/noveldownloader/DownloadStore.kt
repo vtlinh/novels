@@ -79,6 +79,14 @@ data class ChapterImageReq(
     val looked: Boolean = false,
 )
 
+/* Saved chapter picture. `alt` is the Slack file's description —
+   empty when the png was adopted from disk or the file had none. */
+data class ChapterImage(
+    val chapter: String,
+    val image: String,
+    val alt: String = "",
+)
+
 class DownloadStore(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "downloads.db", null, Schema.VERSION) {
 
@@ -723,18 +731,29 @@ class DownloadStore(context: Context) :
         return out
     }
 
-    fun setChapterImage(folder: String, slug: String, chapter: String, image: String) {
+    fun setChapterImage(
+        folder: String,
+        slug: String,
+        chapter: String,
+        image: String,
+        alt: String = "",
+    ) {
+        /* A blank alt keeps whatever is already stored — adoptDiskImage
+           rewrites the image path and must not wipe a caption saved from
+           Slack. INSERT OR REPLACE (not UPSERT): minSdk 26 is SQLite
+           3.18, which has no ON CONFLICT DO UPDATE. */
+        val kept = alt.trim().ifEmpty { chapterImageAlt(folder, slug, chapter) }
         writableDatabase.execSQL(
-            "INSERT OR REPLACE INTO chapter_image(folder,slug,chapter,image) VALUES(?,?,?,?)",
-            arrayOf(folder, slug, chapter, image),
+            "INSERT OR REPLACE INTO chapter_image(folder,slug,chapter,image,alt) VALUES(?,?,?,?,?)",
+            arrayOf(folder, slug, chapter, image, kept),
         )
     }
 
-    fun chapterImages(folder: String, slug: String): List<Pair<String, String>> {
-        val out = ArrayList<Pair<String, String>>()
+    fun chapterImages(folder: String, slug: String): List<ChapterImage> {
+        val out = ArrayList<ChapterImage>()
         readableDatabase.query(
             "chapter_image",
-            arrayOf("chapter", "image"),
+            arrayOf("chapter", "image", "alt"),
             "folder=? AND slug=? AND image<>''",
             arrayOf(folder, slug),
             null, null, null,
@@ -742,7 +761,10 @@ class DownloadStore(context: Context) :
             while (c.moveToNext()) {
                 val chapter = c.getString(0).orEmpty()
                 val image = c.getString(1).orEmpty()
-                if (chapter.isNotEmpty() && image.isNotEmpty()) out.add(chapter to image)
+                val alt = c.getString(2).orEmpty()
+                if (chapter.isNotEmpty() && image.isNotEmpty()) {
+                    out.add(ChapterImage(chapter, image, alt))
+                }
             }
         }
         return out
@@ -757,6 +779,18 @@ class DownloadStore(context: Context) :
         ).use { c ->
             if (!c.moveToFirst()) return null
             return c.getString(0)?.takeIf { it.isNotEmpty() }
+        }
+    }
+
+    fun chapterImageAlt(folder: String, slug: String, chapter: String): String {
+        readableDatabase.query(
+            "chapter_image", arrayOf("alt"),
+            "folder=? AND slug=? AND chapter=?",
+            arrayOf(folder, slug, chapter),
+            null, null, null,
+        ).use { c ->
+            if (!c.moveToFirst()) return ""
+            return c.getString(0).orEmpty()
         }
     }
 

@@ -5,13 +5,19 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Typeface
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.text.style.ReplacementSpan
 import kotlin.math.roundToInt
 
 /* Chapter picture under the heading. A plain ImageSpan is full-bleed
    and picks up the reader's 1.45 line spacing, so a 600px image gets
    ~270px of empty gap. This span draws a padded card and reports a
-   line height that the multiplier stretches back to the card size. */
+   line height that the multiplier stretches back to the card size.
+   A non-empty alt sits under the picture, inside the same card,
+   in italic — empty alt leaves the frame unchanged. */
 class ChapterImageSpan(
     private val bmp: Bitmap,
     private val maxW: Int,
@@ -21,16 +27,16 @@ class ChapterImageSpan(
     private val stroke: Int,
     private val bg: Int,
     private val border: Int,
-    spacingMult: Float,
-    spacingAdd: Float,
+    private val spacingMult: Float,
+    private val spacingAdd: Float,
+    private val alt: String = "",
 ) : ReplacementSpan() {
 
     private val innerW = (maxW - pad * 2).coerceAtLeast(1)
     private val imgH = (bmp.height * (innerW.toFloat() / bmp.width.coerceAtLeast(1)))
         .toInt().coerceAtLeast(1)
-    private val cardH = imgH + pad * 2
-    private val visualH = cardH + gap * 2
-    private val reportedH = lineHeightFor(visualH, spacingMult, spacingAdd)
+    private val caption = alt.trim()
+    private val captionGap = (pad / 2).coerceAtLeast(4)
 
     override fun getSize(
         paint: Paint,
@@ -39,6 +45,7 @@ class ChapterImageSpan(
         end: Int,
         fm: Paint.FontMetricsInt?,
     ): Int {
+        val reportedH = lineHeightFor(visualH(paint), spacingMult, spacingAdd)
         if (fm != null) {
             fm.ascent = -reportedH
             fm.top = -reportedH
@@ -59,13 +66,15 @@ class ChapterImageSpan(
         bottom: Int,
         paint: Paint,
     ) {
-        val box = (bottom - top).coerceAtLeast(visualH)
-        val originY = top + (box - visualH) / 2f
+        val cap = captionLayout(paint)
+        val vis = visualH(paint)
+        val box = (bottom - top).coerceAtLeast(vis)
+        val originY = top + (box - vis) / 2f
         val card = RectF(
             x + stroke / 2f,
             originY + gap,
             x + maxW - stroke / 2f,
-            originY + gap + cardH,
+            originY + gap + cardH(cap),
         )
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = bg
@@ -87,6 +96,13 @@ class ChapterImageSpan(
         canvas.drawBitmap(bmp, null, img, Paint(Paint.FILTER_BITMAP_FLAG))
         canvas.restore()
 
+        if (cap != null) {
+            canvas.save()
+            canvas.translate(img.left, img.bottom + captionGap)
+            cap.draw(canvas)
+            canvas.restore()
+        }
+
         val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = border
             style = Paint.Style.STROKE
@@ -95,10 +111,33 @@ class ChapterImageSpan(
         canvas.drawRoundRect(card, radius.toFloat(), radius.toFloat(), outline)
     }
 
+    private fun cardH(cap: StaticLayout?): Int =
+        imgH + pad * 2 + extraForCaption(cap?.height ?: 0, captionGap)
+
+    private fun visualH(paint: Paint) = cardH(captionLayout(paint)) + gap * 2
+
+    private fun captionLayout(paint: Paint): StaticLayout? {
+        if (caption.isEmpty()) return null
+        val tp = TextPaint(paint).apply {
+            typeface = Typeface.create(typeface, Typeface.ITALIC)
+            isAntiAlias = true
+        }
+        return StaticLayout.Builder.obtain(caption, 0, caption.length, tp, innerW)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1.15f)
+            .setIncludePad(false)
+            .build()
+    }
+
     companion object {
         fun lineHeightFor(visualPx: Int, spacingMult: Float, spacingAdd: Float): Int {
             val m = if (spacingMult > 0f) spacingMult else 1f
             return ((visualPx - spacingAdd) / m).roundToInt().coerceAtLeast(1)
         }
+
+        /* Extra card height under the picture. 0 when there is no
+           caption, so an empty alt does not change the frame. */
+        fun extraForCaption(captionH: Int, gap: Int): Int =
+            if (captionH > 0) gap + captionH else 0
     }
 }

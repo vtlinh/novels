@@ -25,7 +25,10 @@ class SlackPoster(
         val png: ByteArray?,
         val threads: List<String>,
         val readError: String? = null,
+        val alt: String = "",
     )
+    /* Downloaded {hash}.png plus the Slack file's own description. */
+    data class FoundPng(val bytes: ByteArray, val alt: String = "")
     data class NamedFile(
         val name: String,
         val title: String = "",
@@ -142,6 +145,45 @@ class SlackPoster(
             return name.lowercase() == want || title.lowercase() == want
         }
 
+        /* Slack's description of the picture: alt_txt first, then title.
+           Skip a value that is only the filename — Slack copies that
+           into both fields when ChatGPT left no caption (files.info
+           example: alt_txt == "tedair.gif"). */
+        fun fileAlt(altTxt: String, title: String, name: String): String {
+            fun useful(raw: String): Boolean {
+                val t = raw.trim()
+                if (t.isEmpty()) return false
+                val n = name.trim()
+                if (n.isNotEmpty() && t.equals(n, ignoreCase = true)) return false
+                val dot = t.lastIndexOf('.')
+                if (dot > 0) {
+                    val ext = t.substring(dot + 1).lowercase()
+                    if (ext in setOf("png", "jpg", "jpeg", "gif", "webp")) {
+                        val stem = t.substring(0, dot)
+                        if (n.isNotEmpty() &&
+                            stem.equals(n.substringBeforeLast('.', n), ignoreCase = true)
+                        ) return false
+                        /* {sha256}.png — 64 hex chars, the name we match on */
+                        if (stem.length == 64 && stem.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
+                            return false
+                        }
+                    }
+                }
+                return true
+            }
+            val alt = altTxt.trim()
+            if (useful(alt)) return alt
+            val tit = title.trim()
+            if (useful(tit)) return tit
+            return ""
+        }
+
+        fun fileAlt(file: JSONObject): String = fileAlt(
+            file.optString("alt_txt"),
+            file.optString("title"),
+            file.optString("name"),
+        )
+
         fun describe(code: String): String = when (code) {
             "invalid_auth", "not_authed", "token_revoked", "account_inactive" ->
                 "Slack rejected the bot token. Check it in Settings."
@@ -253,13 +295,13 @@ class SlackPoster(
        thread first. Replies often carry a file stub (id only); ask
        files.info for the name and download URL. files.list is the
        fallback when Slack omitted the share timestamp. */
-    fun waitForImage(hash: String, threadTs: String?, timeoutMs: Long = MAX_WAIT_MS): ByteArray =
+    fun waitForImage(hash: String, threadTs: String?, timeoutMs: Long = MAX_WAIT_MS): FoundPng =
         waitForImage(hash, listOfNotNull(threadTs?.takeIf { it.isNotEmpty() }), timeoutMs)
 
-    fun waitForImage(hash: String, threads: Collection<String>, timeoutMs: Long = MAX_WAIT_MS): ByteArray {
+    fun waitForImage(hash: String, threads: Collection<String>, timeoutMs: Long = MAX_WAIT_MS): FoundPng {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
-            findImage(hash, threads)?.let { return it }
+            findPng(hash, threads)?.let { return it }
             if (System.currentTimeMillis() >= deadline) {
                 throw IOException("No image came back from Slack.")
             }
@@ -267,13 +309,15 @@ class SlackPoster(
         }
     }
 
-    fun findImage(hash: String, threadTs: String?): ByteArray? {
+    fun findImage(hash: String, threadTs: String?): ByteArray? = findPng(hash, threadTs)?.bytes
+
+    private fun findPng(hash: String, threadTs: String?): FoundPng? {
         var tried = 0
         var denied = 0
         if (!threadTs.isNullOrEmpty()) {
             tried++
             try {
-                pickImage(hash, replies(threadTs))?.let { bytes -> return bytes }
+                pickImage(hash, replies(threadTs))?.let { return it }
             } catch (e: ApiException) {
                 if (e.code == "missing_scope") denied++
                 else if (e.code != "thread_not_found" && e.code != "message_not_found") {
@@ -283,7 +327,7 @@ class SlackPoster(
         }
         tried++
         try {
-            pickImage(hash, listedFiles())?.let { bytes -> return bytes }
+            pickImage(hash, listedFiles())?.let { return it }
         } catch (e: ApiException) {
             if (e.code == "missing_scope") denied++
             else throw e
@@ -325,6 +369,7 @@ class SlackPoster(
         val hit = catalogHit(catalog.hist, named, hash, knownThreads)
         log("look ${shortHash(hash)} known=${knownThreads.count { it.isNotEmpty() }} catalog png=${hit.pngName != null} threads=${hit.threads.size}")
         var png: ByteArray? = null
+        var alt = ""
         var readError = catalog.readError
         if (hit.pngName != null) {
             val file = catalog.files.firstOrNull {
@@ -332,6 +377,7 @@ class SlackPoster(
             }
             if (file != null) {
                 png = download(file.file)
+                alt = fileAlt(file.file)
                 log("catalog png ${hit.pngName} ${png?.size ?: 0}B")
             }
         }
@@ -345,8 +391,9 @@ class SlackPoster(
                     log("replies $ts files=${files.size} $names")
                     val got = pickImage(hash, files)
                     if (got != null) {
-                        png = got
-                        log("replies $ts png ${got.size}B")
+                        png = got.bytes
+                        alt = got.alt
+                        log("replies $ts png ${got.bytes.size}B")
                         break
                     }
                 } catch (e: ApiException) {
@@ -369,7 +416,7 @@ class SlackPoster(
             log("look denied $readError")
         }
         log("look done ${shortHash(hash)} png=${png?.size ?: 0}B threads=${hit.threads.size}")
-        return Existing(png, hit.threads, readError)
+        return Existing(png, hit.threads, readError, alt)
     }
 
     fun catalog(): Catalog {
@@ -421,15 +468,17 @@ class SlackPoster(
         return Catalog(msgs, files, readError)
     }
 
-    fun findImage(hash: String, threads: Collection<String>): ByteArray? {
+    fun findImage(hash: String, threads: Collection<String>): ByteArray? = findPng(hash, threads)?.bytes
+
+    private fun findPng(hash: String, threads: Collection<String>): FoundPng? {
         for (ts in threads) {
             if (ts.isEmpty()) continue
-            findImage(hash, ts)?.let { return it }
+            findPng(hash, ts)?.let { return it }
         }
-        return findImage(hash, null)
+        return findPng(hash, null)
     }
 
-    private fun pickImage(hash: String, files: List<JSONObject>): ByteArray? {
+    private fun pickImage(hash: String, files: List<JSONObject>): FoundPng? {
         val seen = mutableSetOf<String>()
         for (stub in files) {
             val id = stub.optString("id")
@@ -440,7 +489,7 @@ class SlackPoster(
             if (!fileMatchesHash(hash, name, title)) {
                 continue
             }
-            download(file)?.let { return it }
+            download(file)?.let { return FoundPng(it, fileAlt(file)) }
             log("pick $id $name download empty")
         }
         return null

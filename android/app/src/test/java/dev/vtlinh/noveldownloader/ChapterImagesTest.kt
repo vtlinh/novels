@@ -149,6 +149,23 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `empty alt hides the caption`() {
+        assertFalse(ChapterImages.showAlt(""))
+        assertFalse(ChapterImages.showAlt("   "))
+        assertTrue(ChapterImages.showAlt("A lantern in the rain"))
+    }
+
+    @Test
+    fun `savedOf keeps a trimmed alt`() {
+        val uri = android.net.Uri.parse("content://tree/Chapter 1.png")
+        val with = ChapterImages.savedOf("Chapter 1.txt", uri, "  A lantern in the rain  ")
+        assertEquals("A lantern in the rain", with.alt)
+        val empty = ChapterImages.savedOf("Chapter 1.txt", uri, "")
+        assertEquals("", empty.alt)
+        assertFalse(ChapterImages.showAlt(empty.alt))
+    }
+
+    @Test
     fun `synopsis grid sorts pictures by chapter number`() {
         val names = listOf("Chapter 400.txt", "Chapter 374.txt", "Chapter 10.txt", "notes.txt")
         val sorted = names.sortedWith(
