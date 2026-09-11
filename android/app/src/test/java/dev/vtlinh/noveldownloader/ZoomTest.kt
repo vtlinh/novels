@@ -61,4 +61,14 @@ class ZoomTest {
         assertEquals(0f, letterbox.first)
         assertEquals(250f, letterbox.second)
     }
+
+    @Test
+    fun `a lift is a tap, a swipe, or neither`() {
+        assertEquals(Zoom.Lift.TAP, Zoom.lift(4f, -3f, 10f, 16f, 80f, 100f))
+        assertEquals(Zoom.Lift.NEXT, Zoom.lift(-120f, 10f, -400f, 16f, 80f, 100f))
+        assertEquals(Zoom.Lift.PREV, Zoom.lift(120f, -8f, 400f, 16f, 80f, 100f))
+        assertEquals(Zoom.Lift.NONE, Zoom.lift(-40f, 8f, -50f, 16f, 80f, 100f))
+        assertEquals(Zoom.Lift.NONE, Zoom.lift(-120f, 200f, -400f, 16f, 80f, 100f))
+        assertEquals(40f, Zoom.span(0f, 0f, 0f, 40f))
+    }
 }

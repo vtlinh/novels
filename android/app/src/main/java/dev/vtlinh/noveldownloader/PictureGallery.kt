@@ -1,10 +1,12 @@
 package dev.vtlinh.noveldownloader
 
-import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -12,13 +14,30 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /* Full-screen chapter picture. Used from the chapter-list synopsis
-   grid and from a tap on the picture in the reader. The image is
-   MATCH_PARENT and owns every gesture. Pinch zooms the drawable
-   matrix. Back or a tap at 1× dismisses. Swipe left / right at 1×
-   steps to the next / previous saved picture — no wrap. A zoomed
-   picture pans instead. A missing decode is a no-op so a broken
-   file cannot crash the page. */
+   grid and from a tap on the picture in the reader.
+
+   This is an overlay on the activity window — not a Dialog.
+   Dialog is a second window; a second pointer often never reached
+   the picture, so pinch did nothing and a swipe was read as a tap
+   that closed the page. Overlay keeps every pointer in the same
+   stream as the rest of the app.
+
+   The picture owns the space above the caption. Pinch zooms the
+   drawable matrix. Back or a still tap at 1× dismisses. Swipe
+   left / right at 1× steps to the next / previous saved picture —
+   no wrap. A zoomed picture pans instead. A missing decode is a
+   no-op so a broken file cannot crash the page. */
 object PictureGallery {
+
+    private var shown: Pair<View, OnBackPressedCallback>? = null
+
+    private fun close() {
+        val cur = shown ?: return
+        shown = null
+        cur.second.isEnabled = false
+        cur.second.remove()
+        (cur.first.parent as? ViewGroup)?.removeView(cur.first)
+    }
 
     fun show(
         activity: AppCompatActivity,
@@ -26,6 +45,7 @@ object PictureGallery {
         start: Int,
     ) {
         if (start !in items.indices) return
+        val host = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
         activity.lifecycleScope.launch {
             val edge = maxOf(
                 activity.resources.displayMetrics.widthPixels,
@@ -36,16 +56,14 @@ object PictureGallery {
                 ChapterImages.thumb(activity, first.first.uri, edge)
             } ?: return@launch
             if (activity.isFinishing || activity.isDestroyed) return@launch
-            val dialog = android.app.Dialog(
-                activity,
-                android.R.style.Theme_DeviceDefault_NoActionBar,
-            )
+            close()
             var index = start
             var loadGen = 0
             val img = ZoomImageView(activity).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT,
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f,
                 )
                 setImageBitmap(shown)
             }
@@ -55,10 +73,9 @@ object PictureGallery {
                 setLineSpacing(0f, 1.25f)
                 val pad = (24 * activity.resources.displayMetrics.density).toInt()
                 setPadding(pad, pad / 3, pad, pad)
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM,
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
                 )
             }
             fun bindCaption(item: ChapterImages.Saved) {
@@ -66,9 +83,9 @@ object PictureGallery {
                     if (ChapterImages.showAlt(item.alt)) item.alt else item.label
                 if (ChapterImages.showAlt(item.alt)) {
                     caption.text = item.alt.trim()
-                    caption.visibility = android.view.View.VISIBLE
+                    caption.visibility = View.VISIBLE
                 } else {
-                    caption.visibility = android.view.View.GONE
+                    caption.visibility = View.GONE
                 }
             }
             fun loadSharp(item: ChapterImages.Saved) {
@@ -77,7 +94,7 @@ object PictureGallery {
                     val sharper = withContext(Dispatchers.IO) {
                         ChapterImages.thumb(activity, item.uri, edge)
                     }
-                    if (gen == loadGen && dialog.isShowing && sharper != null) {
+                    if (gen == loadGen && img.isAttachedToWindow && sharper != null) {
                         img.setImageBitmap(sharper)
                     }
                 }
@@ -91,24 +108,34 @@ object PictureGallery {
                 if (preview != null) img.setImageBitmap(preview)
                 loadSharp(item)
             }
-            img.onDismissTap = { dialog.dismiss() }
+            val overlay = FrameLayout(activity).apply {
+                setBackgroundColor(activity.getColor(R.color.bg))
+                isClickable = true
+                isFocusable = true
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+            }
+            val back = object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() { close() }
+            }
+            fun dismiss() { close() }
+            img.onDismissTap = { dismiss() }
             img.onSwipe = { go(it) }
             bindCaption(first.first)
-            val root = FrameLayout(activity).apply {
-                setBackgroundColor(activity.getColor(R.color.bg))
-                clipChildren = false
+            val column = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                )
             }
-            /* Caption sits on the picture so the image can be MATCH_PARENT.
-               Touches there must reach the image — a sibling TextView
-               would otherwise eat pinch and swipe at the bottom. */
-            caption.setOnTouchListener { v, ev ->
-                ev.offsetLocation(v.left.toFloat(), v.top.toFloat())
-                img.dispatchTouchEvent(ev)
-            }
-            root.addView(img)
-            root.addView(caption)
+            column.addView(img)
+            column.addView(caption)
+            overlay.addView(column)
             val backPad = (16 * activity.resources.displayMetrics.density).toInt()
-            root.addView(
+            overlay.addView(
                 TextView(activity).apply {
                     text = "←"
                     textSize = 24f
@@ -116,20 +143,17 @@ object PictureGallery {
                     setPadding(backPad, backPad, backPad, backPad)
                     isClickable = true
                     isFocusable = true
-                    setOnClickListener { dialog.dismiss() }
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.TOP or Gravity.START,
+                    )
+                    setOnClickListener { dismiss() }
                 },
             )
-            dialog.setContentView(root)
-            dialog.setCancelable(true)
-            dialog.setCanceledOnTouchOutside(true)
-            dialog.window?.setLayout(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            dialog.window?.setBackgroundDrawable(
-                ColorDrawable(activity.getColor(R.color.bg)),
-            )
-            dialog.show()
+            activity.onBackPressedDispatcher.addCallback(activity, back)
+            shown = overlay to back
+            host.addView(overlay)
             if (first.second != null) loadSharp(first.first)
         }
     }
