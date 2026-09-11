@@ -64,12 +64,7 @@ class AboutActivity : AppCompatActivity() {
             return false
         }
         btn.text = "Install v$pending"
-        val notes = Updater.pendingUpdateNotes(this)
-        status.text = if (notes.isNullOrEmpty()) {
-            "v$pending is downloaded and ready to install."
-        } else {
-            "v$pending is ready to install.\n$notes"
-        }
+        status.text = "v$pending is downloaded and ready to install."
         return true
     }
 
