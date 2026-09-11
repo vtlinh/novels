@@ -107,4 +107,30 @@ class TtsPlayTest {
         assertTrue(TtsPlay.shouldKeepPolling(TtsPlay.LOAD_MAX_TICKS - 1, hasVoices = false))
         assertFalse(TtsPlay.shouldKeepPolling(TtsPlay.LOAD_MAX_TICKS, hasVoices = false))
     }
+
+    /* THE DEFECT. Returning to the app starts a warmup bind; opening the
+       reader then shuts it down so the reader can own the only engine.
+       OnInit still fires for the shut-down connection, and without this
+       gate the SUCCESS path posted another poll that rebound beside the
+       reader's — two connections, silent play. */
+    @Test
+    fun `a warmup does not continue once the reader is open`() {
+        assertFalse(
+            TtsPlay.shouldContinueWarmup(readerOpen = true, generation = 1, current = 1),
+        )
+        assertTrue(
+            TtsPlay.shouldContinueWarmup(readerOpen = false, generation = 1, current = 1),
+        )
+    }
+
+    @Test
+    fun `a warmup OnInit from a dropped bind is stale`() {
+        assertFalse(
+            "onBackground bumped the token",
+            TtsPlay.shouldContinueWarmup(readerOpen = false, generation = 0, current = 1),
+        )
+        assertFalse(
+            TtsPlay.shouldContinueWarmup(readerOpen = true, generation = 0, current = 1),
+        )
+    }
 }

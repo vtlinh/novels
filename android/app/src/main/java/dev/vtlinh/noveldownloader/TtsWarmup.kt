@@ -25,6 +25,9 @@ object TtsWarmup {
     private var connecting = false
     private var ticks = 0
     private var app: Context? = null
+    /* Bumped on every onBackground so an OnInit / poll from the bind we
+       just dropped cannot start another engine beside the reader. */
+    private var generation = 0
 
     private val poll = Runnable { tick() }
 
@@ -35,7 +38,7 @@ object TtsWarmup {
         app = context.applicationContext
         /* A live reader already binds (and rebinds) for itself. Starting a
            second engine beside it is how a play went silent on one device. */
-        if (ReaderActivity.isOpen()) return
+        if (!TtsPlay.shouldContinueWarmup(ReaderActivity.isOpen(), generation, generation)) return
         if (TtsPlay.canSpeak(!connecting && engine != null, hasVoices())) return
         if (connecting) return
         ticks = 0
@@ -46,6 +49,7 @@ object TtsWarmup {
        about to bind its own — two connections is how a play went silent.
        The next foreground binds again if no reader is open. */
     fun onBackground() {
+        generation++
         handler.removeCallbacks(poll)
         release()
         connecting = false
@@ -61,12 +65,23 @@ object TtsWarmup {
             Voices.isNetworkName(v.name.orEmpty())
 
     private fun bind() {
+        if (!TtsPlay.shouldContinueWarmup(ReaderActivity.isOpen(), generation, generation)) return
         val ctx = app ?: return
         connecting = true
+        val myGen = generation
         val listener = TextToSpeech.OnInitListener { st ->
+            /* Stale first: a shutdown engine still delivers OnInit, and
+               touching connecting here would clear the flag on a newer
+               bind that started after onBackground. */
+            if (!TtsPlay.shouldContinueWarmup(ReaderActivity.isOpen(), myGen, generation)) {
+                return@OnInitListener
+            }
             connecting = false
             if (st != TextToSpeech.SUCCESS) {
                 handler.post {
+                    if (!TtsPlay.shouldContinueWarmup(ReaderActivity.isOpen(), myGen, generation)) {
+                        return@post
+                    }
                     release()
                     if (TtsPlay.shouldKeepPolling(ticks, hasVoices = false)) {
                         ticks++
@@ -98,6 +113,12 @@ object TtsWarmup {
     }
 
     private fun tick() {
+        if (!TtsPlay.shouldContinueWarmup(ReaderActivity.isOpen(), generation, generation)) {
+            release()
+            connecting = false
+            ticks = 0
+            return
+        }
         if (hasVoices()) {
             /* Keep the engine. Releasing it is what made voices vanish
                again on the next bind; the next foreground finds them
