@@ -1,6 +1,7 @@
 package dev.vtlinh.noveldownloader
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
@@ -20,13 +21,16 @@ import java.io.IOException
    after a Slack look completed and found no thread, file, or png.
    A network or service error is not a look.
 
-   Auto-generate (this novel's ⚙): when enabled, a foreground service
-   posts chapter N ≥ from where (N − from) is a multiple of every,
-   at most one chapter every 15 minutes, including while the app is
-   in the background. Novels are always tried in last-read order —
-   the book opened most recently in the reader goes first. The next
-   due chapter that is not on disk yet is skipped until it arrives —
-   later due chapters are not pulled forward. A chapter already
+   Auto-generate: Settings can turn this on for the whole library,
+   with a minimum star rating and an unfinished-only filter. A
+   novel's own ⚙ switch, when on, always includes that book and
+   uses its Every / Starting from. The service posts chapter N ≥
+   from where (N − from) is a multiple of every, at most one
+   chapter every 15 minutes, including while the app is in the
+   background. Novels are always tried in last-read order — the
+   book opened most recently in the reader goes first. The next
+   due chapter that is not on disk yet is skipped until it arrives
+   — later due chapters are not pulled forward. A chapter already
    posted is not posted again. */
 object ChapterImages {
 
@@ -34,7 +38,13 @@ object ChapterImages {
     const val GIVE_UP_MS = 60L * 60L * 1000L
     const val AUTO_EVERY_DEFAULT = 20
     const val AUTO_FROM_DEFAULT = 1
+    const val AUTO_MIN_STARS_DEFAULT = 7
     const val AUTO_GAP_MS = 15L * 60L * 1000L
+    const val GLOBAL_ON_KEY = "autoImageGlobal"
+    const val GLOBAL_EVERY_KEY = "autoImageGlobalEvery"
+    const val GLOBAL_FROM_KEY = "autoImageGlobalFrom"
+    const val GLOBAL_MIN_STARS_KEY = "autoImageMinStars"
+    const val GLOBAL_UNFINISHED_KEY = "autoImageUnfinishedOnly"
     private const val AUTO_LAST_KEY = "autoImageLastAt"
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val autoLock = Any()
@@ -191,6 +201,101 @@ object ChapterImages {
         if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
     }
 
+    fun finishedKey(slug: String) = "novelRead:$slug"
+
+    fun novelFinished(prefs: SharedPreferences, slug: String): Boolean =
+        slug.isNotEmpty() && prefs.getBoolean(finishedKey(slug), false)
+
+    data class AutoCadence(val every: Int, val from: Int)
+
+    /* A novel switch that is on always wins. Otherwise the global
+       switch applies, then the star floor and the unfinished filter. */
+    fun autoApplies(
+        novelOn: Boolean,
+        globalOn: Boolean,
+        stars: Int,
+        minStars: Int,
+        finished: Boolean,
+        unfinishedOnly: Boolean,
+    ): Boolean {
+        if (novelOn) return true
+        if (!globalOn) return false
+        if (stars < minStars.coerceAtLeast(0)) return false
+        if (unfinishedOnly && finished) return false
+        return true
+    }
+
+    fun autoCadence(
+        novelOn: Boolean,
+        novelEvery: Int,
+        novelFrom: Int,
+        globalEvery: Int,
+        globalFrom: Int,
+    ): AutoCadence =
+        if (novelOn) AutoCadence(novelEvery.coerceAtLeast(1), novelFrom.coerceAtLeast(1))
+        else AutoCadence(globalEvery.coerceAtLeast(1), globalFrom.coerceAtLeast(1))
+
+    fun globalEnabled(ctx: Context): Boolean =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getBoolean(GLOBAL_ON_KEY, false)
+
+    fun globalEvery(ctx: Context): Int =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getInt(GLOBAL_EVERY_KEY, AUTO_EVERY_DEFAULT).coerceAtLeast(1)
+
+    fun globalFrom(ctx: Context): Int =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getInt(GLOBAL_FROM_KEY, AUTO_FROM_DEFAULT).coerceAtLeast(1)
+
+    fun minStars(ctx: Context): Int =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getInt(GLOBAL_MIN_STARS_KEY, AUTO_MIN_STARS_DEFAULT)
+            .coerceIn(0, NovelRating.MAX)
+
+    fun unfinishedOnly(ctx: Context): Boolean =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getBoolean(GLOBAL_UNFINISHED_KEY, true)
+
+    fun setGlobal(
+        ctx: Context,
+        enabled: Boolean,
+        every: Int,
+        from: Int,
+        minStars: Int,
+        unfinishedOnly: Boolean,
+    ) {
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
+            .putBoolean(GLOBAL_ON_KEY, enabled)
+            .putInt(GLOBAL_EVERY_KEY, every.coerceAtLeast(1))
+            .putInt(GLOBAL_FROM_KEY, from.coerceAtLeast(1))
+            .putInt(GLOBAL_MIN_STARS_KEY, minStars.coerceIn(0, NovelRating.MAX))
+            .putBoolean(GLOBAL_UNFINISHED_KEY, unfinishedOnly)
+            .commit()
+        if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
+    }
+
+    fun autoOnFor(ctx: Context, slug: String): Boolean {
+        if (slug.isEmpty()) return false
+        val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+        return autoApplies(
+            novelOn = autoEnabled(ctx, slug),
+            globalOn = globalEnabled(ctx),
+            stars = NovelRating.get(prefs, slug),
+            minStars = minStars(ctx),
+            finished = novelFinished(prefs, slug),
+            unfinishedOnly = unfinishedOnly(ctx),
+        )
+    }
+
+    fun cadenceFor(ctx: Context, slug: String): AutoCadence =
+        autoCadence(
+            novelOn = autoEnabled(ctx, slug),
+            novelEvery = autoEvery(ctx, slug),
+            novelFrom = autoFrom(ctx, slug),
+            globalEvery = globalEvery(ctx),
+            globalFrom = globalFrom(ctx),
+        )
+
     private fun slackReady(ctx: Context): Boolean {
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
         val token = (prefs.getString("slackBotToken", "") ?: "").trim()
@@ -292,9 +397,10 @@ object ChapterImages {
     ) {
         if (slug.isEmpty() || folder.isEmpty() || dirName.isEmpty()) return
         if (!slackReady(ctx)) return
-        val autoOn = autoEnabled(ctx, slug)
-        val every = autoEvery(ctx, slug)
-        val from = autoFrom(ctx, slug)
+        val autoOn = autoOnFor(ctx, slug)
+        val cadence = cadenceFor(ctx, slug)
+        val every = cadence.every
+        val from = cadence.from
         val app = ctx.applicationContext
         work.launch {
             slackPoster(app)?.let { slack ->
@@ -317,7 +423,8 @@ object ChapterImages {
     }
 
     /* Slack is set and there is either a waiting download or at least
-       one novel with auto-generate on. The service uses this to decide
+       one novel auto-generate applies to (its own switch, or the
+       global switch plus filters). The service uses this to decide
        whether to start; the loop itself stops when a pass finds nothing
        left to post or fetch. */
     fun hasBackgroundWork(ctx: Context): Boolean {
@@ -329,7 +436,7 @@ object ChapterImages {
             .getString("tree", "") ?: ""
         if (folder.isEmpty()) return false
         val novels = try { store.novels(folder) } catch (e: Exception) { emptyList() }
-        return novels.any { autoEnabled(ctx, it.slug) }
+        return novels.any { autoOnFor(ctx, it.slug) }
     }
 
     /* Keeps posting and fetching while the service holds the process.
@@ -361,7 +468,7 @@ object ChapterImages {
         if (!autoReady(autoLastAt(app))) return false
         val slack = slackPoster(app)
         for (novel in loadAutoNovels(app)) {
-            if (!autoEnabled(app, novel.slug) || !slackReady(app)) continue
+            if (!slackReady(app)) continue
             val chapters = loadChapters(app, novel.folder, novel.dirName, novel.slug)
             if (chapters.isEmpty()) continue
             slack?.let {
@@ -405,15 +512,31 @@ object ChapterImages {
         if (folder.isEmpty()) return emptyList()
         val store = try { DownloadStore(app) } catch (e: Exception) { return emptyList() }
         val recs = try { store.novels(folder) } catch (e: Exception) { return emptyList() }
+        val prefs = app.getSharedPreferences("app", Context.MODE_PRIVATE)
+        val globalOn = globalEnabled(app)
+        val gEvery = globalEvery(app)
+        val gFrom = globalFrom(app)
+        val floor = minStars(app)
+        val onlyOpen = unfinishedOnly(app)
         val out = ArrayList<AutoTarget>()
         for (rec in recs) {
-            if (!autoEnabled(app, rec.slug)) continue
+            val novelOn = autoEnabled(app, rec.slug)
+            if (!autoApplies(
+                    novelOn, globalOn,
+                    NovelRating.get(prefs, rec.slug), floor,
+                    novelFinished(prefs, rec.slug), onlyOpen,
+                )
+            ) continue
             val dir = try {
                 store.dirNameOrGuess(folder, rec.slug, rec.title)
             } catch (e: Exception) { "" }
             if (dir.isEmpty()) continue
+            val cadence = autoCadence(
+                novelOn, autoEvery(app, rec.slug), autoFrom(app, rec.slug),
+                gEvery, gFrom,
+            )
             out.add(
-                AutoTarget(folder, dir, rec.slug, rec.lastRead, autoFrom(app, rec.slug), autoEvery(app, rec.slug)),
+                AutoTarget(folder, dir, rec.slug, rec.lastRead, cadence.from, cadence.every),
             )
         }
         return byLastRead(out, { it.lastRead }, { it.slug })
