@@ -3100,6 +3100,11 @@ class ReaderActivity : AppCompatActivity() {
                 getColor(R.color.card), getColor(R.color.input_stroke),
                 text.lineSpacingMultiplier, text.lineSpacingExtra,
                 alt,
+                TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    ChapterImageSpan.CAPTION_SP,
+                    resources.displayMetrics,
+                ),
             ),
             at, at + 1,
             android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
