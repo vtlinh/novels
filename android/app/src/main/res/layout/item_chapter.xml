@@ -28,6 +28,21 @@
         android:maxLines="1"
         android:ellipsize="end" />
 
+    <ImageView
+        android:id="@+id/chapterPictureBtn"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_marginStart="4dp"
+        android:padding="6dp"
+        android:src="@drawable/ic_picture"
+        android:tint="@color/fg"
+        android:scaleType="centerInside"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:clickable="true"
+        android:focusable="true"
+        android:contentDescription="Chapter picture"
+        android:visibility="gone" />
+
     <TextView
         android:id="@+id/chapterNow"
         android:layout_width="wrap_content"

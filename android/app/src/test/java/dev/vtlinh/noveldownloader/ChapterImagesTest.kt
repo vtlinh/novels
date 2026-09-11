@@ -383,6 +383,8 @@ class ChapterImagesTest {
         assertFalse(ChapterImages.objectReplacementAt("A\uFFFC\nmore", 3))
         assertFalse(ChapterImages.objectReplacementAt("no picture", 2))
         assertFalse(ChapterImages.imageAt("A\uFFFC\nmore", 1))
+        assertFalse(ChapterImages.hasEmbeddedPicture("A\uFFFC\nmore"))
+        assertFalse(ChapterImages.hasEmbeddedPicture("no picture"))
     }
 
     @Test

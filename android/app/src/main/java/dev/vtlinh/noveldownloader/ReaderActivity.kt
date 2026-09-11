@@ -28,11 +28,15 @@ import kotlinx.coroutines.withContext
    the English translation and the Vietnamese source; the ⚙ menu also has
    the language toggle, Font size +/−, and Generate image
    (or Poll image while Slack still owes a picture).
+   A chapter with a picture shows a toolbar button that opens it
+   in a dialog with its alt text; opening that chapter also
+   shows the dialog briefly.
    Language and font persist. */
 class ReaderActivity : AppCompatActivity() {
 
     companion object {
         private const val SEP = "\n\n⁂\n\n"
+        private const val STATE_AUTO_PICTURE = "autoPictureChapter"
 
         /* the reader instance currently owning TTS. Opening a new reader
            finishes the old one so two chapters never read at once — but
@@ -80,8 +84,16 @@ class ReaderActivity : AppCompatActivity() {
        so the header can show the chapter actually being READ */
     /* `idx` is a position in the current listing, and a rename pass can move
        it under us — resyncIfRenamed carries the whole buffer across by name */
-    private class LoadedChapter(var idx: Int, var start: Int, val heading: String)
+    private class LoadedChapter(
+        var idx: Int,
+        var start: Int,
+        val heading: String,
+        val hasImage: Boolean = false,
+    )
     private val loadedChapters = ArrayList<LoadedChapter>()
+
+    private fun loadedOf(idx: Int, start: Int, body: CharSequence) =
+        LoadedChapter(idx, start, headingOf(body), ChapterImages.hasEmbeddedPicture(body))
 
     private fun headingOf(body: CharSequence): String {
         val nl = body.indexOf('\n')
@@ -138,6 +150,7 @@ class ReaderActivity : AppCompatActivity() {
                the TTS position doesn't belong to, and the restore then found
                no saved spot and stayed at the top. */
             if (!speaking) saveLastChapter(cur.idx)
+            bindPictureButton()
         }
         /* keep the reading notification on the current chapter */
         if (speaking && heading.isNotEmpty() && heading != lastNotifHeading) {
@@ -378,6 +391,10 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var text: TextView
     private lateinit var titleBar: TextView
     private lateinit var scroll: ScrollView
+    private lateinit var pictureBtn: android.widget.ImageView
+    /* Chapter we already auto-opened the picture dialog for, so a
+       rotation or a re-pick of the same chapter does not pop it again. */
+    private var lastAutoPictureChapter: String? = null
 
     /* ---- sleep timer + shake-to-reset ---- */
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -453,6 +470,9 @@ class ReaderActivity : AppCompatActivity() {
         titleBar = findViewById(R.id.readerTitle)
         text = findViewById(R.id.readerText)
         scroll = findViewById(R.id.readerScroll)
+        pictureBtn = findViewById(R.id.pictureBtn)
+        pictureBtn.setOnClickListener { showChapterPicture(auto = false) }
+        lastAutoPictureChapter = savedInstanceState?.getString(STATE_AUTO_PICTURE)
         titleBar.text = novelTitle
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
         /* no "Loading…" placeholder — the chapter renders almost immediately,
@@ -794,6 +814,7 @@ class ReaderActivity : AppCompatActivity() {
         chaptersBtn.textSize = 15f
         chaptersBtn.setOnClickListener { editDocument() }
         findViewById<TextView>(R.id.speechEditsBtn).visibility = android.view.View.GONE
+        pictureBtn.visibility = android.view.View.GONE
         val menuBtn = findViewById<TextView>(R.id.settingsBtn)
         menuBtn.text = "\u22EE"
         menuBtn.setOnClickListener { showDocumentMenu(menuBtn) }
@@ -2280,8 +2301,14 @@ class ReaderActivity : AppCompatActivity() {
         leaveReader()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        lastAutoPictureChapter?.let { outState.putString(STATE_AUTO_PICTURE, it) }
+    }
+
     override fun onDestroy() {
         if (active === this) active = null
+        ChapterImagePreview.close()
         cancelSleepTimer()
         settleHandler.removeCallbacks(settleRunnable)
         stopShakeDetection()
@@ -2327,7 +2354,7 @@ class ReaderActivity : AppCompatActivity() {
             }
             if (outcome.getOrNull() == true && !asDocument()) {
                 val pos = currentChapterIdx
-                if (pos >= 0) openAt(pos)
+                if (pos >= 0) openAt(pos, autoPicture = true)
             }
             bindImageAction(gen, card)
         }
@@ -2348,7 +2375,7 @@ class ReaderActivity : AppCompatActivity() {
             }
             if (outcome.getOrNull() == true && !asDocument()) {
                 val pos = currentChapterIdx
-                if (pos >= 0) openAt(pos)
+                if (pos >= 0) openAt(pos, autoPicture = true)
             }
             bindImageAction(gen, card)
         }
@@ -3045,6 +3072,45 @@ class ReaderActivity : AppCompatActivity() {
         return layout.getOffsetForHorizontal(line, e.x - text.totalPaddingLeft)
     }
 
+    private fun currentLoadedChapter(): LoadedChapter? =
+        loadedChapters.firstOrNull { it.idx == currentChapterIdx }
+
+    private fun bindPictureButton() {
+        val show = ChapterImagePreview.shouldShowButton(
+            !asDocument() && currentLoadedChapter()?.hasImage == true,
+        )
+        pictureBtn.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
+    }
+
+    /* Dialog with the picture and its alt. auto = fade after 7s unless
+       the reader touches the card. The toolbar button always holds. */
+    private fun showChapterPicture(auto: Boolean) {
+        if (asDocument()) return
+        val folder = prefs.getString("tree", null) ?: return
+        val dir = intent.getStringExtra("dir") ?: return
+        val slug = intent.getStringExtra("slug") ?: return
+        val chapter = currentChapterFile() ?: return
+        if (currentLoadedChapter()?.hasImage != true) return
+        lifecycleScope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                ChapterImages.chapterUri(this@ReaderActivity, folder, dir, chapter, slug)
+            } ?: return@launch
+            if (isFinishing || isDestroyed) return@launch
+            val alt = ChapterImages.linkedAlt(this@ReaderActivity, folder, slug, chapter)
+            val one = ChapterImages.savedOf(chapter, uri, alt)
+            ChapterImagePreview.show(this@ReaderActivity, one, null, auto)
+        }
+    }
+
+    private fun maybeAutoShowPicture() {
+        val chapter = currentChapterFile() ?: return
+        val hasImage = currentLoadedChapter()?.hasImage == true
+        val already = lastAutoPictureChapter == chapter
+        if (!ChapterImagePreview.shouldAutoOpen(hasImage, true, already)) return
+        lastAutoPictureChapter = chapter
+        showChapterPicture(auto = true)
+    }
+
     /* A confirmed single tap on the picture — not a double-tap, which
        still starts reading from there. Opens the same full-screen
        gallery the chapter-list grid uses, so pinch and swipe have a
@@ -3128,6 +3194,7 @@ class ReaderActivity : AppCompatActivity() {
         targetPara: Int,
         anchor: String? = null,
         saveTts: Boolean = false,
+        autoPicture: Boolean = false,
     ): Boolean {
         if (loading) return false
         val lc = loadedChapters.firstOrNull { it.idx == pos } ?: return false
@@ -3154,6 +3221,8 @@ class ReaderActivity : AppCompatActivity() {
         placeAt(off, fifth = targetPara > 0) {
             setTextFocusable(true)
             updateHeader()
+            bindPictureButton()
+            if (autoPicture) maybeAutoShowPicture()
             scroll.post { loadReady = true }
         }
         return true
@@ -3181,6 +3250,7 @@ class ReaderActivity : AppCompatActivity() {
         targetPara: Int,
         anchor: String? = null,
         saveTts: Boolean = false,
+        autoPicture: Boolean = currentChapterIdx != pos,
     ) {
         /* picking the chapter TTS is already reading → keep reading (nothing new
            to load); just bring the spoken line back into view */
@@ -3196,8 +3266,8 @@ class ReaderActivity : AppCompatActivity() {
         gotoJob = lifecycleScope.launch {
             var waited = 0
             while (loading && waited < 120) { kotlinx.coroutines.delay(50); waited++ }
-            if (!jumpToLoaded(pos, targetPara, anchor, saveTts)) {
-                openAt(pos, targetPara, anchor, saveTts)
+            if (!jumpToLoaded(pos, targetPara, anchor, saveTts, autoPicture)) {
+                openAt(pos, targetPara, anchor, saveTts, autoPicture)
             }
         }
     }
@@ -3221,6 +3291,7 @@ class ReaderActivity : AppCompatActivity() {
         targetPara: Int = 0,
         anchor: String? = null,
         saveTts: Boolean = false,
+        autoPicture: Boolean = false,
     ) {
         /* Both early returns disarm the Play flag. It is set right before the
            call at the Play button, and nothing else ever cleared it — so a
@@ -3289,7 +3360,7 @@ class ReaderActivity : AppCompatActivity() {
                     continue
                 }
                 if (sb.isNotEmpty()) sb.append(SEP)
-                loadedChapters.add(LoadedChapter(i, sb.length, headingOf(b)))
+                loadedChapters.add(loadedOf(i, sb.length, b))
                 if (i == p) {
                     openStart = sb.length
                     targetBodyLen = b.length
@@ -3323,6 +3394,8 @@ class ReaderActivity : AppCompatActivity() {
                        the first loaded chapter rather than on it. */
                     prependArmed = false
                     updateHeader()
+                    bindPictureButton()
+                    if (autoPicture) maybeAutoShowPicture()
                     if (pendingSpeakAfterOpen) {
                         pendingSpeakAfterOpen = false
                         /* TTS extends its own runway from here (speakNext) */
@@ -3654,7 +3727,7 @@ class ReaderActivity : AppCompatActivity() {
                 val body = readAt(idx)
                 if (body != null) {
                     val start = if (text.text.isEmpty()) 0 else text.text.length + SEP.length
-                    loadedChapters.add(LoadedChapter(idx, start, headingOf(body)))
+                    loadedChapters.add(loadedOf(idx, start, body))
                     if (text.text.isEmpty()) {
                         text.setText(body, TextView.BufferType.EDITABLE)
                     } else {
@@ -3770,7 +3843,7 @@ class ReaderActivity : AppCompatActivity() {
             var acc = 0
             val newLoaded = ArrayList<LoadedChapter>()
             for ((chapterIdx, body) in bodies) {
-                newLoaded.add(LoadedChapter(chapterIdx, acc, headingOf(body)))
+                newLoaded.add(loadedOf(chapterIdx, acc, body))
                 acc += body.length + SEP.length
             }
             loadedChapters.addAll(0, newLoaded)
