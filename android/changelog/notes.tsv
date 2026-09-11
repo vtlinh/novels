@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Don't wait for one chapter picture before asking for the next
+	Keep every toolbar icon the same size
+1.37.47	Don't wait for one chapter picture before asking for the next
 1.37.46	Mark novels as read or unread, and only make pictures for unread ones
 1.37.45	Wait a day for a chapter picture unless Slack no longer has the post
 1.37.44	Keep the chapter-picture popup up for 15 seconds
