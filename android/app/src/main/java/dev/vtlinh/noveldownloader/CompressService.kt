@@ -103,15 +103,17 @@ class CompressService : Service() {
                        file named exactly like a chapter, but the user's own
                        "Chapter 1.txt" in their own folder is not ours to gzip,
                        and the half-written sweep runs on the whole listing.
-
-                       An EMPTY set falls back to the old whole-tree walk: a
-                       library predating these columns records neither, and
-                       skipping everything would leave it uncompressed for ever
-                       with nothing to say so. */
+                       An empty owned set is "no novels on record", not a
+                       licence to walk everything: ownedDirNames already
+                       guesses a directory for each registered novel, so the
+                       only empty case left is documents-only (or a query
+                       failure, which must not be treated as empty). */
                     val owned = try {
                         DownloadStore(this@CompressService).ownedDirNames(treeStr)
                     } catch (e: Exception) {
-                        emptySet<String>()
+                        /* A failed query is not "no novels". Standing aside
+                           keeps the job flag set so the next start retries. */
+                        break
                     }
                     val allDirs = try {
                         Saf.children(cr, treeUri, Saf.rootId(treeUri))
@@ -119,8 +121,7 @@ class CompressService : Service() {
                         emptyList()
                     }
                     val dirs = allDirs.filter {
-                        it.isDir && !Documents.isReservedDir(it.name) &&
-                            (owned.isEmpty() || it.name in owned)
+                        it.isDir && CompressWalk.includeNovelDir(it.name, owned)
                     }
                     var aborted = false
                     var novelsChanged = false
