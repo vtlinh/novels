@@ -372,6 +372,17 @@ class ChapterImagesTest {
         assertEquals(null, ChapterImages.swipeDelta(-120f, 200f, -400f, 80f, 100f))
         assertEquals(null, ChapterImages.swipeDelta(-120f, 10f, -40f, 80f, 100f))
         assertEquals(1, ChapterImages.swipeDelta(-120f, 10f, -120f, 80f, 0f))
+        assertEquals(-1, ChapterImages.indexOfSaved(emptyList(), "Chapter 21.txt"))
+    }
+
+    @Test
+    fun `a tap on the object-replacement char is a tap on the picture`() {
+        assertTrue(ChapterImages.objectReplacementAt("A\uFFFC\nmore", 1))
+        assertTrue(ChapterImages.objectReplacementAt("A\uFFFC\nmore", 2))
+        assertFalse(ChapterImages.objectReplacementAt("A\uFFFC\nmore", 0))
+        assertFalse(ChapterImages.objectReplacementAt("A\uFFFC\nmore", 3))
+        assertFalse(ChapterImages.objectReplacementAt("no picture", 2))
+        assertFalse(ChapterImages.imageAt("A\uFFFC\nmore", 1))
     }
 
     @Test

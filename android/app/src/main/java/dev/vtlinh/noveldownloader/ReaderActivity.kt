@@ -606,11 +606,16 @@ class ReaderActivity : AppCompatActivity() {
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
                 override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
-                    val layout = text.layout ?: return false
-                    val line = layout.getLineForVertical(e.y.toInt() - text.totalPaddingTop)
-                    val off = layout.getOffsetForHorizontal(line, e.x - text.totalPaddingLeft)
+                    val off = textOffsetAt(e) ?: return false
                     startTtsFrom(off)
                     swallowTap = true
+                    return true
+                }
+
+                override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
+                    val off = textOffsetAt(e) ?: return false
+                    if (!ChapterImages.imageAt(text.text, off)) return false
+                    openChapterPicture(off)
                     return true
                 }
             },
@@ -3031,6 +3036,40 @@ class ReaderActivity : AppCompatActivity() {
                 else -> Saf.readText(contentResolver, treeUri!!, ref)
             } ?: return@withContext null
             decorateChapter(name, raw)
+        }
+    }
+
+    private fun textOffsetAt(e: android.view.MotionEvent): Int? {
+        val layout = text.layout ?: return null
+        val line = layout.getLineForVertical(e.y.toInt() - text.totalPaddingTop)
+        return layout.getOffsetForHorizontal(line, e.x - text.totalPaddingLeft)
+    }
+
+    /* A confirmed single tap on the picture — not a double-tap, which
+       still starts reading from there. Opens the same full-screen
+       gallery the chapter-list grid uses, so pinch and swipe have a
+       surface to work on. */
+    private fun openChapterPicture(off: Int) {
+        val folder = prefs.getString("tree", null) ?: return
+        val dir = intent.getStringExtra("dir") ?: return
+        val slug = intent.getStringExtra("slug") ?: return
+        val lc = loadedChapters.lastOrNull { it.start <= off } ?: return
+        val chapter = chapters?.ordered?.getOrNull(lc.idx) ?: return
+        lifecycleScope.launch {
+            val items = withContext(Dispatchers.IO) {
+                ChapterImages.listSaved(this@ReaderActivity, folder, dir, slug)
+            }
+            if (isFinishing || isDestroyed) return@launch
+            val start = ChapterImages.indexOfSaved(items, chapter)
+            if (start >= 0) {
+                PictureGallery.show(this@ReaderActivity, items.map { it to null }, start)
+                return@launch
+            }
+            val uri = ChapterImages.chapterUri(this@ReaderActivity, folder, dir, chapter, slug)
+                ?: return@launch
+            val alt = ChapterImages.linkedAlt(this@ReaderActivity, folder, slug, chapter)
+            val one = ChapterImages.savedOf(chapter, uri, alt)
+            PictureGallery.show(this@ReaderActivity, listOf(one to null), 0)
         }
     }
 
