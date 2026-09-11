@@ -427,4 +427,53 @@ class ChapterImagesTest {
             ),
         )
     }
+
+    @Test
+    fun `picture logs name the novel and chapter`() {
+        assertEquals(
+            "Library of Heaven's Path, chapter 21",
+            ChapterImages.describe("Library of Heaven's Path", "Chapter 21.txt"),
+        )
+        assertEquals(
+            "Library of Heaven's Path, chapter 1",
+            ChapterImages.describe("Library of Heaven's Path", "Chapter 1 - Prologue.txt"),
+        )
+        assertEquals("This novel, chapter 5", ChapterImages.describe("  ", "Chapter 5.txt"))
+        assertEquals("My Book, notes", ChapterImages.describe("My Book", "notes.txt"))
+    }
+
+    @Test
+    fun `picture logs report Slack catalog results in words`() {
+        assertEquals(
+            "Checking Slack for pictures already made for Library of Heaven's Path — 24 chapters",
+            ChapterImages.catalogLookLine("Library of Heaven's Path", 24),
+        )
+        assertEquals(
+            "Checking Slack for pictures already made for this novel — 1 chapter",
+            ChapterImages.catalogLookLine("", 1),
+        )
+        assertEquals(
+            "Library of Heaven's Path: Slack has no picture yet for 24 chapters",
+            ChapterImages.catalogResultLine("Library of Heaven's Path", 0, 24),
+        )
+        assertEquals(
+            "Library of Heaven's Path: Slack already had pictures for 2 chapters — saved",
+            ChapterImages.catalogResultLine("Library of Heaven's Path", 2, 0),
+        )
+        assertEquals(
+            "Library of Heaven's Path: saved 1 chapter from Slack; 23 chapters still have none",
+            ChapterImages.catalogResultLine("Library of Heaven's Path", 1, 23),
+        )
+    }
+
+    @Test
+    fun `picture logs say how large a file is and how long a wait is`() {
+        assertEquals("400 B", ChapterImages.sizeLabel(400))
+        assertEquals("1 KB", ChapterImages.sizeLabel(1024))
+        assertEquals("45 KB", ChapterImages.sizeLabel(45 * 1024))
+        assertEquals("1.5 MB", ChapterImages.sizeLabel((1024 + 512) * 1024))
+        assertEquals("about 1 minute", ChapterImages.waitLabel(20_000L))
+        assertEquals("about 5 minutes", ChapterImages.waitLabel(5L * 60L * 1000L))
+        assertEquals("about 50 minutes", ChapterImages.waitLabel(50L * 60L * 1000L))
+    }
 }

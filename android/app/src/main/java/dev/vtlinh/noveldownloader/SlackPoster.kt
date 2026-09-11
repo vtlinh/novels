@@ -308,9 +308,6 @@ class SlackPoster(
         DownloadService.appendLog("image: $msg")
     }
 
-    private fun shortHash(hash: String) =
-        if (hash.length <= 12) hash else hash.take(12)
-
     fun postChapter(text: String): Post {
         val bytes = text.toByteArray(Charsets.UTF_8)
         val hash = Scenes.contentHash(text)
@@ -430,7 +427,6 @@ class SlackPoster(
     ): Existing {
         val named = catalog.files.map { NamedFile(it.name, it.title, it.threadTs) }
         val hit = catalogHit(catalog.hist, named, hash, knownThreads)
-        log("look ${shortHash(hash)} known=${knownThreads.count { it.isNotEmpty() }} catalog png=${hit.pngName != null} threads=${hit.threads.size}")
         var png: ByteArray? = null
         var alt = ""
         var readError = catalog.readError
@@ -442,26 +438,20 @@ class SlackPoster(
                 val full = withDescription(file.file)
                 png = download(full)
                 alt = fileAlt(full)
-                log("catalog png ${hit.pngName} ${png?.size ?: 0}B alt=${alt.length}c")
             }
         }
         if (png == null) {
             for (ts in hit.threads) {
                 try {
                     val files = replies(ts)
-                    val names = files.map {
-                        hydrate(it).optString("name").ifEmpty { it.optString("id") }
-                    }
-                    log("replies $ts files=${files.size} $names")
                     val got = pickImage(hash, files)
                     if (got != null) {
                         png = got.bytes
                         alt = got.alt
-                        log("replies $ts png ${got.bytes.size}B")
                         break
                     }
                 } catch (e: ApiException) {
-                    log("replies $ts ${e.code}")
+                    log("Slack thread: ${describe(e.code)}")
                     if (readError == null &&
                         (e.code == "missing_scope" || e.code == "not_in_channel" ||
                             e.code == "channel_not_found")
@@ -476,10 +466,6 @@ class SlackPoster(
                 }
             }
         }
-        if (lookDenied(png, readError)) {
-            log("look denied $readError")
-        }
-        log("look done ${shortHash(hash)} png=${png?.size ?: 0}B threads=${hit.threads.size}")
         return Existing(png, hit.threads, readError, alt)
     }
 
@@ -523,9 +509,9 @@ class SlackPoster(
                 val ts = threadTsOf(file).orEmpty()
                 files.add(CatFile(name, title, ts, file))
             }
-            log("catalog history=${msgs.size} files=${files.size}")
+            log("Read the Slack channel — ${msgs.size} messages and ${files.size} files")
         } catch (e: ApiException) {
-            log("catalog files.list ${e.code}")
+            log("Could not list Slack files: ${describe(e.code)}")
             remember(e.code)
             if (e.code != "missing_scope") throw e
         }
@@ -673,7 +659,7 @@ class SlackPoster(
                 cursor = next
             }
         } catch (e: ApiException) {
-            log("history ${e.code} after ${out.size} msgs")
+            log("Could not read Slack history after ${out.size} messages: ${describe(e.code)}")
             if (e.code != "missing_scope" && e.code != "not_in_channel" &&
                 e.code != "channel_not_found" &&
                 e.code != "method_not_supported_for_channel_type"

@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Name the novel and chapter in picture logs
 	Don't toast when a chapter picture is polling or saving
 	Keep chapter-picture captions a fixed size
 	Don't list what's new under the update button
