@@ -7,8 +7,9 @@ object CompressWalk {
     /* An empty owned set means no novels are on record — not "walk
        everything". The tree is whichever folder the user picked and may
        hold their own files; a chapter-shaped name in one of those is
-       still theirs. The reserved-name check is the same rule as
-       Documents.isReservedDir (`documents`, any case). */
+       still theirs. Reserved names are Documents.isReservedDir — the
+       pasted-text store and Android's Documents folder — so a rename
+       of DIR cannot silently start gzipping that folder as a novel. */
     fun includeNovelDir(name: String, owned: Set<String>): Boolean =
-        !name.equals("documents", ignoreCase = true) && name in owned
+        !Documents.isReservedDir(name) && name in owned
 }
