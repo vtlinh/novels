@@ -2313,7 +2313,6 @@ class ReaderActivity : AppCompatActivity() {
         val slug = intent.getStringExtra("slug")
         val chapter = currentChapterFile()
         if (folder.isNullOrEmpty() || dir.isNullOrEmpty() || slug.isNullOrEmpty() || chapter == null) {
-            android.widget.Toast.makeText(this, "Could not read this chapter.", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         setGenerateEnabled(gen, false)
@@ -2321,26 +2320,10 @@ class ReaderActivity : AppCompatActivity() {
             val outcome = withContext(Dispatchers.IO) {
                 ChapterImages.request(this@ReaderActivity, folder, dir, slug, chapter)
             }
-            outcome.fold(
-                onSuccess = { saved ->
-                    android.widget.Toast.makeText(
-                        this@ReaderActivity,
-                        if (saved) "Image saved." else "Waiting for the image…",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                    if (saved && !asDocument()) {
-                        val pos = currentChapterIdx
-                        if (pos >= 0) openAt(pos)
-                    }
-                },
-                onFailure = {
-                    android.widget.Toast.makeText(
-                        this@ReaderActivity,
-                        it.message ?: "Could not generate an image.",
-                        android.widget.Toast.LENGTH_LONG,
-                    ).show()
-                },
-            )
+            if (outcome.getOrNull() == true && !asDocument()) {
+                val pos = currentChapterIdx
+                if (pos >= 0) openAt(pos)
+            }
             bindImageAction(gen, card)
         }
     }
@@ -2351,7 +2334,6 @@ class ReaderActivity : AppCompatActivity() {
         val slug = intent.getStringExtra("slug")
         val chapter = currentChapterFile()
         if (folder.isNullOrEmpty() || dir.isNullOrEmpty() || slug.isNullOrEmpty() || chapter == null) {
-            android.widget.Toast.makeText(this, "Could not read this chapter.", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         setGenerateEnabled(gen, false)
@@ -2359,26 +2341,10 @@ class ReaderActivity : AppCompatActivity() {
             val outcome = withContext(Dispatchers.IO) {
                 ChapterImages.poll(this@ReaderActivity, folder, dir, slug, chapter)
             }
-            outcome.fold(
-                onSuccess = { saved ->
-                    android.widget.Toast.makeText(
-                        this@ReaderActivity,
-                        if (saved) "Image saved." else "No image yet.",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                    if (saved && !asDocument()) {
-                        val pos = currentChapterIdx
-                        if (pos >= 0) openAt(pos)
-                    }
-                },
-                onFailure = {
-                    android.widget.Toast.makeText(
-                        this@ReaderActivity,
-                        it.message ?: "No image yet.",
-                        android.widget.Toast.LENGTH_LONG,
-                    ).show()
-                },
-            )
+            if (outcome.getOrNull() == true && !asDocument()) {
+                val pos = currentChapterIdx
+                if (pos >= 0) openAt(pos)
+            }
             bindImageAction(gen, card)
         }
     }
