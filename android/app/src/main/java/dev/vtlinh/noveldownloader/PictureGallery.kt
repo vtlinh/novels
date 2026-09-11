@@ -52,7 +52,7 @@ object PictureGallery {
                 activity.resources.displayMetrics.heightPixels,
             )
             val first = items[start]
-            val shown = first.second ?: withContext(Dispatchers.IO) {
+            val firstBmp = first.second ?: withContext(Dispatchers.IO) {
                 ChapterImages.thumb(activity, first.first.uri, edge)
             } ?: return@launch
             if (activity.isFinishing || activity.isDestroyed) return@launch
@@ -65,7 +65,7 @@ object PictureGallery {
                     0,
                     1f,
                 )
-                setImageBitmap(shown)
+                setImageBitmap(firstBmp)
             }
             val caption = TextView(activity).apply {
                 textSize = 15f
