@@ -16,7 +16,9 @@ import java.io.IOException
 /* One chapter image: post {hash}.txt, record that Slack thread in
    the database, poll for {hash}.png, and save it under scenes/. The
    chapter→image row is how the reader knows to draw a picture. Request
-   threads stay until that save — an hour give-up only stops polling.
+   threads stay until that save — an hour give-up only stops polling
+   after a Slack look completed and found no thread, file, or png.
+   A network or service error is not a look.
 
    Auto-generate (this novel's ⚙): when enabled, a foreground service
    posts chapter N ≥ from where (N − from) is a multiple of every,
@@ -130,11 +132,16 @@ object ChapterImages {
     fun expired(startedAt: Long, now: Long = System.currentTimeMillis()) =
         now - startedAt >= GIVE_UP_MS
 
-    /* A stale wait is dropped only after Slack has been checked once
-       more. Dropping first loses a png that landed while the app was
-       closed (generated at 30 min, app opened at 2 h). */
-    fun mayDrop(startedAt: Long, looked: Boolean, now: Long = System.currentTimeMillis()) =
-        expired(startedAt, now) && looked
+    /* A stale wait is dropped only after a Slack look completed and
+       found no thread, file, or png. Dropping first loses a png that
+       landed while the app was closed. A network / 503 / timeout is
+       not a look — keep polling. */
+    fun mayDrop(
+        startedAt: Long,
+        looked: Boolean,
+        foundNothing: Boolean,
+        now: Long = System.currentTimeMillis(),
+    ): Boolean = expired(startedAt, now) && looked && foundNothing
 
     /* Chapter N is due when it is at or after `from` and lands on the
        every-th step from there. Defaults (from 1, every 20) → 1, 21, 41. */
@@ -787,7 +794,9 @@ object ChapterImages {
         return Result.failure(IOException("No image yet."))
     }
 
-    /* One Slack lookup. Request threads stay unless the png is saved. */
+    /* One Slack lookup. Request threads stay unless the png is saved.
+       A throw here is a transport / Slack-outage miss — do not mark
+       looked, do not give up. */
     private fun lastLook(
         ctx: Context,
         slack: SlackPoster,
@@ -801,7 +810,7 @@ object ChapterImages {
         log("$chapter lastLook hash=${shortHash(hash)} threads=${threads.count { it.isNotEmpty() }}")
         val found = try { slack.findExisting(hash, threads) } catch (e: Exception) {
             log("$chapter lastLook fail ${e.message}")
-            SlackPoster.Existing(null, emptyList())
+            return Result.failure(e)
         }
         log("$chapter lastLook png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
         deniedLook(found)?.let { return it }
@@ -812,11 +821,12 @@ object ChapterImages {
         for (ts in found.threads) {
             if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
         }
+        val missing = SlackPoster.lookMissing(found.png, found.readError)
         val store = DownloadStore(ctx)
-        store.markImageReqLooked(folder, slug, chapter)
+        if (missing) store.markImageReqLooked(folder, slug, chapter)
         val started = store.imageReqs(folder, slug, chapter)
             .minOfOrNull { it.startedAt } ?: 0L
-        if (mayDrop(started, looked = true)) {
+        if (mayDrop(started, looked = missing, foundNothing = missing)) {
             return Result.failure(IOException("Gave up waiting for the image."))
         }
         return Result.failure(IOException("No image came back from Slack."))
