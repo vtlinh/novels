@@ -4,22 +4,23 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Pinch and swipe the full-screen chapter picture
-	Don't gzip the novel-documents folder as if it were a novel
-	Compile the vivutruyen2 listing test against the Link type
-	Less empty space at the top and bottom of the Library
-	Keep star ranking when a folder-scan novel merges with its site row
-	Don't overwrite a document with an empty editor
-	Don't gzip the user's Documents folder
-	Keep the listen spot when a paused chapter skip reopens the window
-	Keep the listen chapter when switching EN/VI
-	Don't gzip other folders when no novels are on record
-	Don't drop the listen spot when a Library delete fails
-	Don't bind a second TTS engine when the reader opens
-	Don't save preview chapters
-	Show this version's notes on the update notification
-	Post only one auto-generated chapter image every 5 minutes
-	Pinch to zoom a full-screen chapter picture
+	Don't list what's new under the update button
+1.37.36	Pinch and swipe the full-screen chapter picture
+1.37.36	Don't gzip the novel-documents folder as if it were a novel
+1.37.36	Compile the vivutruyen2 listing test against the Link type
+1.37.36	Less empty space at the top and bottom of the Library
+1.37.36	Keep star ranking when a folder-scan novel merges with its site row
+1.37.36	Don't overwrite a document with an empty editor
+1.37.36	Don't gzip the user's Documents folder
+1.37.36	Keep the listen spot when a paused chapter skip reopens the window
+1.37.36	Keep the listen chapter when switching EN/VI
+1.37.36	Don't gzip other folders when no novels are on record
+1.37.36	Don't drop the listen spot when a Library delete fails
+1.37.36	Don't bind a second TTS engine when the reader opens
+1.37.36	Don't save preview chapters
+1.37.36	Show this version's notes on the update notification
+1.37.36	Post only one auto-generated chapter image every 5 minutes
+1.37.36	Pinch to zoom a full-screen chapter picture
 1.37.33	Swipe left or right between full-screen chapter pictures
 1.37.32	Raise the update-ready notification above pictures and downloads
 1.37.31	Add library-wide chapter image settings with star and unfinished filters
