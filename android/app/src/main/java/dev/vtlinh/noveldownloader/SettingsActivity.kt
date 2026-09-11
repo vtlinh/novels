@@ -186,19 +186,8 @@ class SettingsActivity : AppCompatActivity() {
         fromInput.setText(ChapterImages.globalFrom(this).toString())
         starsInput.setText(ChapterImages.minStars(this).toString())
         unfinishedCheck.isChecked = ChapterImages.unfinishedOnly(this)
-        autoCheck.setOnCheckedChangeListener { _, checked ->
+        autoCheck.setOnCheckedChangeListener { _, _ ->
             saveAutoImage()
-            if (checked) {
-                val token = (prefs.getString("slackBotToken", "") ?: "").trim()
-                val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
-                if (token.isEmpty() || channel.isEmpty()) {
-                    Toast.makeText(
-                        this,
-                        "Set Slack above, or no images will be generated.",
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            }
         }
         unfinishedCheck.setOnCheckedChangeListener { _, _ -> saveAutoImage() }
         val persist = { _: android.view.View, hasFocus: Boolean ->
