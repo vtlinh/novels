@@ -28,7 +28,8 @@ import java.io.IOException
    uses its Every / Starting from. The service posts chapter N ≥
    from where (N − from) is a multiple of every, at most one
    chapter every 5 minutes, including while the app is in the
-   background. Novels are always tried in last-read order — the
+   background. A post does not wait for that png before the next
+   one is due. Novels are always tried in last-read order — the
    book opened most recently in the reader goes first. The next
    due chapter that is not on disk yet is skipped until it arrives
    — later due chapters are not pulled forward. A chapter already
@@ -243,6 +244,23 @@ object ChapterImages {
         now: Long = System.currentTimeMillis(),
         gapMs: Long = AUTO_GAP_MS,
     ): Long = if (lastAt <= 0L) 0L else (lastAt + gapMs - now).coerceAtLeast(0L)
+
+    /* 0 means the service can stop. While pictures are still due or
+       Slack still owes a png, keep looking — do not sit in
+       waitForImage, and do not exit just because this pass posted
+       nothing. */
+    fun backgroundWaitMs(
+        hasWork: Boolean,
+        posted: Boolean,
+        lastAt: Long,
+        now: Long = System.currentTimeMillis(),
+        gapMs: Long = AUTO_GAP_MS,
+    ): Long {
+        if (!hasWork) return 0L
+        if (posted) return gapMs
+        val left = autoWaitMs(lastAt, now, gapMs)
+        return if (left > 0L) left else gapMs
+    }
 
     fun autoEnabled(ctx: Context, slug: String): Boolean =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
@@ -513,7 +531,9 @@ object ChapterImages {
 
     /* Keeps posting and fetching while the service holds the process.
        One auto post every 5 minutes, always the next due chapter of
-       the most recently read novel that still has one. */
+       the most recently read novel that still has one. The post does
+       not wait for that png — Slack can take much longer than the
+       gap, and sitting on it delayed every later request. */
     suspend fun runBackground(ctx: Context, status: (String) -> Unit = {}) {
         val app = ctx.applicationContext
         statusSink = status
@@ -523,18 +543,12 @@ object ChapterImages {
                 report("Saving chapter pictures that Slack already finished")
                 resumeWaitingNow(app)
                 val posted = runAutoPass(app)
-                if (!hasBackgroundWork(app)) return
-                val wait = when {
-                    posted -> AUTO_GAP_MS
-                    !autoReady(autoLastAt(app)) -> autoWaitMs(autoLastAt(app))
-                    else -> 0L
-                }
-                if (wait > 0L) {
-                    report("Waiting ${waitLabel(wait)} before making the next picture")
-                    delay(wait)
-                    continue
-                }
-                return
+                val wait = backgroundWaitMs(
+                    hasBackgroundWork(app), posted, autoLastAt(app),
+                )
+                if (wait <= 0L) return
+                report("Waiting ${waitLabel(wait)} before making the next picture")
+                delay(wait)
             }
         } finally {
             statusSink = null
@@ -671,7 +685,7 @@ object ChapterImages {
         markAutoTried(app, slug, chapter)
         report("${describe(dirName, chapter)} — asking Slack to make a picture")
         try {
-            request(app, folder, dirName, slug, chapter)
+            request(app, folder, dirName, slug, chapter, wait = false)
         } catch (e: Exception) {
             report("${describe(dirName, chapter)} — could not ask Slack (${e.message})")
         }
@@ -754,6 +768,7 @@ object ChapterImages {
         slug: String,
         chapter: String,
         postIfMissing: Boolean = true,
+        wait: Boolean = true,
     ): Result<Boolean> {
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
         val token = (prefs.getString("slackBotToken", "") ?: "").trim()
@@ -818,6 +833,10 @@ object ChapterImages {
             val poll = all.map { it.threadTs }.filter { it.isNotEmpty() }
             val started = all.maxOfOrNull { it.startedAt }?.takeIf { it > 0L }
                 ?: System.currentTimeMillis()
+            if (!wait) {
+                report("$where — asked Slack to make a picture")
+                return Result.success(true)
+            }
             if (!inflight.add(hash)) {
                 report("$where — already waiting for Slack")
                 return Result.success(false)
@@ -910,9 +929,8 @@ object ChapterImages {
                 continue
             }
             val (folder, dir) = found
-            report("${describe(dir, w.chapter)} — checking Slack again")
             try {
-                request(app, folder, dir, w.slug, w.chapter, postIfMissing = false)
+                poll(app, folder, dir, w.slug, w.chapter)
             } catch (e: Exception) {
                 report("${describe(dir, w.chapter)} — could not finish (${e.message})")
             }

@@ -73,6 +73,25 @@ class ChapterImagesTest {
         assertEquals(0L, ChapterImages.autoWaitMs(0L, start))
         assertEquals(ChapterImages.AUTO_GAP_MS, ChapterImages.autoWaitMs(start, start))
         assertEquals(0L, ChapterImages.autoWaitMs(start, start + ChapterImages.AUTO_GAP_MS))
+        assertEquals(
+            ChapterImages.AUTO_GAP_MS,
+            ChapterImages.backgroundWaitMs(true, posted = true, lastAt = start, now = start),
+        )
+        assertEquals(
+            0L,
+            ChapterImages.backgroundWaitMs(false, posted = false, lastAt = start, now = start),
+        )
+        assertEquals(
+            ChapterImages.AUTO_GAP_MS,
+            ChapterImages.backgroundWaitMs(true, posted = false, lastAt = start, now = start),
+        )
+        assertEquals(
+            ChapterImages.AUTO_GAP_MS,
+            ChapterImages.backgroundWaitMs(
+                true, posted = false, lastAt = start,
+                now = start + ChapterImages.AUTO_GAP_MS,
+            ),
+        )
     }
 
     @Test
