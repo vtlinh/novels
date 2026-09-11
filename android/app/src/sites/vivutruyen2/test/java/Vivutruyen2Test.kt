@@ -89,7 +89,7 @@ class Vivutruyen2Test : SiteContract() {
         for (r in novels) {
             val (_, slug) = site.normalize(r[3])
             val found = Listing.collect(Jsoup.parse(page(r[1]), r[3]), site, slug)
-            val nums = found.links.mapNotNull { Extractor.parseHeading(it.second).first }
+            val nums = found.links.mapNotNull { Extractor.parseHeading(it.text).first }
             assertTrue("${r[1]}: link texts carry no numbers", nums.isNotEmpty())
             assertEquals("${r[1]}: does not start at the first chapter", nums.minOrNull(), nums.firstOrNull())
             assertTrue(
