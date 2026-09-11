@@ -19,4 +19,11 @@ class ChapterImageFrameTest {
         assertEquals(0, ChapterImageSpan.extraForCaption(-1, 8))
         assertEquals(28, ChapterImageSpan.extraForCaption(20, 8))
     }
+
+    @Test
+    fun `caption size does not follow the reader font`() {
+        assertEquals(13f, ChapterImageSpan.CAPTION_SP)
+        assertEquals(26f, ChapterImageSpan.captionSizePx(48f, 26f))
+        assertEquals(48f, ChapterImageSpan.captionSizePx(48f, 0f))
+    }
 }

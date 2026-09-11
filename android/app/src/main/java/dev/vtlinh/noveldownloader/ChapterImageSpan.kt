@@ -17,7 +17,8 @@ import kotlin.math.roundToInt
    ~270px of empty gap. This span draws a padded card and reports a
    line height that the multiplier stretches back to the card size.
    A non-empty alt sits under the picture, inside the same card,
-   in italic — empty alt leaves the frame unchanged. */
+   in italic at a fixed size — it must not follow the reader
+   font slider. Empty alt leaves the frame unchanged. */
 class ChapterImageSpan(
     private val bmp: Bitmap,
     private val maxW: Int,
@@ -30,6 +31,7 @@ class ChapterImageSpan(
     private val spacingMult: Float,
     private val spacingAdd: Float,
     private val alt: String = "",
+    private val captionPx: Float = 0f,
 ) : ReplacementSpan() {
 
     private val innerW = (maxW - pad * 2).coerceAtLeast(1)
@@ -118,10 +120,7 @@ class ChapterImageSpan(
 
     private fun captionLayout(paint: Paint): StaticLayout? {
         if (caption.isEmpty()) return null
-        val tp = TextPaint(paint).apply {
-            typeface = Typeface.create(typeface, Typeface.ITALIC)
-            isAntiAlias = true
-        }
+        val tp = captionPaint(paint, captionPx)
         return StaticLayout.Builder.obtain(caption, 0, caption.length, tp, innerW)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setLineSpacing(0f, 1.15f)
@@ -130,6 +129,23 @@ class ChapterImageSpan(
     }
 
     companion object {
+        /* Fixed caption size in sp. The body paint's textSize follows
+           the reader slider and made the screenshot caption as large
+           as the chapter text. */
+        const val CAPTION_SP = 13f
+
+        /* A positive captionPx wins; 0 keeps the body size. Extracted
+           so the unit test can check this without constructing Paint. */
+        fun captionSizePx(bodyPx: Float, captionPx: Float): Float =
+            if (captionPx > 0f) captionPx else bodyPx
+
+        fun captionPaint(body: Paint, captionPx: Float): TextPaint =
+            TextPaint(body).apply {
+                typeface = Typeface.create(typeface, Typeface.ITALIC)
+                isAntiAlias = true
+                textSize = captionSizePx(textSize, captionPx)
+            }
+
         fun lineHeightFor(visualPx: Int, spacingMult: Float, spacingAdd: Float): Int {
             val m = if (spacingMult > 0f) spacingMult else 1f
             return ((visualPx - spacingAdd) / m).roundToInt().coerceAtLeast(1)
