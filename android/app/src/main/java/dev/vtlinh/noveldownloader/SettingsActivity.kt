@@ -180,16 +180,16 @@ class SettingsActivity : AppCompatActivity() {
         val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
         val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
         val starsInput = findViewById<EditText>(R.id.autoImageMinStarsInput)
-        val unfinishedCheck = findViewById<CheckBox>(R.id.autoImageUnfinishedCheck)
+        val unreadCheck = findViewById<CheckBox>(R.id.autoImageUnreadCheck)
         autoCheck.isChecked = ChapterImages.globalEnabled(this)
         everyInput.setText(ChapterImages.globalEvery(this).toString())
         fromInput.setText(ChapterImages.globalFrom(this).toString())
         starsInput.setText(ChapterImages.minStars(this).toString())
-        unfinishedCheck.isChecked = ChapterImages.unfinishedOnly(this)
+        unreadCheck.isChecked = ChapterImages.unreadOnly(this)
         autoCheck.setOnCheckedChangeListener { _, _ ->
             saveAutoImage()
         }
-        unfinishedCheck.setOnCheckedChangeListener { _, _ -> saveAutoImage() }
+        unreadCheck.setOnCheckedChangeListener { _, _ -> saveAutoImage() }
         val persist = { _: android.view.View, hasFocus: Boolean ->
             if (!hasFocus) saveAutoImage()
         }
@@ -202,9 +202,9 @@ class SettingsActivity : AppCompatActivity() {
                 "the filters below, even after you leave the app.\n\n" +
                 "Every and Starting from chapter pick which chapters. " +
                 "At least N stars skips novels you have not rated that high. " +
-                "Only unfinished novels skips ones you marked finished.\n\n" +
+                "Only unread novels skips ones you marked as read.\n\n" +
                 "A novel with Auto-generate images on in its own settings " +
-                "is always included, even if it is finished or has fewer stars.",
+                "is always included, even if you marked it as read or it has fewer stars.",
         )
     }
 
@@ -223,7 +223,7 @@ class SettingsActivity : AppCompatActivity() {
             this,
             findViewById<CheckBox>(R.id.autoImageCheck).isChecked,
             every, from, stars,
-            findViewById<CheckBox>(R.id.autoImageUnfinishedCheck).isChecked,
+            findViewById<CheckBox>(R.id.autoImageUnreadCheck).isChecked,
         )
         if (everyInput.text.toString() != every.toString()) everyInput.setText(every.toString())
         if (fromInput.text.toString() != from.toString()) fromInput.setText(from.toString())

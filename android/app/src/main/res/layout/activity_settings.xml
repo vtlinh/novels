@@ -475,12 +475,12 @@
                 android:gravity="center_vertical">
 
                 <CheckBox
-                    android:id="@+id/autoImageUnfinishedCheck"
+                    android:id="@+id/autoImageUnreadCheck"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:paddingStart="6dp"
-                    android:text="Only unfinished novels"
+                    android:text="Only unread novels"
                     android:textSize="14sp"
                     android:textColor="@color/fg"
                     app:buttonTint="@color/accent" />

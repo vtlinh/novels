@@ -28,8 +28,8 @@ import kotlinx.coroutines.withContext
    in from elsewhere). "Check status" asks each site for its chapter count,
    finished flag, and author; a finished novel with everything on disk shows
    a Complete tag instead of a Download button, and an ongoing novel with
-   every chapter on disk shows an Up to date tag. ALL NOVELS sorts unfinished
-   first (stars, then most recently updated); novels the user marked finished
+   every chapter on disk shows an Up to date tag. ALL NOVELS sorts unread
+   first (stars, then most recently updated); novels the user marked as read
    sit at the bottom. Two tabs split the list: Shorts is every novel
    with 20 or fewer chapters (site total when known), Novels is the rest.
 
@@ -80,7 +80,7 @@ class NovelListActivity : AppCompatActivity() {
             }
         }
 
-    /* ---- per-novel user marks (finished / garbage) ---- */
+    /* ---- per-novel user marks (read / garbage) ---- */
     private fun isRead(slug: String) = prefs.getBoolean("novelRead:$slug", false)
     private fun setRead(slug: String, v: Boolean) =
         prefs.edit().putBoolean("novelRead:$slug", v).apply()
@@ -491,9 +491,9 @@ class NovelListActivity : AppCompatActivity() {
                 NovelCheck.localCount(store, folder, rec),
             )
         }.sortedWith(
-            /* unfinished first, then finished at the bottom; within each,
+            /* unread first, then read at the bottom; within each,
                more stars first, same stars most recently updated first.
-               The three latest unfinished reads are pinned above this
+               The three latest unread reads are pinned above this
                in render(). */
             LibrarySort.comparator(
                 { NovelRating.get(prefs, it.rec.slug) },
@@ -660,8 +660,8 @@ class NovelListActivity : AppCompatActivity() {
                 return@launch
             }
             status.text = finalStatus ?: "${shown.size} $kind(s)"
-            /* the 3 most recently READ unfinished items on THIS tab get
-               their own section on top — a finished mark sends the novel
+            /* the 3 most recently opened unread items on THIS tab get
+               their own section on top — a read mark sends the novel
                to the bottom of the all-list instead of pinning it here */
             val recent = LibrarySort.recentlyRead(
                 shown,
@@ -807,7 +807,7 @@ class NovelListActivity : AppCompatActivity() {
         if (isRead(row.rec.slug)) {
             line.addView(
                 TextView(ctx).apply {
-                    this.text = "FINISHED"
+                    this.text = "READ"
                     textSize = 11f
                     setTextColor(getColor(R.color.muted))
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -876,7 +876,7 @@ class NovelListActivity : AppCompatActivity() {
         return line
     }
 
-    /* long-press menu: finished / garbage / delete */
+    /* long-press menu: read / garbage / delete */
     private fun showMarkSheet(row: Row) {
         val slug = row.rec.slug
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
@@ -901,7 +901,7 @@ class NovelListActivity : AppCompatActivity() {
                     setOnClickListener { sheet.dismiss(); onTap() }
                 },
             )
-        item(if (isRead(slug)) "Mark as unread" else "Mark as finished") {
+        item(if (isRead(slug)) "Mark as unread" else "Mark as read") {
             setRead(slug, !isRead(slug)); render()
         }
         item("Mark as garbage…") { confirmGarbage(row) }

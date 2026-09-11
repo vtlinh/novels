@@ -23,7 +23,7 @@ import java.io.IOException
    A network or service error is not a look.
 
    Auto-generate: Settings can turn this on for the whole library,
-   with a minimum star rating and an unfinished-only filter. A
+   with a minimum star rating and an unread-only filter. A
    novel's own ⚙ switch, when on, always includes that book and
    uses its Every / Starting from. The service posts chapter N ≥
    from where (N − from) is a multiple of every, at most one
@@ -45,7 +45,9 @@ object ChapterImages {
     const val GLOBAL_EVERY_KEY = "autoImageGlobalEvery"
     const val GLOBAL_FROM_KEY = "autoImageGlobalFrom"
     const val GLOBAL_MIN_STARS_KEY = "autoImageMinStars"
-    const val GLOBAL_UNFINISHED_KEY = "autoImageUnfinishedOnly"
+    /* Stored under the old unfinished-only name so existing installs
+       keep the filter they already picked. */
+    const val GLOBAL_UNREAD_KEY = "autoImageUnfinishedOnly"
     private const val AUTO_LAST_KEY = "autoImageLastAt"
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val autoLock = Any()
@@ -264,27 +266,27 @@ object ChapterImages {
         if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
     }
 
-    fun finishedKey(slug: String) = "novelRead:$slug"
+    fun readKey(slug: String) = "novelRead:$slug"
 
-    fun novelFinished(prefs: SharedPreferences, slug: String): Boolean =
-        slug.isNotEmpty() && prefs.getBoolean(finishedKey(slug), false)
+    fun novelRead(prefs: SharedPreferences, slug: String): Boolean =
+        slug.isNotEmpty() && prefs.getBoolean(readKey(slug), false)
 
     data class AutoCadence(val every: Int, val from: Int)
 
     /* A novel switch that is on always wins. Otherwise the global
-       switch applies, then the star floor and the unfinished filter. */
+       switch applies, then the star floor and the unread filter. */
     fun autoApplies(
         novelOn: Boolean,
         globalOn: Boolean,
         stars: Int,
         minStars: Int,
-        finished: Boolean,
-        unfinishedOnly: Boolean,
+        read: Boolean,
+        unreadOnly: Boolean,
     ): Boolean {
         if (novelOn) return true
         if (!globalOn) return false
         if (stars < minStars.coerceAtLeast(0)) return false
-        if (unfinishedOnly && finished) return false
+        if (unreadOnly && read) return false
         return true
     }
 
@@ -315,9 +317,9 @@ object ChapterImages {
             .getInt(GLOBAL_MIN_STARS_KEY, AUTO_MIN_STARS_DEFAULT)
             .coerceIn(0, NovelRating.MAX)
 
-    fun unfinishedOnly(ctx: Context): Boolean =
+    fun unreadOnly(ctx: Context): Boolean =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-            .getBoolean(GLOBAL_UNFINISHED_KEY, true)
+            .getBoolean(GLOBAL_UNREAD_KEY, true)
 
     fun setGlobal(
         ctx: Context,
@@ -325,14 +327,14 @@ object ChapterImages {
         every: Int,
         from: Int,
         minStars: Int,
-        unfinishedOnly: Boolean,
+        unreadOnly: Boolean,
     ) {
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
             .putBoolean(GLOBAL_ON_KEY, enabled)
             .putInt(GLOBAL_EVERY_KEY, every.coerceAtLeast(1))
             .putInt(GLOBAL_FROM_KEY, from.coerceAtLeast(1))
             .putInt(GLOBAL_MIN_STARS_KEY, minStars.coerceIn(0, NovelRating.MAX))
-            .putBoolean(GLOBAL_UNFINISHED_KEY, unfinishedOnly)
+            .putBoolean(GLOBAL_UNREAD_KEY, unreadOnly)
             .commit()
         if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
     }
@@ -345,8 +347,8 @@ object ChapterImages {
             globalOn = globalEnabled(ctx),
             stars = NovelRating.get(prefs, slug),
             minStars = minStars(ctx),
-            finished = novelFinished(prefs, slug),
-            unfinishedOnly = unfinishedOnly(ctx),
+            read = novelRead(prefs, slug),
+            unreadOnly = unreadOnly(ctx),
         )
     }
 
@@ -591,14 +593,14 @@ object ChapterImages {
         val gEvery = globalEvery(app)
         val gFrom = globalFrom(app)
         val floor = minStars(app)
-        val onlyOpen = unfinishedOnly(app)
+        val onlyUnread = unreadOnly(app)
         val out = ArrayList<AutoTarget>()
         for (rec in recs) {
             val novelOn = autoEnabled(app, rec.slug)
             if (!autoApplies(
                     novelOn, globalOn,
                     NovelRating.get(prefs, rec.slug), floor,
-                    novelFinished(prefs, rec.slug), onlyOpen,
+                    novelRead(prefs, rec.slug), onlyUnread,
                 )
             ) continue
             val dir = try {
