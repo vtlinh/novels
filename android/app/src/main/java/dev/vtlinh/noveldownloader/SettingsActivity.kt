@@ -19,11 +19,11 @@ import kotlinx.coroutines.withContext
 
 /* App settings: the Storage card (download folder, library size, and
    "Compress my novels"), the Anthropic API key and Slack bot token,
-   library auto status-check interval, and reading options. Toggling
-   compression starts a background pass that converts every novel to
-   match; new downloads follow the same flag. The keys are saved on
-   focus loss and when leaving. Descriptions live behind each
-   setting's help icon. */
+   library-wide chapter pictures, library auto status-check interval,
+   and reading options. Toggling compression starts a background pass
+   that converts every novel to match; new downloads follow the same
+   flag. The keys are saved on focus loss and when leaving.
+   Descriptions live behind each setting's help icon. */
 class SettingsActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
@@ -50,6 +50,7 @@ class SettingsActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         try { saveKeys() } catch (e: Exception) {}
+        try { saveAutoImage() } catch (e: Exception) {}
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -171,6 +172,73 @@ class SettingsActivity : AppCompatActivity() {
             R.id.keepAwakeHelp, "Keep screen awake",
             "Keeps the screen on while the app is reading aloud.",
         )
+        bindAutoImage()
+    }
+
+    private fun bindAutoImage() {
+        val autoCheck = findViewById<CheckBox>(R.id.autoImageCheck)
+        val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
+        val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
+        val starsInput = findViewById<EditText>(R.id.autoImageMinStarsInput)
+        val unfinishedCheck = findViewById<CheckBox>(R.id.autoImageUnfinishedCheck)
+        autoCheck.isChecked = ChapterImages.globalEnabled(this)
+        everyInput.setText(ChapterImages.globalEvery(this).toString())
+        fromInput.setText(ChapterImages.globalFrom(this).toString())
+        starsInput.setText(ChapterImages.minStars(this).toString())
+        unfinishedCheck.isChecked = ChapterImages.unfinishedOnly(this)
+        autoCheck.setOnCheckedChangeListener { _, checked ->
+            saveAutoImage()
+            if (checked) {
+                val token = (prefs.getString("slackBotToken", "") ?: "").trim()
+                val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
+                if (token.isEmpty() || channel.isEmpty()) {
+                    Toast.makeText(
+                        this,
+                        "Set Slack above, or no images will be generated.",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+        unfinishedCheck.setOnCheckedChangeListener { _, _ -> saveAutoImage() }
+        val persist = { _: android.view.View, hasFocus: Boolean ->
+            if (!hasFocus) saveAutoImage()
+        }
+        everyInput.setOnFocusChangeListener(persist)
+        fromInput.setOnFocusChangeListener(persist)
+        starsInput.setOnFocusChangeListener(persist)
+        bindHelp(
+            R.id.autoImageHelp, "Chapter images",
+            "When this is on, the app makes pictures for novels that meet " +
+                "the filters below, even after you leave the app.\n\n" +
+                "Every and Starting from chapter pick which chapters. " +
+                "At least N stars skips novels you have not rated that high. " +
+                "Only unfinished novels skips ones you marked finished.\n\n" +
+                "A novel with Auto-generate images on in its own settings " +
+                "is always included, even if it is finished or has fewer stars.",
+        )
+    }
+
+    private fun saveAutoImage() {
+        val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
+        val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
+        val starsInput = findViewById<EditText>(R.id.autoImageMinStarsInput)
+        val every = everyInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
+            ?: ChapterImages.AUTO_EVERY_DEFAULT
+        val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
+            ?: ChapterImages.AUTO_FROM_DEFAULT
+        val stars = starsInput.text.toString().trim().toIntOrNull()
+            ?.coerceIn(0, NovelRating.MAX)
+            ?: ChapterImages.AUTO_MIN_STARS_DEFAULT
+        ChapterImages.setGlobal(
+            this,
+            findViewById<CheckBox>(R.id.autoImageCheck).isChecked,
+            every, from, stars,
+            findViewById<CheckBox>(R.id.autoImageUnfinishedCheck).isChecked,
+        )
+        if (everyInput.text.toString() != every.toString()) everyInput.setText(every.toString())
+        if (fromInput.text.toString() != from.toString()) fromInput.setText(from.toString())
+        if (starsInput.text.toString() != stars.toString()) starsInput.setText(stars.toString())
     }
 
     /* Keep `message` in everyday words. What the reader will see, not how

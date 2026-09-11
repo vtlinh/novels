@@ -307,6 +307,186 @@
                 android:focusable="true" />
         </LinearLayout>
 
+        <!-- ══ Chapter images ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_settings_card"
+            android:padding="18dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Chapter images"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/fg" />
+
+                <ImageView
+                    android:id="@+id/autoImageHelp"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginStart="4dp"
+                    android:padding="5dp"
+                    android:src="@drawable/ic_help"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:contentDescription="About Chapter images" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <CheckBox
+                    android:id="@+id/autoImageCheck"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingStart="6dp"
+                    android:text="Auto-generate images"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg"
+                    app:buttonTint="@color/accent" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Every"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+
+                <EditText
+                    android:id="@+id/autoImageEveryInput"
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_input"
+                    android:padding="11dp"
+                    android:gravity="center"
+                    android:hint="20"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg"
+                    android:textColorHint="@color/muted"
+                    android:inputType="number"
+                    android:importantForAutofill="no" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="chapters"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Starting from chapter"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+
+                <EditText
+                    android:id="@+id/autoImageFromInput"
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:background="@drawable/bg_input"
+                    android:padding="11dp"
+                    android:gravity="center"
+                    android:hint="1"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg"
+                    android:textColorHint="@color/muted"
+                    android:inputType="number"
+                    android:importantForAutofill="no" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="At least"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+
+                <EditText
+                    android:id="@+id/autoImageMinStarsInput"
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_input"
+                    android:padding="11dp"
+                    android:gravity="center"
+                    android:hint="7"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg"
+                    android:textColorHint="@color/muted"
+                    android:inputType="number"
+                    android:importantForAutofill="no" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="stars"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <CheckBox
+                    android:id="@+id/autoImageUnfinishedCheck"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingStart="6dp"
+                    android:text="Only unfinished novels"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg"
+                    app:buttonTint="@color/accent" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- ══ Library ══ -->
         <LinearLayout
             android:layout_width="match_parent"
