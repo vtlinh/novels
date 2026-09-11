@@ -26,6 +26,8 @@ class SlackPoster(
         val threads: List<String>,
         val readError: String? = null,
         val alt: String = "",
+        val txtSeen: Boolean = false,
+        val knownThreadsGone: Boolean = false,
     )
     /* Downloaded {hash}.png plus the Slack file's own description. */
     data class FoundPng(val bytes: ByteArray, val alt: String = "")
@@ -42,6 +44,7 @@ class SlackPoster(
     data class CatalogHit(
         val pngName: String?,
         val threads: List<String>,
+        val txtSeen: Boolean = false,
     )
 
     companion object {
@@ -56,7 +59,7 @@ class SlackPoster(
         fun fileMatchesHash(hash: String, name: String, title: String) =
             fileMatchesExt(hash, "png", name, title)
 
-        /* The chapter upload is {hash}.txt. After a failed hour we
+        /* The chapter upload is {hash}.txt. After a failed wait we
            find every copy of that file and walk each thread. */
         fun fileMatchesTxt(hash: String, name: String, title: String) =
             fileMatchesExt(hash, "txt", name, title)
@@ -74,17 +77,24 @@ class SlackPoster(
         ): CatalogHit {
             val threads = linkedSetOf<String>()
             for (ts in knownThreads) if (ts.isNotEmpty()) threads.add(ts)
-            for (ts in historyTxtThreads(hist, hash)) threads.add(ts)
+            val histThreads = historyTxtThreads(hist, hash)
+            for (ts in histThreads) threads.add(ts)
             var png: String? = null
+            var fileTxt = false
             for (f in files) {
                 if (png == null && fileMatchesHash(hash, f.name, f.title)) {
                     png = f.name.ifEmpty { f.title }
                 }
-                if (fileMatchesTxt(hash, f.name, f.title) && f.threadTs.isNotEmpty()) {
-                    threads.add(f.threadTs)
+                if (fileMatchesTxt(hash, f.name, f.title)) {
+                    fileTxt = true
+                    if (f.threadTs.isNotEmpty()) threads.add(f.threadTs)
                 }
             }
-            return CatalogHit(png, threads.toList())
+            return CatalogHit(
+                png,
+                threads.toList(),
+                txtSeen = histThreads.isNotEmpty() || fileTxt,
+            )
         }
 
         fun historyTxtThreads(messages: Iterable<HistoryMsg>, hash: String): List<String> {
@@ -264,9 +274,33 @@ class SlackPoster(
             }
 
         /* Slack answered and there is no png. Not a transport failure
-           and not a permission deny — the hour give-up may stop. */
+           and not a permission deny — the day-long give-up may stop. */
         fun lookMissing(png: ByteArray?, readError: String?): Boolean =
             png == null && readError.isNullOrEmpty()
+
+        fun threadGone(code: String): Boolean =
+            code == "thread_not_found" || code == "message_not_found"
+
+        /* The chapter post itself is gone: Slack answered, no png, no
+           {hash}.txt in history or files.list, and every stored thread
+           Slack was asked about came back as not there. A stored
+           thread we never got to ask about is not a confirmation. */
+        fun lookTopLevelMissing(
+            png: ByteArray?,
+            readError: String?,
+            txtSeen: Boolean,
+            knownThreadsGone: Boolean,
+        ): Boolean = png == null &&
+            readError.isNullOrEmpty() &&
+            !txtSeen &&
+            knownThreadsGone
+
+        fun lookTopLevelMissing(found: Existing): Boolean = lookTopLevelMissing(
+            found.png,
+            found.readError,
+            found.txtSeen,
+            found.knownThreadsGone,
+        )
 
         /* One history + files.list is reused for every missing hash
            in a burst. A post invalidates it so the wait sees new files. */
@@ -380,7 +414,7 @@ class SlackPoster(
                 pickImage(hash, replies(threadTs))?.let { return it }
             } catch (e: ApiException) {
                 if (e.code == "missing_scope") denied++
-                else if (e.code != "thread_not_found" && e.code != "message_not_found") {
+                else if (!threadGone(e.code)) {
                     throw e
                 }
             }
@@ -430,6 +464,10 @@ class SlackPoster(
         var png: ByteArray? = null
         var alt = ""
         var readError = catalog.readError
+        var txtSeen = hit.txtSeen
+        val known = knownThreads.filter { it.isNotEmpty() }.toSet()
+        val knownLive = mutableSetOf<String>()
+        val knownGone = mutableSetOf<String>()
         if (hit.pngName != null) {
             val file = catalog.files.firstOrNull {
                 fileMatchesHash(hash, it.name, it.title)
@@ -444,6 +482,8 @@ class SlackPoster(
             for (ts in hit.threads) {
                 try {
                     val files = replies(ts)
+                    if (ts in known) knownLive.add(ts)
+                    txtSeen = true
                     val got = pickImage(hash, files)
                     if (got != null) {
                         png = got.bytes
@@ -458,15 +498,17 @@ class SlackPoster(
                     ) {
                         readError = e.code
                     }
-                    if (e.code != "missing_scope" && e.code != "thread_not_found" &&
-                        e.code != "message_not_found"
-                    ) {
+                    if (threadGone(e.code) && ts in known) knownGone.add(ts)
+                    if (e.code != "missing_scope" && !threadGone(e.code)) {
                         throw e
                     }
                 }
             }
         }
-        return Existing(png, hit.threads, readError, alt)
+        val knownThreadsGone = known.isNotEmpty() &&
+            knownLive.isEmpty() &&
+            knownGone.containsAll(known)
+        return Existing(png, hit.threads, readError, alt, txtSeen, knownThreadsGone)
     }
 
     fun catalog(): Catalog {

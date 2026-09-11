@@ -94,7 +94,7 @@ object Schema {
             "folder TEXT, slug TEXT, pos INTEGER, name TEXT, src TEXT, tr TEXT, " +
             "PRIMARY KEY(folder, slug, pos))"
     /* Slack {hash}.txt posts we are waiting on. One chapter can have
-       several threads (a retry after an hour). Rows stay until the png
+       several threads (a retry after a day). Rows stay until the png
        is saved — an expired wait is not a delete. */
     const val CHAPTER_IMAGE_REQ_TABLE =
         "CREATE TABLE IF NOT EXISTS chapter_image_req (" +
@@ -294,10 +294,10 @@ object Schema {
             db.exec(CHAPTER_IMAGE_REQ_TABLE)
             db.exec(CHAPTER_IMAGE_TABLE)
         }
-        /* Whether the hour give-up's last Slack look found nothing.
-           0 until a completed look misses the thread / file / png —
-           a network miss must not set this. The reader offers Poll
-           image until the png is saved. */
+        /* Whether a finished Slack look found nothing — the chapter
+           post is gone, or a day passed with no picture. 0 until a
+           completed look misses; a network miss must not set this.
+           The reader offers Poll image until the png is saved. */
         if (oldVersion < 25) {
             db.soft("ALTER TABLE chapter_image_req ADD COLUMN looked INTEGER DEFAULT 0")
         }

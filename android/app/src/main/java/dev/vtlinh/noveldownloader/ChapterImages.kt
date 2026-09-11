@@ -17,8 +17,9 @@ import java.io.IOException
 /* One chapter image: post {hash}.txt, record that Slack thread in
    the database, poll for {hash}.png, and save it under scenes/. The
    chapter→image row is how the reader knows to draw a picture. Request
-   threads stay until that save — an hour give-up only stops polling
-   after a Slack look completed and found no thread, file, or png.
+   threads stay until that save — a day-long give-up only stops
+   polling after a Slack look completed and found no png. The wait
+   stops sooner if Slack confirms the chapter post itself is gone.
    A network or service error is not a look.
 
    Auto-generate: Settings can turn this on for the whole library,
@@ -35,7 +36,7 @@ import java.io.IOException
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
-    const val GIVE_UP_MS = 60L * 60L * 1000L
+    const val GIVE_UP_MS = 24L * 60L * 60L * 1000L
     const val AUTO_EVERY_DEFAULT = 20
     const val AUTO_FROM_DEFAULT = 1
     const val AUTO_MIN_STARS_DEFAULT = 7
@@ -159,6 +160,10 @@ object ChapterImages {
     }
 
     fun waitLabel(ms: Long): String {
+        if (ms >= 60L * 60_000L) {
+            val hours = ((ms + 30L * 60_000L) / (60L * 60_000L)).coerceAtLeast(1L)
+            return if (hours == 1L) "about 1 hour" else "about $hours hours"
+        }
         val min = ((ms + 30_000L) / 60_000L).coerceAtLeast(1L)
         return if (min == 1L) "about 1 minute" else "about $min minutes"
     }
@@ -198,16 +203,18 @@ object ChapterImages {
     fun expired(startedAt: Long, now: Long = System.currentTimeMillis()) =
         now - startedAt >= GIVE_UP_MS
 
-    /* A stale wait is dropped only after a Slack look completed and
-       found no thread, file, or png. Dropping first loses a png that
-       landed while the app was closed. A network / 503 / timeout is
-       not a look — keep polling. */
+    /* A stale wait is dropped after a day, once a Slack look
+       completed and found no png. The wait also stops as soon as
+       Slack confirms the chapter post itself is gone. A network /
+       503 / timeout is not a look — keep polling. */
     fun mayDrop(
         startedAt: Long,
         looked: Boolean,
         foundNothing: Boolean,
         now: Long = System.currentTimeMillis(),
-    ): Boolean = expired(startedAt, now) && looked && foundNothing
+        topLevelMissing: Boolean = false,
+    ): Boolean = topLevelMissing ||
+        (expired(startedAt, now) && looked && foundNothing)
 
     /* Chapter N is due when it is at or after `from` and lands on the
        every-th step from there. Defaults (from 1, every 20) → 1, 21, 41. */
@@ -791,6 +798,9 @@ object ChapterImages {
                 if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
             }
             val posted = reqs.isNotEmpty() || found.threads.isNotEmpty()
+            if (posted && SlackPoster.lookTopLevelMissing(found)) {
+                return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, threads + found.threads)
+            }
             val live = store.imageReqs(folder, slug, chapter).filter { !expired(it.startedAt) }
             if (live.isEmpty()) {
                 if (!shouldPost(postIfMissing, posted)) {
@@ -811,13 +821,13 @@ object ChapterImages {
                 return Result.success(false)
             }
             try {
-                val remain = (started + GIVE_UP_MS - System.currentTimeMillis())
-                    .coerceAtMost(SlackPoster.MAX_WAIT_MS)
+                val left = started + GIVE_UP_MS - System.currentTimeMillis()
+                val remain = left.coerceAtMost(SlackPoster.MAX_WAIT_MS)
                 if (expired(started) || remain <= 0L) {
-                    report("$where — an hour is up — checking Slack one last time")
+                    report("$where — the wait is up — checking Slack one last time")
                     return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, poll)
                 }
-                report("$where — waiting for Slack (${waitLabel(remain)} left)")
+                report("$where — waiting for Slack (${waitLabel(left)} left)")
                 val png = slack.waitForImage(hash, poll, remain)
                 savePng(ctx, folder, dirName, slug, chapter, png.bytes, png.alt)
                 Result.success(true)
@@ -1013,13 +1023,25 @@ object ChapterImages {
         for (ts in found.threads) {
             if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
         }
+        val gone = SlackPoster.lookTopLevelMissing(found)
         val missing = SlackPoster.lookMissing(found.png, found.readError)
         val store = DownloadStore(ctx)
-        if (missing) store.markImageReqLooked(folder, slug, chapter)
         val started = store.imageReqs(folder, slug, chapter)
             .minOfOrNull { it.startedAt } ?: 0L
-        if (mayDrop(started, looked = missing, foundNothing = missing)) {
-            report("$where — gave up waiting — Slack still has no picture")
+        if (gone || (missing && expired(started))) {
+            store.markImageReqLooked(folder, slug, chapter)
+        }
+        if (mayDrop(
+                started,
+                looked = gone || missing,
+                foundNothing = missing,
+                topLevelMissing = gone,
+            )
+        ) {
+            report(
+                if (gone) "$where — Slack no longer has this chapter posted"
+                else "$where — gave up waiting — Slack still has no picture",
+            )
             return Result.failure(IOException("Gave up waiting for the image."))
         }
         report("$where — Slack has no picture yet")
