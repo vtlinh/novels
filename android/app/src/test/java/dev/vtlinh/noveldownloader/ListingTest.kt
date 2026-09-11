@@ -424,4 +424,41 @@ class ListingTest {
         val doc = org.jsoup.Jsoup.parse(html, "https://novelfull.com/book/chapter-12-the-preview.html")
         assertFalse(Listing.pageIsPreview(doc, dev.vtlinh.noveldownloader.sites.Novelfull, "Chapter 12 The Preview"))
     }
+
+    @Test
+    fun `a full page is not a teaser just because the listing still says preview`() {
+        val html = """
+            <a class="chapter-title">Chapter 12 End</a>
+            <div id="chapter-content">
+              <p>${"word ".repeat(80)}</p>
+            </div>
+        """.trimIndent()
+        val doc = org.jsoup.Jsoup.parse(html, "https://novelfull.com/book/chapter-12-end.html")
+        assertFalse(
+            Listing.pageIsPreview(
+                doc,
+                dev.vtlinh.noveldownloader.sites.Novelfull,
+                "Chapter 12 End (Preview)",
+            ),
+        )
+    }
+
+    @Test
+    fun `a teaser page is still a teaser when the listing badge matches`() {
+        val html = """
+            <a class="chapter-title">Chapter 12 End <span class="label">Preview</span></a>
+            <div id="chapter-content">
+              <p>This chapter is a preview. Unlock the full chapter to continue.</p>
+              <p>The opening lines of the teaser.</p>
+            </div>
+        """.trimIndent()
+        val doc = org.jsoup.Jsoup.parse(html, "https://novelfull.com/book/chapter-12-end.html")
+        assertTrue(
+            Listing.pageIsPreview(
+                doc,
+                dev.vtlinh.noveldownloader.sites.Novelfull,
+                "Chapter 12 End (Preview)",
+            ),
+        )
+    }
 }

@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Wait a day for a chapter picture unless Slack no longer has the post
+	Don't throw away a finished chapter when the site still marks it as a preview
+1.37.45	Wait a day for a chapter picture unless Slack no longer has the post
 1.37.44	Keep the chapter-picture popup up for 15 seconds
 1.37.43	Show the chapter picture in a popup
 1.37.42	Pinch and swipe the chapter-list pictures

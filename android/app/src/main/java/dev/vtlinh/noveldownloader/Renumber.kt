@@ -126,9 +126,14 @@ object Listing {
 
     /* A fetched chapter page that is still a teaser. Heading and short
        notice lines only — the prose is not scanned for the word "preview",
-       which is ordinary English. */
+       which is ordinary English.
+
+       `linkText` is the listing title. It must not decide this: a listing
+       preview is fetched as a probe, and a true here deletes the on-disk
+       file. The listing badge is why we fetched; only the page says
+       whether the full text is up. */
+    @Suppress("UNUSED_PARAMETER")
     fun pageIsPreview(d: org.jsoup.nodes.Document, site: Site, linkText: String): Boolean {
-        if (markedPreview(linkText)) return true
         val headEl = site.chapterHeading(d)
         val heading = headEl?.text()?.trim().orEmpty()
         if (markedPreview(heading)) return true
