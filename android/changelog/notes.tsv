@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Show this version's notes on the update notification
 	Post only one auto-generated chapter image every 5 minutes
 	Pinch to zoom a full-screen chapter picture
 1.37.33	Swipe left or right between full-screen chapter pictures
