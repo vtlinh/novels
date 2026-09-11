@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Show the chapter picture in a popup
+	Keep the chapter-picture popup up for 15 seconds
+1.37.43	Show the chapter picture in a popup
 1.37.42	Pinch and swipe the chapter-list pictures
 1.37.41	Pinch and swipe a chapter picture from the reader
 1.37.41	Name the novel and chapter in picture logs

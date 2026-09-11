@@ -25,7 +25,7 @@ import kotlinx.coroutines.withContext
    outside or Back closes it. */
 object ChapterImagePreview {
 
-    const val AUTO_MS = 7_000L
+    const val AUTO_MS = 15_000L
     const val FADE_MS = 400L
 
     enum class Mode { AUTO, HOLD }

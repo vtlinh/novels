@@ -3082,7 +3082,7 @@ class ReaderActivity : AppCompatActivity() {
         pictureBtn.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
     }
 
-    /* Dialog with the picture and its alt. auto = fade after 7s unless
+    /* Dialog with the picture and its alt. auto = fade after 15s unless
        the reader touches the card. The toolbar button always holds. */
     private fun showChapterPicture(auto: Boolean) {
         if (asDocument()) return

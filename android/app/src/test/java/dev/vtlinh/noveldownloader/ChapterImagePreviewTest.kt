@@ -39,6 +39,6 @@ class ChapterImagePreviewTest {
                 ChapterImagePreview.afterInteract(ChapterImagePreview.Mode.AUTO),
             ),
         )
-        assertEquals(7_000L, ChapterImagePreview.AUTO_MS)
+        assertEquals(15_000L, ChapterImagePreview.AUTO_MS)
     }
 }
