@@ -1138,6 +1138,13 @@ object ChapterImages {
         return s.getSpans(start, end, ChapterImageSpan::class.java).isNotEmpty()
     }
 
+    /* The reader embeds one ChapterImageSpan under the heading.
+       Used to show the picture button for that chapter. */
+    fun hasEmbeddedPicture(text: CharSequence): Boolean {
+        val s = text as? android.text.Spanned ?: return false
+        return s.getSpans(0, s.length, ChapterImageSpan::class.java).isNotEmpty()
+    }
+
     /* Horizontal swipe: left → next, right → previous. A vertical
        flick or a short/slow one is not a page change. */
     fun swipeDelta(

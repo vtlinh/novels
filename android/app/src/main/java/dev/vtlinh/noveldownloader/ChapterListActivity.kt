@@ -15,9 +15,10 @@ import kotlinx.coroutines.withContext
 
 /* Reading mode, screen 2: one novel. The chapter list is the page;
    the circled-i opens the synopsis / ranking card. ← goes back to
-   Library (or to the list, if info is showing). Tapping a chapter
+   Library (or to the list, if info is showing).    Tapping a chapter
    (or Continue) opens the reader and leaves this screen so Back from
-   reading lands on Library. */
+   reading lands on Library. A chapter with a picture has a button
+   that opens it in a dialog with its alt text. */
 class ChapterListActivity : AppCompatActivity() {
 
     companion object {
@@ -265,6 +266,20 @@ class ChapterListActivity : AppCompatActivity() {
             if (show) android.view.View.VISIBLE else android.view.View.GONE
     }
 
+    private fun openChapterPicture(chapter: String) {
+        val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null) ?: return
+        val dirName = intent.getStringExtra("dir") ?: return
+        val slug = intent.getStringExtra("slug") ?: return
+        lifecycleScope.launch {
+            val items = withContext(Dispatchers.IO) {
+                ChapterImages.listSaved(this@ChapterListActivity, folder, dirName, slug)
+            }
+            val start = ChapterImages.indexOfSaved(items, chapter)
+            if (start < 0 || isFinishing || isDestroyed) return@launch
+            ChapterImagePreview.show(this@ChapterListActivity, items[start], null, auto = false)
+        }
+    }
+
     private fun openChapter(name: String) {
         val dirName = intent.getStringExtra("dir") ?: return
         val title = intent.getStringExtra("title") ?: dirName
@@ -504,6 +519,8 @@ class ChapterListActivity : AppCompatActivity() {
         val dirName = intent.getStringExtra("dir")
         val slug = intent.getStringExtra("slug")
         if (folder.isNullOrEmpty() || dirName.isNullOrEmpty() || slug.isNullOrEmpty()) {
+            pictured = emptySet()
+            listAdapter?.notifyDataSetChanged()
             grid.removeAllViews()
             grid.visibility = android.view.View.GONE
             return
@@ -516,6 +533,9 @@ class ChapterListActivity : AppCompatActivity() {
                 val items = ChapterImages.listSaved(this@ChapterListActivity, folder, dirName, slug)
                 items.map { it to ChapterImages.thumb(this@ChapterListActivity, it.uri, edge) }
             }
+            if (isFinishing || isDestroyed) return@launch
+            pictured = thumbs.map { it.first.chapter }.toSet()
+            listAdapter?.notifyDataSetChanged()
             grid.removeAllViews()
             if (thumbs.isEmpty()) {
                 grid.visibility = android.view.View.GONE
@@ -644,6 +664,9 @@ class ChapterListActivity : AppCompatActivity() {
        grow toward chapter 1 and steal the jump — see ChapterListFocus. */
     private var settling = false
     private var listAdapter: ArrayAdapter<String>? = null
+    /* Chapter filenames that have a saved picture — the row button
+       opens that picture in a dialog. */
+    private var pictured = emptySet<String>()
 
     /* While this novel is downloading, fold newly saved chapters in as they
        land. Every saved chapter invalidates the listing cache, so a refresh
@@ -724,6 +747,16 @@ class ChapterListActivity : AppCompatActivity() {
                 )
                 v.findViewById<android.view.View>(R.id.chapterNow).visibility =
                     if (current) android.view.View.VISIBLE else android.view.View.GONE
+                val name = allOrdered.getOrNull(winStart + position)
+                val pic = v.findViewById<ImageView>(R.id.chapterPictureBtn)
+                val hasPic = ChapterImagePreview.shouldShowButton(
+                    name != null && pictured.contains(name),
+                )
+                pic.visibility =
+                    if (hasPic) android.view.View.VISIBLE else android.view.View.GONE
+                pic.setOnClickListener {
+                    if (name != null) openChapterPicture(name)
+                }
                 return v
             }
         }
