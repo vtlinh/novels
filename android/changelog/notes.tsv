@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Keep star ranking when a folder-scan novel merges with its site row
 	Don't overwrite a document with an empty editor
 	Don't gzip the user's Documents folder
 	Keep the listen spot when a paused chapter skip reopens the window
