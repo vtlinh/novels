@@ -28,5 +28,7 @@ class CompressionTest {
     fun `the documents folder is never a novel target`() {
         assertFalse(CompressWalk.includeNovelDir("documents", setOf("documents")))
         assertFalse(CompressWalk.includeNovelDir("Documents", setOf("Documents")))
+        assertFalse(CompressWalk.includeNovelDir(Documents.DIR, setOf(Documents.DIR)))
+        assertFalse(CompressWalk.includeNovelDir(Documents.LEGACY_DIR, setOf(Documents.LEGACY_DIR)))
     }
 }

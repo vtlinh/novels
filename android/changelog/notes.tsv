@@ -4,6 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Don't gzip the novel-documents folder as if it were a novel
+	Compile the vivutruyen2 listing test against the Link type
 	Less empty space at the top and bottom of the Library
 	Keep star ranking when a folder-scan novel merges with its site row
 	Don't overwrite a document with an empty editor

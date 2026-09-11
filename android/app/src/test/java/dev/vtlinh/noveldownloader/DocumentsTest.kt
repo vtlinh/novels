@@ -131,10 +131,10 @@ class DocumentsTest {
         assertTrue(Documents.isReservedDir(Documents.DIR))
         assertFalse(Documents.isReservedDir("document"))
         assertFalse(Documents.isReservedDir("my documents"))
-        /* CompressWalk inlines the same name so it can be tested without
-           Android; a rename of DIR must fail here until that copy matches. */
-        assertEquals("documents", Documents.DIR)
+        /* CompressWalk uses isReservedDir, so the store folder stays
+           out of the novel gzip pass even if it is on the owned list. */
         assertFalse(CompressWalk.includeNovelDir(Documents.DIR, setOf(Documents.DIR)))
+        assertFalse(CompressWalk.includeNovelDir(Documents.LEGACY_DIR, setOf(Documents.LEGACY_DIR)))
     }
 
     /* THE DEFECT. isReservedDir is also true of Android's Documents folder,
