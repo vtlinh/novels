@@ -25,7 +25,7 @@ class ChapterImagePreviewTest {
     }
 
     @Test
-    fun `a self-opened dialog fades; a held one does not`() {
+    fun `a self-opened dialog fades and a held one does not`() {
         assertEquals(ChapterImagePreview.Mode.AUTO, ChapterImagePreview.startMode(true))
         assertEquals(ChapterImagePreview.Mode.HOLD, ChapterImagePreview.startMode(false))
         assertTrue(ChapterImagePreview.shouldFade(ChapterImagePreview.Mode.AUTO))
