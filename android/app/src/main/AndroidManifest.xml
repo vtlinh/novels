@@ -123,13 +123,6 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Foreground service: chapter-picture auto generate/download
-             survives backgrounding -->
-        <service
-            android:name=".ImageService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
         <!-- PackageInstaller session results for self-updates -->
         <receiver
             android:name=".InstallReceiver"

@@ -199,7 +199,8 @@ class SettingsActivity : AppCompatActivity() {
         bindHelp(
             R.id.autoImageHelp, "Chapter images",
             "When this is on, the app makes pictures for novels that meet " +
-                "the filters below, even after you leave the app.\n\n" +
+                "the filters below. It keeps going while you are in the app " +
+                "or while it is reading aloud.\n\n" +
                 "Every and Starting from chapter pick which chapters. " +
                 "At least N stars skips novels you have not rated that high. " +
                 "Only unread novels skips ones you marked as read.\n\n" +

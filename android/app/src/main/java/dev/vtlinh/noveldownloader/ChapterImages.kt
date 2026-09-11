@@ -25,10 +25,10 @@ import java.io.IOException
    Auto-generate: Settings can turn this on for the whole library,
    with a minimum star rating and an unread-only filter. A
    novel's own ⚙ switch, when on, always includes that book and
-   uses its Every / Starting from. The service posts chapter N ≥
+   uses its Every / Starting from. The app posts chapter N ≥
    from where (N − from) is a multiple of every, at most one
-   chapter every 15 minutes, including while the app is in the
-   background. A post does not wait for that png before the next
+   chapter every 15 minutes, including while it is reading
+   aloud in the background. A post does not wait for that png before the next
    one is due. Novels are always tried in last-read order — the
    book opened most recently in the reader goes first. The next
    due chapter that is not on disk yet is skipped until it arrives
@@ -54,8 +54,8 @@ object ChapterImages {
     private val autoLock = Any()
     /* Polls and auto posts must outlive the chapter list: opening the
        reader finishes that screen and would cancel a lifecycle-scoped
-       wait. The service owns the long loop; this scope is only the
-       short adopt-on-open pass. */
+       wait. The process-wide loop owns each look; this scope is only
+       the short adopt-on-open pass. */
     private val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /* One novel the auto pass can post for. lastRead is 0 if the
@@ -125,21 +125,17 @@ object ChapterImages {
         return null
     }
 
-    @Volatile
-    private var statusSink: ((String) -> Unit)? = null
-
     private fun log(msg: String) {
         DownloadService.appendLog("image: $msg")
     }
 
-    /* Logs screen + the picture notification. A download in flight
-       owns statusFlow, so do not overwrite that. */
+    /* Logs screen. A download in flight owns statusFlow, so do
+       not overwrite that. */
     private fun report(msg: String) {
         log(msg)
         if (!DownloadService.runningFlow.value) {
             DownloadService.statusFlow.value = msg
         }
-        statusSink?.invoke(msg)
     }
 
     /* Novel folder + chapter number — what a person reading Logs
@@ -245,7 +241,7 @@ object ChapterImages {
         gapMs: Long = AUTO_GAP_MS,
     ): Long = if (lastAt <= 0L) 0L else (lastAt + gapMs - now).coerceAtLeast(0L)
 
-    /* 0 means the service can stop. While pictures are still due or
+    /* 0 means the loop can stop. While pictures are still due or
        Slack still owes a png, keep looking — do not sit in
        waitForImage, and do not exit just because this pass posted
        nothing. */
@@ -473,10 +469,10 @@ object ChapterImages {
 
     /* Opening a novel (list or reader) asks Slack for pictures that
        are already there, including a description on a png we already
-       saved with a blank caption. Auto-generate itself runs in
-       ImageService, across every novel that has it on, last-read
-       first — so leaving the app does not stop it, and opening a
-       less-recent book does not jump the queue. */
+       saved with a blank caption. Auto-generate itself runs in this
+       process, across every novel that has it on, last-read first —
+       so reading aloud with the screen off does not stop it, and
+       opening a less-recent book does not jump the queue. */
     fun autoSweep(
         ctx: Context,
         folder: String,
@@ -514,9 +510,9 @@ object ChapterImages {
 
     /* Slack is set and there is either a waiting download or at least
        one novel auto-generate applies to (its own switch, or the
-       global switch plus filters). The service uses this to decide
-       whether to start; the loop itself stops when a pass finds nothing
-       left to post or fetch. */
+       global switch plus filters). The loop uses this to decide
+       whether to start; a pass that finds nothing left to post or
+       fetch is the end of this run. */
     fun hasBackgroundWork(ctx: Context): Boolean {
         if (!slackReady(ctx)) return false
         val store = try { DownloadStore(ctx) } catch (e: Exception) { return false }
@@ -529,29 +525,26 @@ object ChapterImages {
         return novels.any { autoOnFor(ctx, it.slug) }
     }
 
-    /* Keeps posting and fetching while the service holds the process.
-       One auto post every 15 minutes, always the next due chapter of
-       the most recently read novel that still has one. The post does
-       not wait for that png — Slack can take much longer than the
-       gap, and sitting on it delayed every later request. */
-    suspend fun runBackground(ctx: Context, status: (String) -> Unit = {}) {
+    /* Keeps posting and fetching while this process is alive. The
+       read-aloud notification is what holds the process once the
+       screen is off — pictures do not post a second one. One auto
+       post every 15 minutes, always the next due chapter of the most
+       recently read novel that still has one. The post does not wait
+       for that png — Slack can take much longer than the gap, and
+       sitting on it delayed every later request. */
+    suspend fun runBackground(ctx: Context) {
         val app = ctx.applicationContext
-        statusSink = status
-        try {
-            while (true) {
-                if (!slackReady(app)) return
-                report("Saving chapter pictures that Slack already finished")
-                resumeWaitingNow(app)
-                val posted = runAutoPass(app)
-                val wait = backgroundWaitMs(
-                    hasBackgroundWork(app), posted, autoLastAt(app),
-                )
-                if (wait <= 0L) return
-                report("Waiting ${waitLabel(wait)} before making the next picture")
-                delay(wait)
-            }
-        } finally {
-            statusSink = null
+        while (true) {
+            if (!slackReady(app)) return
+            report("Saving chapter pictures that Slack already finished")
+            resumeWaitingNow(app)
+            val posted = runAutoPass(app)
+            val wait = backgroundWaitMs(
+                hasBackgroundWork(app), posted, autoLastAt(app),
+            )
+            if (wait <= 0L) return
+            report("Waiting ${waitLabel(wait)} before making the next picture")
+            delay(wait)
         }
     }
 
@@ -876,7 +869,7 @@ object ChapterImages {
     }
 
     /* Waiting downloads first, novels last-read first, then the next
-       auto post. Called from the service so a backgrounded app still
+       auto post. Called from the loop so a backgrounded listen still
        finishes a png that landed after we left. */
     private fun resumeWaitingNow(ctx: Context) {
         importLegacyWaits(ctx)

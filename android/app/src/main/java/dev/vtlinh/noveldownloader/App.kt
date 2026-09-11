@@ -39,9 +39,11 @@ class App : Application() {
                        kill — done on foreground so starting the service is
                        allowed on Android 12+ */
                     try { CompressService.resumeIfNeeded(applicationContext) } catch (e: Exception) {}
-                    /* Pictures keep going in ImageService after this
-                       screen stops. Starting here is allowed on
-                       Android 12+; a start from the background is not. */
+                    /* Pictures run in this process. The read-aloud
+                       notification is what holds it once the screen
+                       is off. Drop the leftover Chapter pictures
+                       notification from older builds. */
+                    try { ImageService.dropLegacyNotification(applicationContext) } catch (e: Exception) {}
                     try { ImageService.startIfNeeded(applicationContext) } catch (e: Exception) {}
                 }
                 override fun onStop(owner: LifecycleOwner) {

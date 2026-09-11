@@ -8,7 +8,7 @@ import org.junit.Test
 class UpdaterTest {
 
     @Test
-    fun `the update notice ranks above pictures and downloads`() {
+    fun `the update notice ranks above downloads`() {
         assertEquals("updates_high", Updater.UPDATE_CHANNEL)
         assertEquals(NotificationManager.IMPORTANCE_HIGH, Updater.UPDATE_IMPORTANCE)
         assertTrue(Updater.UPDATE_IMPORTANCE > NotificationManager.IMPORTANCE_LOW)
