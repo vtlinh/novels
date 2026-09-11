@@ -23,15 +23,8 @@
 
             <ImageView
                 android:id="@+id/backBtn"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:padding="8dp"
+                style="@style/ToolbarIcon"
                 android:src="@drawable/ic_back"
-                android:tint="@color/fg"
-                android:scaleType="centerInside"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
                 android:contentDescription="Back" />
 
             <TextView
@@ -51,44 +44,23 @@
                  list is the page now, and this opens the old info view. -->
             <ImageView
                 android:id="@+id/novelInfoBtn"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:padding="8dp"
+                style="@style/ToolbarIcon"
                 android:src="@drawable/ic_info"
-                android:tint="@color/fg"
-                android:scaleType="centerInside"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
                 android:contentDescription="Novel info" />
 
             <!-- this novel's own settings (auto-download, translation, recheck) -->
             <ImageView
                 android:id="@+id/novelSettingsBtn"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:padding="8dp"
+                style="@style/ToolbarIcon"
                 android:src="@drawable/ic_settings"
-                android:tint="@color/fg"
-                android:scaleType="centerInside"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
                 android:contentDescription="Novel settings" />
 
             <!-- flips the chapter order (ascending/descending), per novel.
                  Hidden while info is open — it only applies to the list. -->
             <ImageView
                 android:id="@+id/sortBtn"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:padding="8dp"
+                style="@style/ToolbarIcon"
                 android:src="@drawable/ic_sort"
-                android:tint="@color/fg"
-                android:scaleType="centerInside"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
                 android:contentDescription="Reverse chapter order" />
         </LinearLayout>
 

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Hit box for every toolbar icon. Padding leaves a 24dp glyph. -->
+    <dimen name="toolbar_icon">40dp</dimen>
+    <dimen name="toolbar_icon_padding">8dp</dimen>
+</resources>

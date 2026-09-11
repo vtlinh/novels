@@ -779,8 +779,8 @@ class ReaderActivity : AppCompatActivity() {
         }
         updateMediaSessionState()
 
-        findViewById<TextView>(R.id.backBtn).setOnClickListener { leaveReader() }
-        findViewById<TextView>(R.id.chaptersBtn).setOnClickListener { openChapterList() }
+        findViewById<android.widget.ImageView>(R.id.backBtn).setOnClickListener { leaveReader() }
+        findViewById<android.widget.ImageView>(R.id.chaptersBtn).setOnClickListener { openChapterList() }
         /* highlight + scroll-to-current runs when the drawer opens from
            an edge swipe, as soon as it starts sliding in */
         drawer.addDrawerListener(object : androidx.drawerlayout.widget.DrawerLayout.SimpleDrawerListener() {
@@ -798,25 +798,27 @@ class ReaderActivity : AppCompatActivity() {
                 if (slideOffset == 0f) prepared = false
             }
         })
-        findViewById<TextView>(R.id.settingsBtn).setOnClickListener { showReaderSettings() }
-        findViewById<TextView>(R.id.speechEditsBtn).setOnClickListener {
+        findViewById<android.widget.ImageView>(R.id.settingsBtn).setOnClickListener { showReaderSettings() }
+        findViewById<android.widget.ImageView>(R.id.speechEditsBtn).setOnClickListener {
             startActivity(android.content.Intent(this, SpeechEditsActivity::class.java))
         }
         if (asDocument()) bindDocumentChrome(drawer)
     }
 
-    /* Documents have no chapters: ≡ becomes Edit, and the gear / speech-edits
-       buttons collapse into one overflow so Delete has a place to live. */
+    /* Documents have no chapters: the list icon becomes Edit, and the
+       gear / speech-edits buttons collapse into one overflow so Delete
+       has a place to live. Icons stay the same size as the novel reader. */
     private fun bindDocumentChrome(drawer: DrawerLayout) {
         drawer.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
-        val chaptersBtn = findViewById<TextView>(R.id.chaptersBtn)
-        chaptersBtn.text = "Edit"
-        chaptersBtn.textSize = 15f
+        val chaptersBtn = findViewById<android.widget.ImageView>(R.id.chaptersBtn)
+        chaptersBtn.setImageResource(R.drawable.ic_edit)
+        chaptersBtn.contentDescription = "Edit"
         chaptersBtn.setOnClickListener { editDocument() }
-        findViewById<TextView>(R.id.speechEditsBtn).visibility = android.view.View.GONE
+        findViewById<android.widget.ImageView>(R.id.speechEditsBtn).visibility = android.view.View.GONE
         pictureBtn.visibility = android.view.View.GONE
-        val menuBtn = findViewById<TextView>(R.id.settingsBtn)
-        menuBtn.text = "\u22EE"
+        val menuBtn = findViewById<android.widget.ImageView>(R.id.settingsBtn)
+        menuBtn.setImageResource(R.drawable.ic_more)
+        menuBtn.contentDescription = "More"
         menuBtn.setOnClickListener { showDocumentMenu(menuBtn) }
     }
 

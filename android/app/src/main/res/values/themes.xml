@@ -10,4 +10,17 @@
         <item name="android:textColorPrimary">@color/fg</item>
         <item name="android:textColorSecondary">@color/muted</item>
     </style>
+
+    <!-- Same box and glyph size for every toolbar icon. -->
+    <style name="ToolbarIcon">
+        <item name="android:layout_width">@dimen/toolbar_icon</item>
+        <item name="android:layout_height">@dimen/toolbar_icon</item>
+        <item name="android:padding">@dimen/toolbar_icon_padding</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:tint">@color/fg</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
 </resources>
+
