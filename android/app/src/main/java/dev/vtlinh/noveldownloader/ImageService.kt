@@ -17,8 +17,8 @@ import kotlinx.coroutines.launch
 
 /* Foreground service that keeps auto chapter pictures going with the
    screen off or the app in the background: download a png that is
-   already on the way, then post the next due chapter, taking turns
-   across novels. One picture every 5 minutes. Settings or a novel's own
+   already on the way, then post the next due chapter, novels last-read
+   first. One picture every 5 minutes. Settings or a novel's own
    switch is what turns this on; this service only keeps the
    process alive. */
 class ImageService : Service() {

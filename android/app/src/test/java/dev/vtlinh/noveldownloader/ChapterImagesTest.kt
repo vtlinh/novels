@@ -114,53 +114,6 @@ class ChapterImagesTest {
     }
 
     @Test
-    fun `auto-generate takes turns after the last posted novel`() {
-        val older = ChapterImages.AutoNovel(
-            slug = "older", lastRead = 10, from = 1, every = 20,
-            chapters = listOf("Chapter 1.txt", "Chapter 21.txt"),
-        )
-        val newer = ChapterImages.AutoNovel(
-            slug = "newer", lastRead = 50, from = 1, every = 20,
-            chapters = listOf("Chapter 1.txt", "Chapter 21.txt"),
-        )
-        val unread = ChapterImages.AutoNovel(
-            slug = "unread", lastRead = 0, from = 1, every = 20,
-            chapters = listOf("Chapter 1.txt"),
-        )
-        val novels = listOf(unread, older, newer)
-        assertEquals(
-            listOf("older", "unread", "newer"),
-            ChapterImages.rotateAfter(
-                ChapterImages.byLastRead(novels, { it.lastRead }, { it.slug }),
-                { it.slug },
-                "newer",
-            ).map { it.slug },
-        )
-        assertEquals(
-            ChapterImages.AutoPick("older", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { _, _ -> false }, afterSlug = "newer"),
-        )
-        assertEquals(
-            ChapterImages.AutoPick("unread", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { _, _ -> false }, afterSlug = "older"),
-        )
-        assertEquals(
-            ChapterImages.AutoPick("newer", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { _, _ -> false }, afterSlug = "unread"),
-        )
-        assertEquals(
-            ChapterImages.AutoPick("newer", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { slug, _ -> slug != "newer" }, afterSlug = "newer"),
-        )
-        assertEquals(
-            ChapterImages.AutoPick("newer", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { _, _ -> false }, afterSlug = "gone"),
-        )
-        assertEquals(emptyList<String>(), ChapterImages.rotateAfter(emptyList<String>(), { it }, "x"))
-        assertEquals(listOf("only"), ChapterImages.rotateAfter(listOf("only"), { it }, "only"))
-    }
-
-    @Test
     fun `a never-read novel waits behind every novel that has been read`() {
         val read = ChapterImages.AutoNovel(
             slug = "read", lastRead = 1, from = 5, every = 1,

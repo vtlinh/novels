@@ -28,12 +28,11 @@ import java.io.IOException
    uses its Every / Starting from. The service posts chapter N ≥
    from where (N − from) is a multiple of every, at most one
    chapter every 5 minutes, including while the app is in the
-   background. Novels take turns: a fresh start prefers the book
-   opened most recently, then each picture goes to the next novel
-   that is due, so a 10-star book you are not reading still gets
-   pictures. The next due chapter that is not on disk yet is
-   skipped until it arrives — later due chapters are not pulled
-   forward. A chapter already posted is not posted again. */
+   background. Novels are always tried in last-read order — the
+   book opened most recently in the reader goes first. The next
+   due chapter that is not on disk yet is skipped until it arrives
+   — later due chapters are not pulled forward. A chapter already
+   posted is not posted again. */
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
@@ -50,7 +49,6 @@ object ChapterImages {
        keep the filter they already picked. */
     const val GLOBAL_UNREAD_KEY = "autoImageUnfinishedOnly"
     private const val AUTO_LAST_KEY = "autoImageLastAt"
-    private const val AUTO_LAST_SLUG_KEY = "autoImageLastSlug"
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val autoLock = Any()
     /* Polls and auto posts must outlive the chapter list: opening the
@@ -81,19 +79,6 @@ object ChapterImages {
     ): List<T> =
         items.sortedWith(compareByDescending(lastReadOf).thenBy(tieOf))
 
-    /* After posting for `after`, start at the next item and wrap.
-       Unknown or empty after leaves the list as-is. */
-    fun <T> rotateAfter(
-        items: List<T>,
-        idOf: (T) -> String,
-        after: String,
-    ): List<T> {
-        if (items.isEmpty() || after.isEmpty()) return items
-        val i = items.indexOfFirst { idOf(it) == after }
-        if (i < 0) return items
-        return items.subList(i + 1, items.size) + items.subList(0, i + 1)
-    }
-
     /* First due chapter that is actually on disk, walking from, from+every,
        from+2*every. A hole — Starting from 21 when only 1–20 are
        downloaded, or chapter 1 missing while 21 is present — waits
@@ -123,20 +108,14 @@ object ChapterImages {
         return null
     }
 
-    /* First due chapter across novels. Last-read order, then rotate
-       so the novel that just got a picture goes last. A novel whose
-       next due chapter is not downloaded yet is skipped. */
+    /* First due chapter across novels already in last-read order.
+       A novel whose next due chapter is not downloaded yet is
+       skipped until that file arrives. */
     fun nextAuto(
         novels: List<AutoNovel>,
         skip: (slug: String, chapter: String) -> Boolean,
-        afterSlug: String = "",
     ): AutoPick? {
-        val ordered = rotateAfter(
-            byLastRead(novels, { it.lastRead }, { it.slug }),
-            { it.slug },
-            afterSlug,
-        )
-        for (novel in ordered) {
+        for (novel in byLastRead(novels, { it.lastRead }, { it.slug })) {
             val chapter = nextDueName(novel.chapters, novel.from, novel.every) { ch ->
                 skip(novel.slug, ch)
             } ?: continue
@@ -474,21 +453,12 @@ object ChapterImages {
             .putLong(AUTO_LAST_KEY, at).apply()
     }
 
-    private fun lastAutoSlug(ctx: Context): String =
-        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-            .getString(AUTO_LAST_SLUG_KEY, "") ?: ""
-
-    private fun markLastAutoSlug(ctx: Context, slug: String) {
-        ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
-            .putString(AUTO_LAST_SLUG_KEY, slug).apply()
-    }
-
     /* Opening a novel (list or reader) asks Slack for pictures that
        are already there, including a description on a png we already
        saved with a blank caption. Auto-generate itself runs in
-       ImageService, across every novel that has it on, taking
-       turns — so leaving the app does not stop it, and a book
-       you are not reading still gets a picture. */
+       ImageService, across every novel that has it on, last-read
+       first — so leaving the app does not stop it, and opening a
+       less-recent book does not jump the queue. */
     fun autoSweep(
         ctx: Context,
         folder: String,
@@ -542,8 +512,8 @@ object ChapterImages {
     }
 
     /* Keeps posting and fetching while the service holds the process.
-       One auto post every 5 minutes, taking turns across novels so
-       a book you are not reading still gets pictures. */
+       One auto post every 5 minutes, always the next due chapter of
+       the most recently read novel that still has one. */
     suspend fun runBackground(ctx: Context, status: (String) -> Unit = {}) {
         val app = ctx.applicationContext
         statusSink = status
@@ -597,7 +567,6 @@ object ChapterImages {
                     chapters, novel.every, novel.from,
                 )
             ) {
-                markLastAutoSlug(app, novel.slug)
                 return true
             }
         }
@@ -646,11 +615,7 @@ object ChapterImages {
                 AutoTarget(folder, dir, rec.slug, rec.lastRead, cadence.from, cadence.every),
             )
         }
-        return rotateAfter(
-            byLastRead(out, { it.lastRead }, { it.slug }),
-            { it.slug },
-            lastAutoSlug(app),
-        )
+        return byLastRead(out, { it.lastRead }, { it.slug })
     }
 
     private fun loadChapters(
