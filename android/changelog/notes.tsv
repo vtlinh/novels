@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Add library-wide chapter image settings with star and unfinished filters
+	Raise the update-ready notification above pictures and downloads
+1.37.31	Add library-wide chapter image settings with star and unfinished filters
 1.37.30	Keep polling a chapter image when Slack is down
 1.37.29	Wait to make a picture until that chapter is downloaded
 1.37.29	Make chapter pictures in the background, last-read novels first

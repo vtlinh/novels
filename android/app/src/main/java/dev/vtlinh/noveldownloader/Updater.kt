@@ -75,7 +75,12 @@ object Updater {
 
     /* ---- "update ready" notification ---- */
 
-    private const val UPDATE_CHANNEL = "updates"
+    /* A new id: Android freezes a channel's importance on first
+       create, and the old "updates" channel was LOW — same as
+       pictures and downloads. HIGH ranks above those. */
+    const val UPDATE_CHANNEL = "updates_high"
+    const val UPDATE_IMPORTANCE = NotificationManager.IMPORTANCE_HIGH
+    private const val LEGACY_UPDATE_CHANNEL = "updates"
     private const val UPDATE_NOTIF_ID = 4711
     /* Its own slot. Sharing 4711 meant the next foreground's "update ready"
        overwrote the explanation of why the last install failed — and with a
@@ -103,14 +108,17 @@ object Updater {
         return prefs(context).getString(PENDING_NAME_KEY, null) ?: cached.toString()
     }
 
+    private fun ensureUpdateChannel(nm: NotificationManager) {
+        try { nm.deleteNotificationChannel(LEGACY_UPDATE_CHANNEL) } catch (e: Exception) {}
+        nm.createNotificationChannel(
+            NotificationChannel(UPDATE_CHANNEL, "Updates", UPDATE_IMPORTANCE),
+        )
+    }
+
     private fun notifyUpdateReady(context: Context, versionName: String) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         try {
-            nm.createNotificationChannel(
-                /* LOW: it lands silently in the shade. The check runs while
-                   the app is already open, so a sound would be noise. */
-                NotificationChannel(UPDATE_CHANNEL, "Updates", NotificationManager.IMPORTANCE_LOW),
-            )
+            ensureUpdateChannel(nm)
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
             val install = PendingIntent.getBroadcast(
@@ -131,6 +139,8 @@ object Updater {
                     .setContentText("Downloaded. Tap Install to update.")
                     .setContentIntent(open)
                     .addAction(0, "Install", install)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setCategory(NotificationCompat.CATEGORY_STATUS)
                     /* re-posted on every foreground while it sits unused —
                        alert once so it doesn't nag */
                     .setOnlyAlertOnce(true)
@@ -148,9 +158,7 @@ object Updater {
     fun notifyInstallFailed(context: Context, reason: String) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         try {
-            nm.createNotificationChannel(
-                NotificationChannel(UPDATE_CHANNEL, "Updates", NotificationManager.IMPORTANCE_LOW),
-            )
+            ensureUpdateChannel(nm)
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
             val open = PendingIntent.getActivity(
