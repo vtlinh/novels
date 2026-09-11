@@ -1117,6 +1117,27 @@ object ChapterImages {
         return next.takeIf { it in 0 until size }
     }
 
+    fun indexOfSaved(items: List<Saved>, chapter: String): Int =
+        items.indexOfFirst { it.chapter == chapter }
+
+    /* The reader inserts one object-replacement char for the picture.
+       A tap on that char (or just after it) is a tap on the picture. */
+    fun objectReplacementAt(text: CharSequence, off: Int): Boolean {
+        if (text.isEmpty()) return false
+        val i = off.coerceIn(0, text.length)
+        if (i < text.length && text[i] == '\uFFFC') return true
+        if (i > 0 && text[i - 1] == '\uFFFC') return true
+        return false
+    }
+
+    fun imageAt(text: CharSequence, off: Int): Boolean {
+        if (!objectReplacementAt(text, off)) return false
+        val s = text as? android.text.Spanned ?: return false
+        val start = (off - 1).coerceAtLeast(0)
+        val end = (off + 1).coerceAtMost(s.length)
+        return s.getSpans(start, end, ChapterImageSpan::class.java).isNotEmpty()
+    }
+
     /* Horizontal swipe: left → next, right → previous. A vertical
        flick or a short/slow one is not a page change. */
     fun swipeDelta(
