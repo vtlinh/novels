@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /* Auto-generate picks chapters N ≥ from where (N − from) is a
-   multiple of every, at most one every 5 minutes. The next due
+   multiple of every, at most one every 15 minutes. The next due
    N that is not downloaded yet waits — a later due chapter is
    not used in its place. A wait older than a day is dropped
    only after a Slack look completed and found no png. The wait
@@ -62,10 +62,10 @@ class ChapterImagesTest {
     }
 
     @Test
-    fun `auto-generate waits 5 minutes between chapters`() {
+    fun `auto-generate waits 15 minutes between chapters`() {
         val start = 1_000_000L
         assertEquals("autoImageLastAt", ChapterImages.autoLastKey())
-        assertEquals(5L * 60L * 1000L, ChapterImages.AUTO_GAP_MS)
+        assertEquals(15L * 60L * 1000L, ChapterImages.AUTO_GAP_MS)
         assertTrue(ChapterImages.autoReady(0L, start))
         assertFalse(ChapterImages.autoReady(start, start))
         assertFalse(ChapterImages.autoReady(start, start + ChapterImages.AUTO_GAP_MS - 1))

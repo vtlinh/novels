@@ -54,7 +54,7 @@ class NovelSettingsActivity : AppCompatActivity() {
             "with fewer stars than Settings asks for.\n\n" +
             "Every and Starting from chapter pick which ones. For example, every 20 " +
             "starting from chapter 1 means chapters 1, 21, 41, and so on.\n\n" +
-            "It makes one picture every 5 minutes, and skips a chapter that already " +
+            "It makes one picture every 15 minutes, and skips a chapter that already " +
             "has one. If the next chapter is not on your phone yet, it waits. " +
             "The novels you read most recently get pictures first. " +
             "Settings can turn this on for many novels at once; this switch, when " +
