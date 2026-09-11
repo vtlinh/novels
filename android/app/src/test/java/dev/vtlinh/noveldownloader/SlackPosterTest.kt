@@ -215,4 +215,73 @@ class SlackPosterTest {
         assertFalse(SlackPoster.lookMissing(ByteArray(1), null))
         assertFalse(SlackPoster.lookMissing(ByteArray(1), ""))
     }
+
+    @Test
+    fun `thread gone is only Slack saying the message is not there`() {
+        assertTrue(SlackPoster.threadGone("thread_not_found"))
+        assertTrue(SlackPoster.threadGone("message_not_found"))
+        assertFalse(SlackPoster.threadGone("missing_scope"))
+        assertFalse(SlackPoster.threadGone("service_unavailable"))
+        assertFalse(SlackPoster.threadGone(""))
+    }
+
+    @Test
+    fun `the chapter post is missing only when Slack confirmed the txt is gone`() {
+        assertTrue(SlackPoster.lookTopLevelMissing(null, null, false, true))
+        assertTrue(SlackPoster.lookTopLevelMissing(null, "", false, true))
+        assertFalse(SlackPoster.lookTopLevelMissing(null, null, true, true))
+        assertFalse(SlackPoster.lookTopLevelMissing(null, null, false, false))
+        assertFalse(SlackPoster.lookTopLevelMissing(null, "missing_scope", false, true))
+        assertFalse(SlackPoster.lookTopLevelMissing(null, "service_unavailable", false, true))
+        assertFalse(SlackPoster.lookTopLevelMissing(ByteArray(1), null, false, true))
+        val gone = SlackPoster.Existing(
+            png = null,
+            threads = listOf("1.1"),
+            txtSeen = false,
+            knownThreadsGone = true,
+        )
+        assertTrue(SlackPoster.lookTopLevelMissing(gone))
+        val stillThere = SlackPoster.Existing(
+            png = null,
+            threads = listOf("1.1"),
+            txtSeen = true,
+            knownThreadsGone = false,
+        )
+        assertFalse(SlackPoster.lookTopLevelMissing(stillThere))
+        val neverPosted = SlackPoster.Existing(
+            png = null,
+            threads = emptyList(),
+            txtSeen = false,
+            knownThreadsGone = false,
+        )
+        assertFalse(SlackPoster.lookTopLevelMissing(neverPosted))
+    }
+
+    @Test
+    fun `catalog txt seen is the file Slack still has not a remembered thread`() {
+        val hash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        val hist = listOf(
+            SlackPoster.HistoryMsg("1.1", files = listOf(SlackPoster.NamedFile("$hash.txt"))),
+        )
+        val files = listOf(SlackPoster.NamedFile("$hash.txt", threadTs = "2.2"))
+        assertTrue(SlackPoster.catalogHit(hist, emptyList(), hash).txtSeen)
+        assertTrue(SlackPoster.catalogHit(emptyList(), files, hash).txtSeen)
+        assertFalse(
+            SlackPoster.catalogHit(
+                emptyList(),
+                emptyList(),
+                hash,
+                knownThreads = listOf("9.9"),
+            ).txtSeen,
+        )
+        assertEquals(
+            listOf("9.9"),
+            SlackPoster.catalogHit(
+                emptyList(),
+                emptyList(),
+                hash,
+                knownThreads = listOf("9.9"),
+            ).threads,
+        )
+    }
 }

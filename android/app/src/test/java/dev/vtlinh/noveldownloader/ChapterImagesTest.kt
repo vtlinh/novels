@@ -9,14 +9,16 @@ import org.junit.Test
 /* Auto-generate picks chapters N ≥ from where (N − from) is a
    multiple of every, at most one every 5 minutes. The next due
    N that is not downloaded yet waits — a later due chapter is
-   not used in its place. A wait older than an hour is dropped
-   only after a Slack look completed and found no thread, file,
-   or png. A network miss is not a look. A posted chapter
+   not used in its place. A wait older than a day is dropped
+   only after a Slack look completed and found no png. The wait
+   also stops as soon as Slack confirms the chapter post itself
+   is gone. A network miss is not a look. A posted chapter
    shows Poll image instead of Generate. */
 class ChapterImagesTest {
 
     @Test
-    fun `a wait is stale after one hour`() {
+    fun `a wait is stale after 24 hours`() {
+        assertEquals(24L * 60L * 60L * 1000L, ChapterImages.GIVE_UP_MS)
         val start = 1_000_000L
         assertFalse(ChapterImages.expired(start, start))
         assertFalse(ChapterImages.expired(start, start + ChapterImages.GIVE_UP_MS - 1))
@@ -29,13 +31,34 @@ class ChapterImagesTest {
     @Test
     fun `an expired wait is not dropped until Slack found nothing`() {
         val start = 1_000_000L
-        val twoHours = start + 2 * ChapterImages.GIVE_UP_MS
-        assertFalse(ChapterImages.mayDrop(start, looked = false, foundNothing = true, twoHours))
-        assertTrue(ChapterImages.mayDrop(start, looked = true, foundNothing = true, twoHours))
-        assertFalse(ChapterImages.mayDrop(start, looked = true, foundNothing = false, twoHours))
+        val past = start + 2 * ChapterImages.GIVE_UP_MS
+        assertFalse(ChapterImages.mayDrop(start, looked = false, foundNothing = true, past))
+        assertTrue(ChapterImages.mayDrop(start, looked = true, foundNothing = true, past))
+        assertFalse(ChapterImages.mayDrop(start, looked = true, foundNothing = false, past))
         assertFalse(ChapterImages.mayDrop(start, looked = true, foundNothing = true, start + ChapterImages.GIVE_UP_MS - 1))
         assertFalse(ChapterImages.mayDrop(start, looked = false, foundNothing = true, start))
         assertFalse(ChapterImages.mayDrop(start, looked = true, foundNothing = false, start))
+    }
+
+    @Test
+    fun `a missing Slack post stops the wait before a day is up`() {
+        val start = 1_000_000L
+        val soon = start + 60_000L
+        assertTrue(
+            ChapterImages.mayDrop(
+                start, looked = true, foundNothing = true, soon, topLevelMissing = true,
+            ),
+        )
+        assertFalse(
+            ChapterImages.mayDrop(
+                start, looked = true, foundNothing = true, soon, topLevelMissing = false,
+            ),
+        )
+        assertTrue(
+            ChapterImages.mayDrop(
+                start, looked = false, foundNothing = false, soon, topLevelMissing = true,
+            ),
+        )
     }
 
     @Test
@@ -488,5 +511,7 @@ class ChapterImagesTest {
         assertEquals("about 1 minute", ChapterImages.waitLabel(20_000L))
         assertEquals("about 5 minutes", ChapterImages.waitLabel(5L * 60L * 1000L))
         assertEquals("about 50 minutes", ChapterImages.waitLabel(50L * 60L * 1000L))
+        assertEquals("about 1 hour", ChapterImages.waitLabel(60L * 60L * 1000L))
+        assertEquals("about 24 hours", ChapterImages.waitLabel(ChapterImages.GIVE_UP_MS))
     }
 }
