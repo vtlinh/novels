@@ -357,6 +357,24 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `full-screen swipe steps to the next or previous picture`() {
+        assertEquals(1, ChapterImages.neighborSaved(0, 3, 1))
+        assertEquals(2, ChapterImages.neighborSaved(1, 3, 1))
+        assertEquals(null, ChapterImages.neighborSaved(2, 3, 1))
+        assertEquals(0, ChapterImages.neighborSaved(1, 3, -1))
+        assertEquals(null, ChapterImages.neighborSaved(0, 3, -1))
+        assertEquals(null, ChapterImages.neighborSaved(0, 1, 1))
+        assertEquals(null, ChapterImages.neighborSaved(0, 0, 1))
+        assertEquals(null, ChapterImages.neighborSaved(-1, 3, 1))
+        assertEquals(1, ChapterImages.swipeDelta(-120f, 10f, -400f, 80f, 100f))
+        assertEquals(-1, ChapterImages.swipeDelta(120f, -8f, 400f, 80f, 100f))
+        assertEquals(null, ChapterImages.swipeDelta(-20f, 4f, -400f, 80f, 100f))
+        assertEquals(null, ChapterImages.swipeDelta(-120f, 200f, -400f, 80f, 100f))
+        assertEquals(null, ChapterImages.swipeDelta(-120f, 10f, -40f, 80f, 100f))
+        assertEquals(1, ChapterImages.swipeDelta(-120f, 10f, -120f, 80f, 0f))
+    }
+
+    @Test
     fun `empty alt hides the caption`() {
         assertFalse(ChapterImages.showAlt(""))
         assertFalse(ChapterImages.showAlt("   "))
