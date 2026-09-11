@@ -46,6 +46,32 @@ object Zoom {
         )
     }
 
+    enum class Lift { TAP, NEXT, PREV, NONE }
+
+    /* Finger up at 1×: a still tap, a horizontal page, or neither.
+       Movement past the tap slop that is not a swipe must not dismiss. */
+    fun lift(
+        dx: Float,
+        dy: Float,
+        vx: Float,
+        tapSlop: Float,
+        minDist: Float,
+        minSpeed: Float,
+    ): Lift {
+        if (kotlin.math.abs(dx) <= tapSlop && kotlin.math.abs(dy) <= tapSlop) return Lift.TAP
+        return when (
+            ChapterImages.swipeDelta(dx, dy, vx, minDist, minSpeed)
+                ?: ChapterImages.swipeDelta(dx, dy, dx, minDist, 0f)
+        ) {
+            1 -> Lift.NEXT
+            -1 -> Lift.PREV
+            else -> Lift.NONE
+        }
+    }
+
+    fun span(x0: Float, y0: Float, x1: Float, y1: Float): Float =
+        kotlin.math.hypot(x1 - x0, y1 - y0)
+
     /* When the drawn picture is smaller than the view, center it.
        When it is larger, keep every edge from sliding off. */
     fun clamp(
