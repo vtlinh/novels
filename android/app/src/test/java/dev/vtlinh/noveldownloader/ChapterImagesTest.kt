@@ -214,7 +214,8 @@ class ChapterImagesTest {
         assertEquals("autoImage:than-y", ChapterImages.autoEnabledKey("than-y"))
         assertEquals("autoImageEvery:than-y", ChapterImages.autoEveryKey("than-y"))
         assertEquals("autoImageFrom:than-y", ChapterImages.autoFromKey("than-y"))
-        assertEquals("novelRead:than-y", ChapterImages.finishedKey("than-y"))
+        assertEquals("novelRead:than-y", ChapterImages.readKey("than-y"))
+        assertEquals("autoImageUnfinishedOnly", ChapterImages.GLOBAL_UNREAD_KEY)
         assertNotEquals(ChapterImages.autoEnabledKey("a"), ChapterImages.autoEnabledKey("b"))
         assertNotEquals(ChapterImages.autoEveryKey("a"), ChapterImages.autoEveryKey("b"))
         assertNotEquals(ChapterImages.autoFromKey("a"), ChapterImages.autoFromKey("b"))
@@ -226,56 +227,56 @@ class ChapterImagesTest {
             ChapterImages.autoApplies(
                 novelOn = true, globalOn = false,
                 stars = 0, minStars = 7,
-                finished = true, unfinishedOnly = true,
+                read = true, unreadOnly = true,
             ),
         )
         assertFalse(
             ChapterImages.autoApplies(
                 novelOn = false, globalOn = false,
                 stars = 10, minStars = 7,
-                finished = false, unfinishedOnly = true,
+                read = false, unreadOnly = true,
             ),
         )
         assertTrue(
             ChapterImages.autoApplies(
                 novelOn = false, globalOn = true,
                 stars = 8, minStars = 7,
-                finished = false, unfinishedOnly = true,
+                read = false, unreadOnly = true,
             ),
         )
         assertFalse(
             ChapterImages.autoApplies(
                 novelOn = false, globalOn = true,
                 stars = 6, minStars = 7,
-                finished = false, unfinishedOnly = true,
+                read = false, unreadOnly = true,
             ),
         )
         assertFalse(
             ChapterImages.autoApplies(
                 novelOn = false, globalOn = true,
                 stars = 8, minStars = 7,
-                finished = true, unfinishedOnly = true,
+                read = true, unreadOnly = true,
             ),
         )
         assertTrue(
             ChapterImages.autoApplies(
                 novelOn = false, globalOn = true,
                 stars = 8, minStars = 7,
-                finished = true, unfinishedOnly = false,
+                read = true, unreadOnly = false,
             ),
         )
         assertFalse(
             ChapterImages.autoApplies(
                 novelOn = false, globalOn = true,
                 stars = 0, minStars = 1,
-                finished = false, unfinishedOnly = true,
+                read = false, unreadOnly = true,
             ),
         )
         assertTrue(
             ChapterImages.autoApplies(
                 novelOn = false, globalOn = true,
                 stars = 0, minStars = 0,
-                finished = false, unfinishedOnly = true,
+                read = false, unreadOnly = true,
             ),
         )
         assertEquals(
