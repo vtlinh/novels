@@ -10,8 +10,9 @@ import org.junit.Test
    multiple of every, at most one every 15 minutes. The next due
    N that is not downloaded yet waits — a later due chapter is
    not used in its place. A wait older than an hour is dropped
-   only after Slack has been looked at once more. A posted
-   chapter shows Poll image instead of Generate. */
+   only after a Slack look completed and found no thread, file,
+   or png. A network miss is not a look. A posted chapter
+   shows Poll image instead of Generate. */
 class ChapterImagesTest {
 
     @Test
@@ -26,13 +27,15 @@ class ChapterImagesTest {
     }
 
     @Test
-    fun `an expired wait is not dropped until Slack has been looked at`() {
+    fun `an expired wait is not dropped until Slack found nothing`() {
         val start = 1_000_000L
         val twoHours = start + 2 * ChapterImages.GIVE_UP_MS
-        assertFalse(ChapterImages.mayDrop(start, looked = false, twoHours))
-        assertTrue(ChapterImages.mayDrop(start, looked = true, twoHours))
-        assertFalse(ChapterImages.mayDrop(start, looked = true, start + ChapterImages.GIVE_UP_MS - 1))
-        assertFalse(ChapterImages.mayDrop(start, looked = false, start))
+        assertFalse(ChapterImages.mayDrop(start, looked = false, foundNothing = true, twoHours))
+        assertTrue(ChapterImages.mayDrop(start, looked = true, foundNothing = true, twoHours))
+        assertFalse(ChapterImages.mayDrop(start, looked = true, foundNothing = false, twoHours))
+        assertFalse(ChapterImages.mayDrop(start, looked = true, foundNothing = true, start + ChapterImages.GIVE_UP_MS - 1))
+        assertFalse(ChapterImages.mayDrop(start, looked = false, foundNothing = true, start))
+        assertFalse(ChapterImages.mayDrop(start, looked = true, foundNothing = false, start))
     }
 
     @Test

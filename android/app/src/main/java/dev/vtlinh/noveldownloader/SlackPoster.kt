@@ -255,9 +255,18 @@ class SlackPoster(
         }
 
         /* History / files.list / replies all denied — waiting will not
-           produce a png. A png we already downloaded wins. */
+           produce a png. A png we already downloaded wins. A 503 or
+           network miss is not a deny. */
         fun lookDenied(png: ByteArray?, readError: String?): Boolean =
-            png == null && !readError.isNullOrEmpty()
+            png == null && when (readError) {
+                "missing_scope", "not_in_channel", "channel_not_found" -> true
+                else -> false
+            }
+
+        /* Slack answered and there is no png. Not a transport failure
+           and not a permission deny — the hour give-up may stop. */
+        fun lookMissing(png: ByteArray?, readError: String?): Boolean =
+            png == null && readError.isNullOrEmpty()
 
         /* One history + files.list is reused for every missing hash
            in a burst. A post invalidates it so the wait sees new files. */

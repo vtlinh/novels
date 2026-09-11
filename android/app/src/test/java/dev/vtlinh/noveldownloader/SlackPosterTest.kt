@@ -197,8 +197,22 @@ class SlackPosterTest {
     @Test
     fun `a denied look is a png miss with a read error`() {
         assertTrue(SlackPoster.lookDenied(null, "missing_scope"))
+        assertTrue(SlackPoster.lookDenied(null, "not_in_channel"))
+        assertTrue(SlackPoster.lookDenied(null, "channel_not_found"))
         assertFalse(SlackPoster.lookDenied(ByteArray(1), "missing_scope"))
         assertFalse(SlackPoster.lookDenied(null, null))
         assertFalse(SlackPoster.lookDenied(null, ""))
+        assertFalse(SlackPoster.lookDenied(null, "service_unavailable"))
+        assertFalse(SlackPoster.lookDenied(null, "ratelimited"))
+    }
+
+    @Test
+    fun `a missing look is a completed Slack query with no png`() {
+        assertTrue(SlackPoster.lookMissing(null, null))
+        assertTrue(SlackPoster.lookMissing(null, ""))
+        assertFalse(SlackPoster.lookMissing(null, "missing_scope"))
+        assertFalse(SlackPoster.lookMissing(null, "service_unavailable"))
+        assertFalse(SlackPoster.lookMissing(ByteArray(1), null))
+        assertFalse(SlackPoster.lookMissing(ByteArray(1), ""))
     }
 }

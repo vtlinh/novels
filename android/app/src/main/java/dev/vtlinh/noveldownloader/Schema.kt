@@ -294,9 +294,10 @@ object Schema {
             db.exec(CHAPTER_IMAGE_REQ_TABLE)
             db.exec(CHAPTER_IMAGE_TABLE)
         }
-        /* Whether the hour give-up's last Slack look has run. 0 until
-           lastLook finishes — the reader offers Poll image until the
-           png is saved. */
+        /* Whether the hour give-up's last Slack look found nothing.
+           0 until a completed look misses the thread / file / png —
+           a network miss must not set this. The reader offers Poll
+           image until the png is saved. */
         if (oldVersion < 25) {
             db.soft("ALTER TABLE chapter_image_req ADD COLUMN looked INTEGER DEFAULT 0")
         }
