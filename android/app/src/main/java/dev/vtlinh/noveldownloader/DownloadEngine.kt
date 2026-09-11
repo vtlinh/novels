@@ -2307,7 +2307,7 @@ class DownloadEngine(
                        preview we probed and then saved is the same shape. */
                     chapters.count {
                         it.filename != null && it.filename in existing && it.filename !in stale &&
-                            it.pos !in thisRunSaved
+                            !thisRunSaved.containsKey(it.pos)
                     } + saved.get()
                 },
             )
