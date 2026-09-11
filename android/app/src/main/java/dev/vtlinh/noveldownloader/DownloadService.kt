@@ -302,8 +302,7 @@ class DownloadService : Service() {
                     statusFlow.value = "Error: ${e.message}"
                 }
                 /* New chapters may have filled a hole auto-generate was
-                   waiting on. This service is already in the foreground,
-                   so starting ImageService from here is allowed. */
+                   waiting on. Picture work shares this process. */
                 try { ImageService.startIfNeeded(applicationContext) } catch (e: Exception) {}
                 /* next in line — unless the user pressed Stop (which also
                    cleared the queue) */

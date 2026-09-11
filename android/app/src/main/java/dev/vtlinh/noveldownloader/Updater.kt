@@ -78,7 +78,7 @@ object Updater {
 
     /* A new id: Android freezes a channel's importance on first
        create, and the old "updates" channel was LOW — same as
-       pictures and downloads. HIGH ranks above those. */
+       downloads. HIGH ranks above those. */
     const val UPDATE_CHANNEL = "updates_high"
     const val UPDATE_IMPORTANCE = NotificationManager.IMPORTANCE_HIGH
     private const val LEGACY_UPDATE_CHANNEL = "updates"

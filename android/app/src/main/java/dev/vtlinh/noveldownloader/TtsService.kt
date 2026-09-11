@@ -13,9 +13,10 @@ import androidx.core.app.NotificationCompat
 
 /* Keeps the process alive (and the CPU awake between sentences) while the
    reader's TTS is speaking, so reading continues with the screen off or the
-   app in the background. All actual TTS work stays in ReaderActivity — this
-   service holds the foreground notification and a partial wake lock that is
-   only held while speaking.
+   app in the background. Chapter-picture requests ride this same
+   notification — they do not post a second one. All actual TTS work stays
+   in ReaderActivity — this service holds the foreground notification and a
+   partial wake lock that is only held while speaking.
 
    The notification uses MediaStyle so the play/pause control is centered and
    the media template stays expanded, with the chapter as the only title and
@@ -29,7 +30,7 @@ class TtsService : Service() {
 
     companion object {
         private const val CHANNEL = "tts"
-        private const val NOTIF_ID = 2
+        const val NOTIF_ID = 2
 
         /* The notification's Pause/Play button → ReaderActivity's in-app
            receiver. Its only sender, so it carries no argument: it means
@@ -65,6 +66,9 @@ class TtsService : Service() {
         val token = intent?.getParcelableExtra<MediaSessionCompat.Token>("token")
 
         postNotification(intent?.getStringExtra("title"), speaking, token, intent?.getStringExtra("slug"))
+        /* The player notification already holds the process. Picture
+           work starts here so a second notification is not needed. */
+        try { ImageService.startIfNeeded(applicationContext) } catch (e: Exception) {}
         /* The CPU only needs to stay awake while actually speaking. RENEWED
            on every speaking start — the reader calls one per chapter change
            — not taken once: the timeout is a backstop against a leak, and
