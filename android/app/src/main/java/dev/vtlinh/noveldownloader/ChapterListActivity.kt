@@ -588,11 +588,13 @@ class ChapterListActivity : AppCompatActivity() {
         }
     }
 
-    /* Full-screen picture on top of the info card. Pinch zooms.
-       Back, a tap at 1×, or a tap on the empty frame dismisses.
-       Swipe left / right at 1× steps to the next / previous saved
-       picture — no wrap. A zoomed picture pans instead. A missing
-       decode is a no-op so a broken file cannot crash the grid. */
+    /* Full-screen picture on top of the info card. The image is
+       MATCH_PARENT and owns every gesture — a parent listener that
+       ate ACTION_DOWN made pinch and swipe no-ops. Pinch zooms the
+       drawable matrix. Back or a tap at 1× dismisses. Swipe left /
+       right at 1× steps to the next / previous saved picture — no
+       wrap. A zoomed picture pans instead. A missing decode is a
+       no-op so a broken file cannot crash the grid. */
     private fun showSceneFull(
         items: List<Pair<ChapterImages.Saved, android.graphics.Bitmap?>>,
         start: Int,
@@ -615,10 +617,9 @@ class ChapterListActivity : AppCompatActivity() {
             var index = start
             var loadGen = 0
             val img = ZoomImageView(this@ChapterListActivity).apply {
-                layoutParams = android.widget.LinearLayout.LayoutParams(
-                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                    0,
-                    1f,
+                layoutParams = android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 )
                 setImageBitmap(shown)
             }
@@ -627,6 +628,11 @@ class ChapterListActivity : AppCompatActivity() {
                 setTextColor(getColor(R.color.fg))
                 setLineSpacing(0f, 1.25f)
                 setPadding(dp(24), dp(8), dp(24), dp(24))
+                layoutParams = android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.view.Gravity.BOTTOM,
+                )
             }
             fun bindCaption(item: ChapterImages.Saved) {
                 img.contentDescription =
@@ -660,49 +666,20 @@ class ChapterListActivity : AppCompatActivity() {
             }
             img.onDismissTap = { dialog.dismiss() }
             img.onSwipe = { go(it) }
-            val vc = android.view.ViewConfiguration.get(this@ChapterListActivity)
-            val minDist = vc.scaledPagingTouchSlop.toFloat() * 2f
-            var frameDownX = 0f
-            var frameDownY = 0f
-            val frameTouch = android.view.View.OnTouchListener { _, ev ->
-                when (ev.actionMasked) {
-                    android.view.MotionEvent.ACTION_DOWN -> {
-                        frameDownX = ev.x
-                        frameDownY = ev.y
-                    }
-                    android.view.MotionEvent.ACTION_UP -> {
-                        val dx = ev.x - frameDownX
-                        val dy = ev.y - frameDownY
-                        val swipe = if (img.canPan()) null
-                        else ChapterImages.swipeDelta(dx, dy, dx, minDist, 0f)
-                        if (swipe != null) go(swipe)
-                        else if (kotlin.math.abs(dx) < minDist && kotlin.math.abs(dy) < minDist) {
-                            dialog.dismiss()
-                        }
-                    }
-                }
-                true
-            }
             bindCaption(first.first)
             val root = android.widget.FrameLayout(this@ChapterListActivity).apply {
                 setBackgroundColor(getColor(R.color.bg))
                 clipChildren = false
-                isClickable = true
-                isFocusable = true
-                setOnTouchListener(frameTouch)
             }
-            val column = android.widget.LinearLayout(this@ChapterListActivity).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-                layoutParams = android.widget.FrameLayout.LayoutParams(
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                )
-                clipChildren = false
-                setOnTouchListener(frameTouch)
+            /* Caption sits on the picture so the image can be MATCH_PARENT.
+               Touches there must reach the image — a sibling TextView
+               would otherwise eat pinch and swipe at the bottom. */
+            caption.setOnTouchListener { v, ev ->
+                ev.offsetLocation(v.left.toFloat(), v.top.toFloat())
+                img.dispatchTouchEvent(ev)
             }
-            column.addView(img)
-            column.addView(caption)
-            root.addView(column)
+            root.addView(img)
+            root.addView(caption)
             root.addView(
                 TextView(this@ChapterListActivity).apply {
                     text = "←"
