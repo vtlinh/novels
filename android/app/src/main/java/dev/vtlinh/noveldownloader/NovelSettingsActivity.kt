@@ -56,7 +56,7 @@ class NovelSettingsActivity : AppCompatActivity() {
             "starting from chapter 1 means chapters 1, 21, 41, and so on.\n\n" +
             "It makes one picture every 5 minutes, and skips a chapter that already " +
             "has one. If the next chapter is not on your phone yet, it waits. " +
-            "The novels you read most recently get pictures first. " +
+            "It takes turns across novels, so a book you are not reading still gets pictures. " +
             "Settings can turn this on for many novels at once; this switch, when " +
             "on, is only for this novel."
     private val ttsLangHelp =
