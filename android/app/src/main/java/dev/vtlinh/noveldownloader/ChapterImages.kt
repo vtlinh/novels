@@ -128,8 +128,8 @@ object ChapterImages {
        next due chapter is not downloaded yet is skipped. */
     fun nextAuto(
         novels: List<AutoNovel>,
-        skip: (slug: String, chapter: String) -> Boolean,
         afterSlug: String = "",
+        skip: (slug: String, chapter: String) -> Boolean,
     ): AutoPick? {
         val ordered = rotateAfter(
             byLastRead(novels, { it.lastRead }, { it.slug }),

@@ -138,23 +138,23 @@ class ChapterImagesTest {
         )
         assertEquals(
             ChapterImages.AutoPick("older", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { _, _ -> false }, afterSlug = "newer"),
+            ChapterImages.nextAuto(novels, afterSlug = "newer") { _, _ -> false },
         )
         assertEquals(
             ChapterImages.AutoPick("unread", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { _, _ -> false }, afterSlug = "older"),
+            ChapterImages.nextAuto(novels, afterSlug = "older") { _, _ -> false },
         )
         assertEquals(
             ChapterImages.AutoPick("newer", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { _, _ -> false }, afterSlug = "unread"),
+            ChapterImages.nextAuto(novels, afterSlug = "unread") { _, _ -> false },
         )
         assertEquals(
             ChapterImages.AutoPick("newer", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { slug, _ -> slug != "newer" }, afterSlug = "newer"),
+            ChapterImages.nextAuto(novels, afterSlug = "newer") { slug, _ -> slug != "newer" },
         )
         assertEquals(
             ChapterImages.AutoPick("newer", "Chapter 1.txt"),
-            ChapterImages.nextAuto(novels, { _, _ -> false }, afterSlug = "gone"),
+            ChapterImages.nextAuto(novels, afterSlug = "gone") { _, _ -> false },
         )
         assertEquals(emptyList<String>(), ChapterImages.rotateAfter(emptyList<String>(), { it }, "x"))
         assertEquals(listOf("only"), ChapterImages.rotateAfter(listOf("only"), { it }, "only"))
