@@ -1038,6 +1038,28 @@ object ChapterImages {
 
     fun synopsisTap(): SynopsisTap = SynopsisTap.EXPAND
 
+    /* Next or previous picture in the full-screen gallery.
+       Does not wrap — first and last stay put. */
+    fun neighborSaved(index: Int, size: Int, delta: Int): Int? {
+        if (size <= 0 || delta == 0 || index !in 0 until size) return null
+        val next = index + delta
+        return next.takeIf { it in 0 until size }
+    }
+
+    /* Horizontal swipe: left → next, right → previous. A vertical
+       flick or a short/slow one is not a page change. */
+    fun swipeDelta(
+        dx: Float,
+        dy: Float,
+        vx: Float,
+        minDist: Float,
+        minSpeed: Float,
+    ): Int? {
+        if (kotlin.math.abs(dx) < kotlin.math.abs(dy)) return null
+        if (kotlin.math.abs(dx) < minDist || kotlin.math.abs(vx) < minSpeed) return null
+        return if (dx < 0f) 1 else -1
+    }
+
     fun linkedImage(ctx: Context, folder: String, slug: String, chapter: String): String? {
         if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
         return try { DownloadStore(ctx).chapterImage(folder, slug, chapter) } catch (e: Exception) { null }
