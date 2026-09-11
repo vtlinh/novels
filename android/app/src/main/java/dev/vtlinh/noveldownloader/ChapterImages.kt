@@ -121,19 +121,75 @@ object ChapterImages {
         return null
     }
 
+    @Volatile
+    private var statusSink: ((String) -> Unit)? = null
+
     private fun log(msg: String) {
         DownloadService.appendLog("image: $msg")
     }
 
-    private fun shortHash(hash: String) =
-        if (hash.length <= 12) hash else hash.take(12)
+    /* Logs screen + the picture notification. A download in flight
+       owns statusFlow, so do not overwrite that. */
+    private fun report(msg: String) {
+        log(msg)
+        if (!DownloadService.runningFlow.value) {
+            DownloadService.statusFlow.value = msg
+        }
+        statusSink?.invoke(msg)
+    }
+
+    /* Novel folder + chapter number — what a person reading Logs
+       can match to the book they opened. */
+    fun describe(novel: String, chapter: String): String {
+        val book = novel.trim().ifEmpty { "This novel" }
+        val n = Scenes.chapterNumber(chapter)
+        if (n != null) return "$book, chapter $n"
+        val stem = Scenes.chapterStem(chapter).trim()
+        return if (stem.isNotEmpty()) "$book, $stem" else book
+    }
+
+    fun sizeLabel(bytes: Int): String {
+        if (bytes < 1024) return "$bytes B"
+        val kb = (bytes + 512) / 1024
+        if (kb < 1024) return "$kb KB"
+        val tenths = (bytes * 10L + 512L * 1024L) / (1024L * 1024L)
+        val whole = tenths / 10
+        val frac = tenths % 10
+        return if (frac == 0L) "$whole MB" else "$whole.$frac MB"
+    }
+
+    fun waitLabel(ms: Long): String {
+        val min = ((ms + 30_000L) / 60_000L).coerceAtLeast(1L)
+        return if (min == 1L) "about 1 minute" else "about $min minutes"
+    }
+
+    fun catalogLookLine(novel: String, count: Int): String {
+        val book = novel.trim().ifEmpty { "this novel" }
+        return "Checking Slack for pictures already made for $book — ${countLabel(count)}"
+    }
+
+    fun catalogResultLine(novel: String, saved: Int, missing: Int): String {
+        val book = novel.trim().ifEmpty { "This novel" }
+        return when {
+            saved <= 0 && missing <= 0 -> "$book: nothing to check on Slack"
+            saved <= 0 -> "$book: Slack has no picture yet for ${countLabel(missing)}"
+            missing <= 0 -> "$book: Slack already had pictures for ${countLabel(saved)} — saved"
+            else -> "$book: saved ${countLabel(saved)} from Slack; ${countLabel(missing)} still have none"
+        }
+    }
+
+    private fun countLabel(n: Int) = if (n == 1) "1 chapter" else "$n chapters"
 
     /* missing_scope / not_in_channel: another 8 minutes will not
        produce a png. Surface Slack's message and stop. */
-    private fun deniedLook(found: SlackPoster.Existing): Result<Boolean>? {
+    private fun deniedLook(
+        novel: String,
+        chapter: String,
+        found: SlackPoster.Existing,
+    ): Result<Boolean>? {
         if (!SlackPoster.lookDenied(found.png, found.readError)) return null
         val code = found.readError ?: return null
-        log("look denied $code")
+        report("${describe(novel, chapter)} — ${SlackPoster.describe(code)}")
         return Result.failure(SlackPoster.ApiException(code))
     }
 
@@ -337,30 +393,37 @@ object ChapterImages {
             looks.add(Triple(chapter, hash, reqs.map { it.threadTs }.filter { it.isNotEmpty() }))
         }
         if (looks.isEmpty()) return
-        log("catalog look ${looks.size}")
+        report(catalogLookLine(dirName, looks.size))
         val found = try {
             slack.findExistingMany(looks.map { it.second to it.third })
         } catch (e: Exception) {
-            log("catalog look fail ${e.message}")
+            report("$dirName: could not read Slack (${e.message})")
             return
         }
+        var saved = 0
+        var missing = 0
         for ((chapter, hash, _) in looks) {
             val ex = found[hash] ?: continue
             if (SlackPoster.lookDenied(ex.png, ex.readError)) {
-                log("look denied ${ex.readError}")
+                report("$dirName — ${SlackPoster.describe(ex.readError ?: "")}")
                 return
             }
             if (ex.png != null) {
                 try {
                     keepImage(ctx, folder, dirName, slug, chapter, ex.png, ex.alt)
+                    saved++
                 } catch (e: Exception) {
-                    log("$chapter catalog save fail ${e.message}")
+                    report("${describe(dirName, chapter)} — could not save the picture Slack already had (${e.message})")
+                    missing++
                 }
+            } else {
+                missing++
             }
             for (ts in ex.threads) {
                 if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
             }
         }
+        report(catalogResultLine(dirName, saved, missing))
     }
 
     private fun autoTried(ctx: Context, slug: String, chapter: String): Boolean =
@@ -444,27 +507,32 @@ object ChapterImages {
        the most recently read novel that still has one. */
     suspend fun runBackground(ctx: Context, status: (String) -> Unit = {}) {
         val app = ctx.applicationContext
-        while (true) {
-            if (!slackReady(app)) return
-            status("Saving chapter pictures")
-            resumeWaitingNow(app)
-            val posted = runAutoPass(app, status)
-            if (!hasBackgroundWork(app)) return
-            val wait = when {
-                posted -> AUTO_GAP_MS
-                !autoReady(autoLastAt(app)) -> autoWaitMs(autoLastAt(app))
-                else -> 0L
+        statusSink = status
+        try {
+            while (true) {
+                if (!slackReady(app)) return
+                report("Saving chapter pictures that Slack already finished")
+                resumeWaitingNow(app)
+                val posted = runAutoPass(app)
+                if (!hasBackgroundWork(app)) return
+                val wait = when {
+                    posted -> AUTO_GAP_MS
+                    !autoReady(autoLastAt(app)) -> autoWaitMs(autoLastAt(app))
+                    else -> 0L
+                }
+                if (wait > 0L) {
+                    report("Waiting ${waitLabel(wait)} before making the next picture")
+                    delay(wait)
+                    continue
+                }
+                return
             }
-            if (wait > 0L) {
-                status("Waiting to make the next picture")
-                delay(wait)
-                continue
-            }
-            return
+        } finally {
+            statusSink = null
         }
     }
 
-    private fun runAutoPass(app: Context, status: (String) -> Unit): Boolean {
+    private fun runAutoPass(app: Context): Boolean {
         if (!autoReady(autoLastAt(app))) return false
         val slack = slackPoster(app)
         for (novel in loadAutoNovels(app)) {
@@ -485,7 +553,6 @@ object ChapterImages {
                     (dueCh + blankAlt).distinct(),
                 )
             }
-            status("Making a chapter picture")
             if (autoTakeOne(
                     app, novel.folder, novel.dirName, novel.slug,
                     chapters, novel.every, novel.from,
@@ -581,23 +648,23 @@ object ChapterImages {
            Leave it untried so the next pass retries when it arrives. */
         val text = chapterText(app, folder, dirName, slug, chapter)
         if (text.isNullOrEmpty()) {
-            log("auto $chapter not ready")
+            report("${describe(dirName, chapter)} — chapter file is not downloaded yet")
             return false
         }
         synchronized(autoLock) {
             val last = autoLastAt(app)
             if (!autoReady(last)) {
-                log("auto wait ${autoWaitMs(last)}ms")
+                report("Waiting ${waitLabel(autoWaitMs(last))} before making the next picture")
                 return false
             }
             markAutoLast(app)
         }
         markAutoTried(app, slug, chapter)
-        log("auto $chapter")
+        report("${describe(dirName, chapter)} — asking Slack to make a picture")
         try {
             request(app, folder, dirName, slug, chapter)
         } catch (e: Exception) {
-            log("auto $chapter fail ${e.message}")
+            report("${describe(dirName, chapter)} — could not ask Slack (${e.message})")
         }
         return true
     }
@@ -684,15 +751,15 @@ object ChapterImages {
         val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
         importLegacyWaits(ctx)
         val store = DownloadStore(ctx)
+        val where = describe(dirName, chapter)
         return try {
-            log("request $chapter post=$postIfMissing")
             val onDisk = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
             if (onDisk && !needsAltRefresh(true, linkedAlt(ctx, folder, slug, chapter))) {
-                log("$chapter already on disk")
+                report("$where — already on this phone")
                 return Result.success(true)
             }
             if (token.isEmpty() || channel.isEmpty()) {
-                log("$chapter slack not set")
+                report("$where — Slack is not set in Settings")
                 return Result.failure(IOException("Set Slack in Settings."))
             }
             val slack = SlackPoster(token, channel)
@@ -700,25 +767,24 @@ object ChapterImages {
             val threads = reqs.map { it.threadTs }.filter { it.isNotEmpty() }
             val text = chapterText(ctx, folder, dirName, slug, chapter)
             if (text == null) {
-                log("$chapter no text")
+                report("$where — could not read this chapter")
                 return Result.failure(IOException("Could not read this chapter."))
             }
             if (text.isEmpty()) {
-                log("$chapter empty")
+                report("$where — this chapter is empty")
                 return Result.failure(IOException("This chapter is empty."))
             }
             var hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
                 ?: Scenes.contentHash(text)
-            log("$chapter hash=${shortHash(hash)} storedThreads=${threads.size}")
+            report("$where — checking Slack for a picture already made")
             val found = slack.findExisting(hash, threads)
-            log("$chapter look png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
-            deniedLook(found)?.let { return it }
+            deniedLook(dirName, chapter, found)?.let { return it }
             if (found.png != null) {
                 keepImage(ctx, folder, dirName, slug, chapter, found.png, found.alt)
                 return Result.success(true)
             }
             if (onDisk) {
-                log("$chapter already on disk")
+                report("$where — already on this phone")
                 return Result.success(true)
             }
             for (ts in found.threads) {
@@ -728,12 +794,12 @@ object ChapterImages {
             val live = store.imageReqs(folder, slug, chapter).filter { !expired(it.startedAt) }
             if (live.isEmpty()) {
                 if (!shouldPost(postIfMissing, posted)) {
-                    log("$chapter skip post alreadyPosted=$posted")
+                    report("$where — Slack already has this chapter posted — checking one last time")
                     return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, threads + found.threads)
                 }
+                report("$where — asking Slack to make a picture")
                 val post = slack.postChapter(text)
                 hash = post.hash
-                log("$chapter posted hash=${shortHash(hash)} thread=${post.threadTs}")
                 markRequested(ctx, folder, slug, chapter, hash, post.threadTs)
             }
             val all = store.imageReqs(folder, slug, chapter)
@@ -741,17 +807,17 @@ object ChapterImages {
             val started = all.maxOfOrNull { it.startedAt }?.takeIf { it > 0L }
                 ?: System.currentTimeMillis()
             if (!inflight.add(hash)) {
-                log("$chapter wait already running")
+                report("$where — already waiting for Slack")
                 return Result.success(false)
             }
             try {
                 val remain = (started + GIVE_UP_MS - System.currentTimeMillis())
                     .coerceAtMost(SlackPoster.MAX_WAIT_MS)
                 if (expired(started) || remain <= 0L) {
-                    log("$chapter hour up, last look")
+                    report("$where — an hour is up — checking Slack one last time")
                     return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, poll)
                 }
-                log("$chapter wait ${remain}ms threads=${poll.size}")
+                report("$where — waiting for Slack (${waitLabel(remain)} left)")
                 val png = slack.waitForImage(hash, poll, remain)
                 savePng(ctx, folder, dirName, slug, chapter, png.bytes, png.alt)
                 Result.success(true)
@@ -759,7 +825,7 @@ object ChapterImages {
                 inflight.remove(hash)
             }
         } catch (e: Exception) {
-            log("$chapter request fail ${e.message}")
+            report("${describe(dirName, chapter)} — could not finish (${e.message})")
             val reqs = store.imageReqs(folder, slug, chapter)
             val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
             val started = reqs.minOfOrNull { it.startedAt } ?: 0L
@@ -798,7 +864,10 @@ object ChapterImages {
             { lastRead["${it.folder}\u0000${it.slug}"] ?: 0L },
             { "${it.slug}\u0000${it.chapter}" },
         )
-        log("resume ${ordered.size} waiting")
+        report(
+            if (ordered.size == 1) "Finishing 1 picture Slack already started"
+            else "Finishing ${ordered.size} pictures Slack already started",
+        )
         slackPoster(app)?.let { slack ->
             val byNovel = linkedMapOf<String, MutableList<String>>()
             val loc = mutableMapOf<String, Triple<String, String, String>>()
@@ -821,19 +890,19 @@ object ChapterImages {
             val key = "${w.folder}\u0000${w.slug}\u0000${w.chapter}"
             if (!seen.add(key)) continue
             val found = try { store.imageResumeDir(w.folder, w.slug) } catch (e: Exception) {
-                log("${w.chapter} resume dir fail ${e.message}")
+                report("${w.chapter} — could not find this novel's folder (${e.message})")
                 null
             }
             if (found == null) {
-                log("${w.chapter} resume skip no folder slug=${w.slug}")
+                report("${w.chapter} — could not find this novel's folder")
                 continue
             }
             val (folder, dir) = found
-            log("${w.chapter} resume $dir")
+            report("${describe(dir, w.chapter)} — checking Slack again")
             try {
                 request(app, folder, dir, w.slug, w.chapter, postIfMissing = false)
             } catch (e: Exception) {
-                log("${w.chapter} resume fail ${e.message}")
+                report("${describe(dir, w.chapter)} — could not finish (${e.message})")
             }
         }
     }
@@ -875,14 +944,15 @@ object ChapterImages {
         val token = (prefs.getString("slackBotToken", "") ?: "").trim()
         val channel = (prefs.getString("slackChannelId", "") ?: "").trim()
         importLegacyWaits(ctx)
-        log("poll $chapter")
+        val where = describe(dirName, chapter)
+        report("$where — checking Slack again")
         val onDisk = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
         if (onDisk && !needsAltRefresh(true, linkedAlt(ctx, folder, slug, chapter))) {
-            log("$chapter already on disk")
+            report("$where — already on this phone")
             return Result.success(true)
         }
         if (token.isEmpty() || channel.isEmpty()) {
-            log("$chapter slack not set")
+            report("$where — Slack is not set in Settings")
             return Result.failure(IOException("Set Slack in Settings."))
         }
         val store = DownloadStore(ctx)
@@ -891,29 +961,28 @@ object ChapterImages {
         val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
             ?: chapterText(ctx, folder, dirName, slug, chapter)?.let { Scenes.contentHash(it) }
         if (hash == null) {
-            log("$chapter no text")
+            report("$where — could not read this chapter")
             return Result.failure(IOException("Could not read this chapter."))
         }
-        log("$chapter hash=${shortHash(hash)} storedThreads=${threads.size}")
         val slack = SlackPoster(token, channel)
         val found = try { slack.findExisting(hash, threads) } catch (e: Exception) {
-            log("$chapter look fail ${e.message}")
+            report("$where — could not read Slack (${e.message})")
             return Result.failure(e)
         }
-        log("$chapter look png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
-        deniedLook(found)?.let { return it }
+        deniedLook(dirName, chapter, found)?.let { return it }
         if (found.png != null) {
             keepImage(ctx, folder, dirName, slug, chapter, found.png, found.alt)
             return Result.success(true)
         }
         if (onDisk) {
-            log("$chapter already on disk")
+            report("$where — already on this phone")
             return Result.success(true)
         }
         for (ts in found.threads) {
             if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
         }
         store.markImageReqLooked(folder, slug, chapter)
+        report("$where — Slack has no picture yet")
         return Result.failure(IOException("No image yet."))
     }
 
@@ -930,13 +999,13 @@ object ChapterImages {
         hash: String,
         threads: Collection<String>,
     ): Result<Boolean> {
-        log("$chapter lastLook hash=${shortHash(hash)} threads=${threads.count { it.isNotEmpty() }}")
+        val where = describe(dirName, chapter)
+        report("$where — checking Slack one last time")
         val found = try { slack.findExisting(hash, threads) } catch (e: Exception) {
-            log("$chapter lastLook fail ${e.message}")
+            report("$where — could not read Slack (${e.message})")
             return Result.failure(e)
         }
-        log("$chapter lastLook png=${found.png?.size ?: 0}B slackThreads=${found.threads.size}")
-        deniedLook(found)?.let { return it }
+        deniedLook(dirName, chapter, found)?.let { return it }
         if (found.png != null) {
             keepImage(ctx, folder, dirName, slug, chapter, found.png, found.alt)
             return Result.success(true)
@@ -950,8 +1019,10 @@ object ChapterImages {
         val started = store.imageReqs(folder, slug, chapter)
             .minOfOrNull { it.startedAt } ?: 0L
         if (mayDrop(started, looked = missing, foundNothing = missing)) {
+            report("$where — gave up waiting — Slack still has no picture")
             return Result.failure(IOException("Gave up waiting for the image."))
         }
+        report("$where — Slack has no picture yet")
         return Result.failure(IOException("No image came back from Slack."))
     }
 
@@ -1092,16 +1163,15 @@ object ChapterImages {
         val linked = linkedImage(ctx, folder, slug, chapter)
         if (!linked.isNullOrEmpty()) {
             if (imageOnDisk(ctx, folder, dirName, linked)) return linked
-            log("$chapter linked=$linked missing on disk")
+            report("${describe(dirName, chapter)} — the saved picture is missing from this phone")
             forgetMissingImage(ctx, folder, slug, chapter)
         }
         val name = Scenes.imageName(chapter)
         if (!imageOnDisk(ctx, folder, dirName, name)) return null
         try { DownloadStore(ctx).setChapterImage(folder, slug, chapter, name) } catch (e: Exception) {
-            log("$chapter adopt fail ${e.message}")
+            report("${describe(dirName, chapter)} — could not remember the picture on this phone (${e.message})")
             return null
         }
-        log("$chapter adopted $name")
         return name
     }
 
@@ -1140,7 +1210,7 @@ object ChapterImages {
     }
 
     fun forgetMissingImage(ctx: Context, folder: String, slug: String, chapter: String) {
-        log("$chapter drop image row")
+        log("${chapter}: dropped the saved-picture row — the file is gone")
         try { DownloadStore(ctx).clearChapterImage(folder, slug, chapter) } catch (e: Exception) {}
     }
 
@@ -1176,7 +1246,7 @@ object ChapterImages {
         if (!existing.isNullOrEmpty() && imageOnDisk(ctx, folder, dirName, existing)) {
             DownloadStore(ctx).setChapterImage(folder, slug, chapter, existing, alt)
             if (altText(alt).isNotEmpty()) {
-                log("$chapter caption ${altText(alt).length}c")
+                report("${describe(dirName, chapter)} — saved the picture's description")
             }
             return
         }
@@ -1197,12 +1267,12 @@ object ChapterImages {
         val name = Scenes.imageName(chapter)
         val docId = writeBytes(ctx, dir, name, "image/png", bytes)
         if (docId == null) {
-            log("$chapter save fail ${bytes.size}B")
+            report("${describe(dirName, chapter)} — could not save the picture (${sizeLabel(bytes.size)})")
             throw IOException("Could not save the image.")
         }
         val store = DownloadStore(ctx)
         store.setChapterImage(folder, slug, chapter, docId, alt)
-        log("$chapter saved ${bytes.size}B id=$docId")
+        report("${describe(dirName, chapter)} — saved (${sizeLabel(bytes.size)})")
         /* Keep the Slack threads. Clearing them was why Chapter 400
            posted a second {hash}.txt after the saved png could not be
            opened — the hash was gone, so the next tap hashed new text. */
@@ -1246,12 +1316,12 @@ object ChapterImages {
                 }
                 try { DocumentsContract.getDocumentId(done) } catch (e: Exception) { name }
             } catch (e: Exception) {
-                log("write $name failed ${e.message}")
+                log("could not write $name (${e.message})")
                 try { f.delete() } catch (e2: Exception) {}
                 null
             }
         } catch (e: Exception) {
-            log("write $name failed ${e.message}")
+            log("could not write $name (${e.message})")
             null
         }
     }

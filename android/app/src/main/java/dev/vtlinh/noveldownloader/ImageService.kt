@@ -37,7 +37,7 @@ class ImageService : Service() {
                 /* From API 31 a foreground service cannot be started
                    from the background. The next time the app comes
                    forward, App.onStart tries again. */
-                DownloadService.appendLog("image: service start refused ${e.message}")
+                DownloadService.appendLog("image: could not start the picture service (${e.message})")
             }
         }
 
@@ -67,7 +67,7 @@ class ImageService : Service() {
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                DownloadService.appendLog("image: service fail ${e.message}")
+                DownloadService.appendLog("image: picture service stopped (${e.message})")
             } finally {
                 runningFlow.value = false
                 stopForeground(STOP_FOREGROUND_REMOVE)

@@ -3049,7 +3049,9 @@ class ReaderActivity : AppCompatActivity() {
         val pad = dp(10)
         val bmp = ChapterImages.thumb(this, uri, (maxW - pad * 2).coerceAtLeast(1))
         if (bmp == null) {
-            DownloadService.appendLog("image: $chapter thumb failed $uri")
+            DownloadService.appendLog(
+                "image: ${ChapterImages.describe(dir, chapter)} — could not open the picture on this phone",
+            )
             ChapterImages.forgetMissingImage(this, folder, slug, chapter)
             return raw
         }
