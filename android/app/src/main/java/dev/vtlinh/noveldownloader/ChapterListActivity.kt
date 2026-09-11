@@ -588,10 +588,11 @@ class ChapterListActivity : AppCompatActivity() {
         }
     }
 
-    /* Full-screen picture on top of the info card. Back, a tap, or
-       the empty frame dismisses. Swipe left / right steps to the
-       next / previous saved picture — no wrap. A missing decode is
-       a no-op so a broken file cannot crash the grid. */
+    /* Full-screen picture on top of the info card. Pinch zooms.
+       Back, a tap at 1×, or a tap on the empty frame dismisses.
+       Swipe left / right at 1× steps to the next / previous saved
+       picture — no wrap. A zoomed picture pans instead. A missing
+       decode is a no-op so a broken file cannot crash the grid. */
     private fun showSceneFull(
         items: List<Pair<ChapterImages.Saved, android.graphics.Bitmap?>>,
         start: Int,
@@ -613,16 +614,12 @@ class ChapterListActivity : AppCompatActivity() {
             )
             var index = start
             var loadGen = 0
-            var paged = false
-            var downX = 0f
-            var downY = 0f
-            val img = ImageView(this@ChapterListActivity).apply {
+            val img = ZoomImageView(this@ChapterListActivity).apply {
                 layoutParams = android.widget.LinearLayout.LayoutParams(
                     android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
                     0,
                     1f,
                 )
-                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 setImageBitmap(shown)
             }
             val caption = TextView(this@ChapterListActivity).apply {
@@ -656,66 +653,43 @@ class ChapterListActivity : AppCompatActivity() {
                 val next = ChapterImages.neighborSaved(index, items.size, delta) ?: return
                 index = next
                 val (item, preview) = items[next]
+                img.resetZoom()
                 bindCaption(item)
                 if (preview != null) img.setImageBitmap(preview)
                 loadSharp(item)
             }
+            img.onDismissTap = { dialog.dismiss() }
+            img.onSwipe = { go(it) }
             val vc = android.view.ViewConfiguration.get(this@ChapterListActivity)
             val minDist = vc.scaledPagingTouchSlop.toFloat() * 2f
-            val minSpeed = vc.scaledMinimumFlingVelocity.toFloat()
-            val detector = android.view.GestureDetector(
-                this@ChapterListActivity,
-                object : android.view.GestureDetector.SimpleOnGestureListener() {
-                    override fun onDown(e: android.view.MotionEvent): Boolean = true
-                    override fun onSingleTapUp(e: android.view.MotionEvent): Boolean {
-                        dialog.dismiss()
-                        return true
+            var frameDownX = 0f
+            var frameDownY = 0f
+            val frameTouch = android.view.View.OnTouchListener { _, ev ->
+                when (ev.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        frameDownX = ev.x
+                        frameDownY = ev.y
                     }
-                    override fun onFling(
-                        e1: android.view.MotionEvent?,
-                        e2: android.view.MotionEvent,
-                        velocityX: Float,
-                        velocityY: Float,
-                    ): Boolean {
-                        val startEv = e1 ?: return false
-                        val delta = ChapterImages.swipeDelta(
-                            e2.x - startEv.x,
-                            e2.y - startEv.y,
-                            velocityX,
-                            minDist,
-                            minSpeed,
-                        ) ?: return false
-                        go(delta)
-                        paged = true
-                        return true
+                    android.view.MotionEvent.ACTION_UP -> {
+                        val dx = ev.x - frameDownX
+                        val dy = ev.y - frameDownY
+                        val swipe = if (img.canPan()) null
+                        else ChapterImages.swipeDelta(dx, dy, dx, minDist, 0f)
+                        if (swipe != null) go(swipe)
+                        else if (kotlin.math.abs(dx) < minDist && kotlin.math.abs(dy) < minDist) {
+                            dialog.dismiss()
+                        }
                     }
-                },
-            )
-            val swipe = android.view.View.OnTouchListener { _, ev ->
-                if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
-                    paged = false
-                    downX = ev.x
-                    downY = ev.y
-                }
-                detector.onTouchEvent(ev)
-                if (ev.actionMasked == android.view.MotionEvent.ACTION_UP && !paged) {
-                    val delta = ChapterImages.swipeDelta(
-                        ev.x - downX,
-                        ev.y - downY,
-                        ev.x - downX,
-                        minDist,
-                        0f,
-                    )
-                    if (delta != null) go(delta)
                 }
                 true
             }
             bindCaption(first.first)
             val root = android.widget.FrameLayout(this@ChapterListActivity).apply {
                 setBackgroundColor(getColor(R.color.bg))
+                clipChildren = false
                 isClickable = true
                 isFocusable = true
-                setOnTouchListener(swipe)
+                setOnTouchListener(frameTouch)
             }
             val column = android.widget.LinearLayout(this@ChapterListActivity).apply {
                 orientation = android.widget.LinearLayout.VERTICAL
@@ -723,9 +697,9 @@ class ChapterListActivity : AppCompatActivity() {
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 )
-                setOnTouchListener(swipe)
+                clipChildren = false
+                setOnTouchListener(frameTouch)
             }
-            img.setOnTouchListener(swipe)
             column.addView(img)
             column.addView(caption)
             root.addView(column)
@@ -737,7 +711,7 @@ class ChapterListActivity : AppCompatActivity() {
                     setPadding(dp(16), dp(16), dp(16), dp(16))
                     isClickable = true
                     isFocusable = true
-                    setOnTouchListener(swipe)
+                    setOnClickListener { dialog.dismiss() }
                 },
             )
             dialog.setContentView(root)
