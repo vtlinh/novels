@@ -27,7 +27,7 @@ import java.io.IOException
    novel's own ⚙ switch, when on, always includes that book and
    uses its Every / Starting from. The service posts chapter N ≥
    from where (N − from) is a multiple of every, at most one
-   chapter every 15 minutes, including while the app is in the
+   chapter every 30 minutes, including while the app is in the
    background. A post does not wait for that png before the next
    one is due. Novels are always tried in last-read order — the
    book opened most recently in the reader goes first. The next
@@ -41,7 +41,7 @@ object ChapterImages {
     const val AUTO_EVERY_DEFAULT = 20
     const val AUTO_FROM_DEFAULT = 1
     const val AUTO_MIN_STARS_DEFAULT = 7
-    const val AUTO_GAP_MS = 15L * 60L * 1000L
+    const val AUTO_GAP_MS = 30L * 60L * 1000L
     const val GLOBAL_ON_KEY = "autoImageGlobal"
     const val GLOBAL_EVERY_KEY = "autoImageGlobalEvery"
     const val GLOBAL_FROM_KEY = "autoImageGlobalFrom"
@@ -231,7 +231,7 @@ object ChapterImages {
     fun autoFromKey(slug: String) = "autoImageFrom:$slug"
     fun autoLastKey() = AUTO_LAST_KEY
 
-    /* First auto post is immediate. After that, 15 minutes from the
+    /* First auto post is immediate. After that, 30 minutes from the
        last auto start. lastAt 0 means never. */
     fun autoReady(
         lastAt: Long,
@@ -530,7 +530,7 @@ object ChapterImages {
     }
 
     /* Keeps posting and fetching while the service holds the process.
-       One auto post every 15 minutes, always the next due chapter of
+       One auto post every 30 minutes, always the next due chapter of
        the most recently read novel that still has one. The post does
        not wait for that png — Slack can take much longer than the
        gap, and sitting on it delayed every later request. */
