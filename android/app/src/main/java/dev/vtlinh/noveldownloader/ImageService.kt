@@ -10,7 +10,7 @@ import kotlinx.coroutines.launch
 
 /* Asks Slack for chapter pictures in this process: download a png
    that is already on the way, then post the next due chapter,
-   novels last-read first. One picture every 15 minutes.
+   novels last-read first. One picture every 30 minutes.
 
    It does not post a notification. While the app is open the
    process is already alive; once the screen is off, the read-aloud
