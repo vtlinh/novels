@@ -32,6 +32,10 @@ object ChapterImagePreview {
 
     fun shouldShowButton(hasImage: Boolean): Boolean = hasImage
 
+    /* False: a focusable picture button makes ListView drop the row
+       tap, so a pictured chapter cannot be opened. */
+    fun pictureButtonFocusable(): Boolean = false
+
     fun shouldAutoOpen(
         hasImage: Boolean,
         navigating: Boolean,

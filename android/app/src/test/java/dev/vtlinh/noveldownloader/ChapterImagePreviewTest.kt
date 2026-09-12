@@ -16,6 +16,13 @@ class ChapterImagePreviewTest {
         assertFalse(ChapterImagePreview.shouldShowButton(false))
     }
 
+    /* THE DEFECT. A focusable picture button on the chapter row made
+       ListView drop the tap, so a pictured chapter could not be opened. */
+    @Test
+    fun `the picture button does not take focus from the chapter row`() {
+        assertFalse(ChapterImagePreview.pictureButtonFocusable())
+    }
+
     @Test
     fun `opening a pictured chapter shows the dialog once`() {
         assertTrue(ChapterImagePreview.shouldAutoOpen(true, true, false))

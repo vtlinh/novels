@@ -18,7 +18,8 @@ import kotlinx.coroutines.withContext
    Library (or to the list, if info is showing).    Tapping a chapter
    (or Continue) opens the reader and leaves this screen so Back from
    reading lands on Library. A chapter with a picture has a button
-   that opens it in a dialog with its alt text. */
+   that opens it in a dialog with its alt text. Tapping the rest of
+   the row still opens the chapter. */
 class ChapterListActivity : AppCompatActivity() {
 
     companion object {
@@ -283,6 +284,10 @@ class ChapterListActivity : AppCompatActivity() {
     private fun openChapter(name: String) {
         val dirName = intent.getStringExtra("dir") ?: return
         val title = intent.getStringExtra("title") ?: dirName
+        /* REORDER_TO_FRONT: if the reader for this novel is still
+           alive behind us (e.g. reading aloud), bring THAT instance
+           forward (it gets onNewIntent and jumps to the chapter)
+           instead of building a new reader over it */
         startActivity(
             Intent(this, ReaderActivity::class.java)
                 .putExtra("dir", dirName)
@@ -754,8 +759,15 @@ class ChapterListActivity : AppCompatActivity() {
                 )
                 pic.visibility =
                     if (hasPic) android.view.View.VISIBLE else android.view.View.GONE
+                /* The button must not take focus. A focusable child
+                   makes ListView ignore the row tap. */
+                pic.isFocusable = ChapterImagePreview.pictureButtonFocusable()
+                pic.isFocusableInTouchMode = ChapterImagePreview.pictureButtonFocusable()
                 pic.setOnClickListener {
                     if (name != null) openChapterPicture(name)
+                }
+                v.setOnClickListener {
+                    if (name != null) openChapter(name)
                 }
                 return v
             }
@@ -953,15 +965,6 @@ class ChapterListActivity : AppCompatActivity() {
                 false
             }
 
-            listView.setOnItemClickListener { _, _, pos, _ ->
-                val abs = winStart + pos
-                if (abs !in allOrdered.indices) return@setOnItemClickListener
-                /* REORDER_TO_FRONT: if the reader for this novel is still
-                   alive behind us (e.g. reading aloud), bring THAT instance
-                   forward (it gets onNewIntent and jumps to the chapter)
-                   instead of building a new reader over it */
-                openChapter(allOrdered[abs])
-            }
             bindWindow(
                 listView,
                 preserveScroll = preserveScroll && keptWindow,
