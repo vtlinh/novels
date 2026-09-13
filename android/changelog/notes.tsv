@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Don't show a Slack join error when the picture channel is private
+	Don't flood Logs when Slack is looking up pictures
+1.37.52	Don't show a Slack join error when the picture channel is private
 1.37.51	Post only one auto-generated chapter image every 30 minutes
 1.37.50	Don't show a notification while making chapter pictures
 1.37.49	Post only one auto-generated chapter image every 15 minutes

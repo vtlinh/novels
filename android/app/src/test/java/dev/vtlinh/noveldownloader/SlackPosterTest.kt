@@ -2,6 +2,7 @@ package dev.vtlinh.noveldownloader
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -130,6 +131,31 @@ class SlackPosterTest {
                 "method_not_supported_for_channel_type",
             ),
         )
+        assertNull(
+            SlackPoster.slackErrorLog("/api/files.info", "ratelimited"),
+        )
+        assertEquals(
+            "slack /api/files.info file_not_found",
+            SlackPoster.slackErrorLog("/api/files.info", "file_not_found"),
+        )
+    }
+
+    @Test
+    fun `Slack wait seconds come from Retry-After and then give up`() {
+        assertEquals(
+            12_000L,
+            SlackPoster.slackRetryWaitMs("ratelimited", 429, "12", 0),
+        )
+        assertEquals(
+            10_000L,
+            SlackPoster.slackRetryWaitMs("ratelimited", 200, null, 0),
+        )
+        assertEquals(
+            30_000L,
+            SlackPoster.slackRetryWaitMs("ratelimited", 429, "90", 1),
+        )
+        assertNull(SlackPoster.slackRetryWaitMs("ratelimited", 429, "12", 2))
+        assertNull(SlackPoster.slackRetryWaitMs("file_not_found", 200, "12", 0))
     }
 
     @Test

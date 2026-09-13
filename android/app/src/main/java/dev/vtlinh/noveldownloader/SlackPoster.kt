@@ -273,7 +273,37 @@ class SlackPoster(
         fun slackErrorLog(path: String, code: String): String? {
             val method = path.substringAfterLast('/')
             if (method == "conversations.join" && expectedJoinMiss(code)) return null
+            if (code == "ratelimited") return null
             return "slack $path $code"
+        }
+
+        /* files.list carries shares when Slack has them. A miss is
+           not a reason to ask files.info — history already names
+           each {hash}.txt thread. */
+        fun shareTsOnChannel(f: JSONObject, channelId: String): String? {
+            val shares = f.optJSONObject("shares") ?: return null
+            for (kind in listOf("public", "private")) {
+                val byChan = shares.optJSONObject(kind) ?: continue
+                val arr = byChan.optJSONArray(channelId) ?: continue
+                val ts = arr.optJSONObject(0)?.optString("ts").orEmpty()
+                if (ts.isNotEmpty()) return ts
+            }
+            return null
+        }
+
+        /* Slack's Retry-After is seconds. Wait once or twice, then
+           give up so a busy channel does not freeze the phone. */
+        fun slackRetryWaitMs(
+            code: String,
+            httpCode: Int,
+            retryAfter: String?,
+            attempt: Int,
+            maxAttempts: Int = 2,
+        ): Long? {
+            if (attempt >= maxAttempts) return null
+            if (code != "ratelimited" && httpCode != 429) return null
+            val sec = retryAfter?.toIntOrNull() ?: 10
+            return sec.coerceIn(1, 30) * 1000L
         }
 
         /* History / files.list / replies all denied — waiting will not
@@ -680,12 +710,11 @@ class SlackPoster(
         return out
     }
 
-    private fun threadTsOf(file: JSONObject): String? {
-        shareTsOf(file)?.let { return it }
-        val id = file.optString("id")
-        if (id.isEmpty()) return null
-        return shareTs(fileInfo(id))
-    }
+    /* files.list already carries shares when Slack has them.
+       Do not ask files.info for every listed file — that is what
+       rate-limited a 344-file channel. History is the source of
+       truth for {hash}.txt threads. */
+    private fun threadTsOf(file: JSONObject): String? = shareTsOf(file)
 
     /* Top-level channel messages. The png lives in the txt thread,
        so history is only used to find {hash}.txt and its ts. */
@@ -759,7 +788,7 @@ class SlackPoster(
             )
         } catch (e: Exception) {
             val why = if (e is ApiException) e.code else e.message
-            log("files.info $fileId $why")
+            if (why != "ratelimited") log("files.info $fileId $why")
             JSONObject()
         }
     }
@@ -771,16 +800,7 @@ class SlackPoster(
         return shareTsOf(f)
     }
 
-    private fun shareTsOf(f: JSONObject): String? {
-        val shares = f.optJSONObject("shares") ?: return null
-        for (kind in listOf("public", "private")) {
-            val byChan = shares.optJSONObject(kind) ?: continue
-            val arr = byChan.optJSONArray(channelId) ?: continue
-            val ts = arr.optJSONObject(0)?.optString("ts").orEmpty()
-            if (ts.isNotEmpty()) return ts
-        }
-        return null
-    }
+    private fun shareTsOf(f: JSONObject): String? = shareTsOnChannel(f, channelId)
 
     private fun tryJoin() {
         try {
@@ -813,17 +833,28 @@ class SlackPoster(
     }
 
     private fun execute(req: Request): JSONObject {
-        client.newCall(req).execute().use { r ->
-            val text = r.body?.string() ?: ""
-            val json = try { JSONObject(text) } catch (e: Exception) {
-                throw IOException("Slack returned a bad reply (${r.code}).")
-            }
-            if (!json.optBoolean("ok")) {
+        var attempt = 0
+        while (true) {
+            val wait = client.newCall(req).execute().use { r ->
+                val text = r.body?.string() ?: ""
+                val json = try {
+                    JSONObject(text)
+                } catch (e: Exception) {
+                    if (r.code != 429) {
+                        throw IOException("Slack returned a bad reply (${r.code}).")
+                    }
+                    JSONObject().put("ok", false).put("error", "ratelimited")
+                }
+                if (json.optBoolean("ok")) return json
                 val code = json.optString("error", "http_${r.code}")
-                slackErrorLog(req.url.encodedPath, code)?.let { log(it) }
-                throw ApiException(code)
+                slackRetryWaitMs(code, r.code, r.header("Retry-After"), attempt)
+                    ?: run {
+                        slackErrorLog(req.url.encodedPath, code)?.let { log(it) }
+                        throw ApiException(code)
+                    }
             }
-            return json
+            attempt++
+            Thread.sleep(wait)
         }
     }
 }
