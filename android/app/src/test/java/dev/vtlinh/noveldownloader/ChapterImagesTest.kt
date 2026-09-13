@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /* Auto-generate picks chapters N ≥ from where (N − from) is a
-   multiple of every, at most one every 30 minutes. The next due
+   multiple of every, at most one per the wait in Settings. The next due
    N that is not downloaded yet waits — a later due chapter is
    not used in its place. A wait older than a day is dropped
    only after a Slack look completed and found no png. The wait
@@ -65,7 +65,10 @@ class ChapterImagesTest {
     fun `auto-generate waits 30 minutes between chapters`() {
         val start = 1_000_000L
         assertEquals("autoImageLastAt", ChapterImages.autoLastKey())
+        assertEquals("autoImageGapMinutes", ChapterImages.GLOBAL_GAP_MINUTES_KEY)
+        assertEquals(30, ChapterImages.AUTO_GAP_MINUTES_DEFAULT)
         assertEquals(30L * 60L * 1000L, ChapterImages.AUTO_GAP_MS)
+        assertEquals(ChapterImages.AUTO_GAP_MS, ChapterImages.gapMs(30))
         assertTrue(ChapterImages.autoReady(0L, start))
         assertFalse(ChapterImages.autoReady(start, start))
         assertFalse(ChapterImages.autoReady(start, start + ChapterImages.AUTO_GAP_MS - 1))
@@ -92,6 +95,26 @@ class ChapterImagesTest {
                 now = start + ChapterImages.AUTO_GAP_MS,
             ),
         )
+    }
+
+    @Test
+    fun `auto-generate wait minutes can be shorter or longer than the default`() {
+        val start = 1_000_000L
+        val five = ChapterImages.gapMs(5)
+        assertEquals(5L * 60L * 1000L, five)
+        assertFalse(ChapterImages.autoReady(start, start + five - 1, five))
+        assertTrue(ChapterImages.autoReady(start, start + five, five))
+        assertEquals(five, ChapterImages.autoWaitMs(start, start, five))
+        assertEquals(
+            five,
+            ChapterImages.backgroundWaitMs(
+                true, posted = true, lastAt = start, now = start, gapMs = five,
+            ),
+        )
+        assertEquals(1, ChapterImages.clampGapMinutes(0))
+        assertEquals(1, ChapterImages.clampGapMinutes(-3))
+        assertEquals(24 * 60, ChapterImages.clampGapMinutes(10_000))
+        assertEquals(ChapterImages.gapMs(1), ChapterImages.gapMs(0))
     }
 
     @Test

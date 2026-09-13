@@ -178,11 +178,13 @@ class SettingsActivity : AppCompatActivity() {
     private fun bindAutoImage() {
         val autoCheck = findViewById<CheckBox>(R.id.autoImageCheck)
         val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
+        val gapInput = findViewById<EditText>(R.id.autoImageGapInput)
         val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
         val starsInput = findViewById<EditText>(R.id.autoImageMinStarsInput)
         val unreadCheck = findViewById<CheckBox>(R.id.autoImageUnreadCheck)
         autoCheck.isChecked = ChapterImages.globalEnabled(this)
         everyInput.setText(ChapterImages.globalEvery(this).toString())
+        gapInput.setText(ChapterImages.globalGapMinutes(this).toString())
         fromInput.setText(ChapterImages.globalFrom(this).toString())
         starsInput.setText(ChapterImages.minStars(this).toString())
         unreadCheck.isChecked = ChapterImages.unreadOnly(this)
@@ -194,6 +196,7 @@ class SettingsActivity : AppCompatActivity() {
             if (!hasFocus) saveAutoImage()
         }
         everyInput.setOnFocusChangeListener(persist)
+        gapInput.setOnFocusChangeListener(persist)
         fromInput.setOnFocusChangeListener(persist)
         starsInput.setOnFocusChangeListener(persist)
         bindHelp(
@@ -202,6 +205,8 @@ class SettingsActivity : AppCompatActivity() {
                 "the filters below. It keeps going while you are in the app " +
                 "or while it is reading aloud.\n\n" +
                 "Every and Starting from chapter pick which chapters. " +
+                "Wait minutes between pictures is how long the app waits " +
+                "after asking for one before asking for the next. " +
                 "At least N stars skips novels you have not rated that high. " +
                 "Only unread novels skips ones you marked as read.\n\n" +
                 "A novel with Auto-generate images on in its own settings " +
@@ -211,10 +216,15 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun saveAutoImage() {
         val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
+        val gapInput = findViewById<EditText>(R.id.autoImageGapInput)
         val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
         val starsInput = findViewById<EditText>(R.id.autoImageMinStarsInput)
         val every = everyInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
             ?: ChapterImages.AUTO_EVERY_DEFAULT
+        val gap = ChapterImages.clampGapMinutes(
+            gapInput.text.toString().trim().toIntOrNull()
+                ?: ChapterImages.AUTO_GAP_MINUTES_DEFAULT,
+        )
         val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
             ?: ChapterImages.AUTO_FROM_DEFAULT
         val stars = starsInput.text.toString().trim().toIntOrNull()
@@ -225,8 +235,10 @@ class SettingsActivity : AppCompatActivity() {
             findViewById<CheckBox>(R.id.autoImageCheck).isChecked,
             every, from, stars,
             findViewById<CheckBox>(R.id.autoImageUnreadCheck).isChecked,
+            gap,
         )
         if (everyInput.text.toString() != every.toString()) everyInput.setText(every.toString())
+        if (gapInput.text.toString() != gap.toString()) gapInput.setText(gap.toString())
         if (fromInput.text.toString() != from.toString()) fromInput.setText(from.toString())
         if (starsInput.text.toString() != stars.toString()) starsInput.setText(stars.toString())
     }
