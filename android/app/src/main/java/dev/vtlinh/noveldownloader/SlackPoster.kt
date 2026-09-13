@@ -264,6 +264,18 @@ class SlackPoster(
             else -> "Slack error: $code"
         }
 
+        /* conversations.join only works on public channels. A private
+           picture channel returns this; tryJoin treats it as fine and
+           the upload continues. Keep the raw Slack code off Logs. */
+        fun expectedJoinMiss(code: String): Boolean =
+            code == "missing_scope" || code == "method_not_supported_for_channel_type"
+
+        fun slackErrorLog(path: String, code: String): String? {
+            val method = path.substringAfterLast('/')
+            if (method == "conversations.join" && expectedJoinMiss(code)) return null
+            return "slack $path $code"
+        }
+
         /* History / files.list / replies all denied — waiting will not
            produce a png. A png we already downloaded wins. A 503 or
            network miss is not a deny. */
@@ -777,9 +789,7 @@ class SlackPoster(
                 FormBody.Builder().add("channel", channelId).build(),
             )
         } catch (e: ApiException) {
-            if (e.code != "missing_scope" && e.code != "method_not_supported_for_channel_type") {
-                throw e
-            }
+            if (!expectedJoinMiss(e.code)) throw e
         }
     }
 
@@ -810,7 +820,7 @@ class SlackPoster(
             }
             if (!json.optBoolean("ok")) {
                 val code = json.optString("error", "http_${r.code}")
-                log("slack ${req.url.encodedPath} $code")
+                slackErrorLog(req.url.encodedPath, code)?.let { log(it) }
                 throw ApiException(code)
             }
             return json
