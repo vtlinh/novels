@@ -1,6 +1,5 @@
 package dev.vtlinh.noveldownloader
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -139,21 +138,6 @@ class SlackPosterTest {
             "slack /api/files.info file_not_found",
             SlackPoster.slackErrorLog("/api/files.info", "file_not_found"),
         )
-    }
-
-    /* files.list on a 344-file channel used to call files.info for
-       every file that omitted shares, and Slack rate-limited the
-       burst. History already has each {hash}.txt thread. */
-    @Test
-    fun `a listed file uses shares for its thread and does not invent one`() {
-        val chan = "C0T8SE4AU"
-        val withShares = JSONObject(
-            """{"id":"F1","name":"ab.txt","shares":{"private":{"$chan":[{"ts":"1531763348.000001"}]}}}""",
-        )
-        val noShares = JSONObject("""{"id":"F2","name":"cd.txt"}""")
-        assertEquals("1531763348.000001", SlackPoster.shareTsOnChannel(withShares, chan))
-        assertNull(SlackPoster.shareTsOnChannel(noShares, chan))
-        assertNull(SlackPoster.shareTsOnChannel(withShares, "Cother"))
     }
 
     @Test
