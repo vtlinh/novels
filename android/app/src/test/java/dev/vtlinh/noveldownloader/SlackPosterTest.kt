@@ -103,6 +103,36 @@ class SlackPosterTest {
     }
 
     @Test
+    fun `a private-channel join error stays off the log`() {
+        assertTrue(SlackPoster.expectedJoinMiss("method_not_supported_for_channel_type"))
+        assertTrue(SlackPoster.expectedJoinMiss("missing_scope"))
+        assertFalse(SlackPoster.expectedJoinMiss("channel_not_found"))
+        assertFalse(SlackPoster.expectedJoinMiss("not_in_channel"))
+        assertEquals(
+            null,
+            SlackPoster.slackErrorLog(
+                "/api/conversations.join",
+                "method_not_supported_for_channel_type",
+            ),
+        )
+        assertEquals(
+            null,
+            SlackPoster.slackErrorLog("/api/conversations.join", "missing_scope"),
+        )
+        assertEquals(
+            "slack /api/conversations.join channel_not_found",
+            SlackPoster.slackErrorLog("/api/conversations.join", "channel_not_found"),
+        )
+        assertEquals(
+            "slack /api/conversations.history method_not_supported_for_channel_type",
+            SlackPoster.slackErrorLog(
+                "/api/conversations.history",
+                "method_not_supported_for_channel_type",
+            ),
+        )
+    }
+
+    @Test
     fun `missing_scope names the read scopes`() {
         val msg = SlackPoster.describe("missing_scope")
         assertTrue(msg.contains("files:read"))
