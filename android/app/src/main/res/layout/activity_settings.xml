@@ -409,6 +409,44 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:text="Wait"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+
+                <EditText
+                    android:id="@+id/autoImageGapInput"
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_input"
+                    android:padding="11dp"
+                    android:gravity="center"
+                    android:hint="30"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg"
+                    android:textColorHint="@color/muted"
+                    android:inputType="number"
+                    android:importantForAutofill="no" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="minutes between pictures"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
                     android:text="Starting from chapter"
                     android:textSize="14sp"
                     android:textColor="@color/fg" />

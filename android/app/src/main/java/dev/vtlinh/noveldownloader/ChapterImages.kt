@@ -27,8 +27,8 @@ import java.io.IOException
    novel's own ⚙ switch, when on, always includes that book and
    uses its Every / Starting from. The app posts chapter N ≥
    from where (N − from) is a multiple of every, at most one
-   chapter every 30 minutes, including while it is reading
-   aloud in the background. A post does not wait for that png before the next
+   chapter per the wait in Settings, including while it is
+   reading aloud in the background. A post does not wait for that png before the next
    one is due. Novels are always tried in last-read order — the
    book opened most recently in the reader goes first. The next
    due chapter that is not on disk yet is skipped until it arrives
@@ -41,10 +41,14 @@ object ChapterImages {
     const val AUTO_EVERY_DEFAULT = 20
     const val AUTO_FROM_DEFAULT = 1
     const val AUTO_MIN_STARS_DEFAULT = 7
-    const val AUTO_GAP_MS = 30L * 60L * 1000L
+    const val AUTO_GAP_MINUTES_DEFAULT = 30
+    const val AUTO_GAP_MINUTES_MIN = 1
+    const val AUTO_GAP_MINUTES_MAX = 24 * 60
+    const val AUTO_GAP_MS = AUTO_GAP_MINUTES_DEFAULT * 60L * 1000L
     const val GLOBAL_ON_KEY = "autoImageGlobal"
     const val GLOBAL_EVERY_KEY = "autoImageGlobalEvery"
     const val GLOBAL_FROM_KEY = "autoImageGlobalFrom"
+    const val GLOBAL_GAP_MINUTES_KEY = "autoImageGapMinutes"
     const val GLOBAL_MIN_STARS_KEY = "autoImageMinStars"
     /* Stored under the old unfinished-only name so existing installs
        keep the filter they already picked. */
@@ -227,8 +231,14 @@ object ChapterImages {
     fun autoFromKey(slug: String) = "autoImageFrom:$slug"
     fun autoLastKey() = AUTO_LAST_KEY
 
-    /* First auto post is immediate. After that, 30 minutes from the
-       last auto start. lastAt 0 means never. */
+    fun clampGapMinutes(minutes: Int): Int =
+        minutes.coerceIn(AUTO_GAP_MINUTES_MIN, AUTO_GAP_MINUTES_MAX)
+
+    fun gapMs(minutes: Int): Long =
+        clampGapMinutes(minutes) * 60L * 1000L
+
+    /* First auto post is immediate. After that, the wait in Settings
+       from the last auto start. lastAt 0 means never. */
     fun autoReady(
         lastAt: Long,
         now: Long = System.currentTimeMillis(),
@@ -335,6 +345,14 @@ object ChapterImages {
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
             .getBoolean(GLOBAL_UNREAD_KEY, true)
 
+    fun globalGapMinutes(ctx: Context): Int =
+        clampGapMinutes(
+            ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+                .getInt(GLOBAL_GAP_MINUTES_KEY, AUTO_GAP_MINUTES_DEFAULT),
+        )
+
+    private fun autoGapMs(ctx: Context): Long = gapMs(globalGapMinutes(ctx))
+
     fun setGlobal(
         ctx: Context,
         enabled: Boolean,
@@ -342,6 +360,7 @@ object ChapterImages {
         from: Int,
         minStars: Int,
         unreadOnly: Boolean,
+        gapMinutes: Int = AUTO_GAP_MINUTES_DEFAULT,
     ) {
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
             .putBoolean(GLOBAL_ON_KEY, enabled)
@@ -349,6 +368,7 @@ object ChapterImages {
             .putInt(GLOBAL_FROM_KEY, from.coerceAtLeast(1))
             .putInt(GLOBAL_MIN_STARS_KEY, minStars.coerceIn(0, NovelRating.MAX))
             .putBoolean(GLOBAL_UNREAD_KEY, unreadOnly)
+            .putInt(GLOBAL_GAP_MINUTES_KEY, clampGapMinutes(gapMinutes))
             .commit()
         if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
     }
@@ -528,7 +548,7 @@ object ChapterImages {
     /* Keeps posting and fetching while this process is alive. The
        read-aloud notification is what holds the process once the
        screen is off — pictures do not post a second one. One auto
-       post every 30 minutes, always the next due chapter of the most
+       post per the wait in Settings, always the next due chapter of the most
        recently read novel that still has one. The post does not wait
        for that png — Slack can take much longer than the gap, and
        sitting on it delayed every later request. */
@@ -539,8 +559,10 @@ object ChapterImages {
             report("Saving chapter pictures that Slack already finished")
             resumeWaitingNow(app)
             val posted = runAutoPass(app)
+            val gap = autoGapMs(app)
             val wait = backgroundWaitMs(
                 hasBackgroundWork(app), posted, autoLastAt(app),
+                gapMs = gap,
             )
             if (wait <= 0L) return
             report("Waiting ${waitLabel(wait)} before making the next picture")
@@ -549,7 +571,7 @@ object ChapterImages {
     }
 
     private fun runAutoPass(app: Context): Boolean {
-        if (!autoReady(autoLastAt(app))) return false
+        if (!autoReady(autoLastAt(app), gapMs = autoGapMs(app))) return false
         val slack = slackPoster(app)
         for (novel in loadAutoNovels(app)) {
             if (!slackReady(app)) continue
@@ -669,8 +691,9 @@ object ChapterImages {
         }
         synchronized(autoLock) {
             val last = autoLastAt(app)
-            if (!autoReady(last)) {
-                report("Waiting ${waitLabel(autoWaitMs(last))} before making the next picture")
+            val gap = autoGapMs(app)
+            if (!autoReady(last, gapMs = gap)) {
+                report("Waiting ${waitLabel(autoWaitMs(last, gapMs = gap))} before making the next picture")
                 return false
             }
             markAutoLast(app)
