@@ -9,7 +9,7 @@ import org.junit.Test
 /* Auto-generate picks chapters N ≥ from where (N − from) is a
    multiple of every, at most one per the wait in Settings. The next due
    N that is not downloaded yet waits — a later due chapter is
-   not used in its place. A wait older than a day is dropped
+   not used in its place. A wait older than 30 days is dropped
    only after a Slack look completed and found no png. The wait
    also stops as soon as Slack confirms the chapter post itself
    is gone. A network miss is not a look. A posted chapter
@@ -17,8 +17,8 @@ import org.junit.Test
 class ChapterImagesTest {
 
     @Test
-    fun `a wait is stale after 24 hours`() {
-        assertEquals(24L * 60L * 60L * 1000L, ChapterImages.GIVE_UP_MS)
+    fun `a wait is stale after 30 days`() {
+        assertEquals(30L * 24L * 60L * 60L * 1000L, ChapterImages.GIVE_UP_MS)
         val start = 1_000_000L
         assertFalse(ChapterImages.expired(start, start))
         assertFalse(ChapterImages.expired(start, start + ChapterImages.GIVE_UP_MS - 1))
@@ -41,7 +41,7 @@ class ChapterImagesTest {
     }
 
     @Test
-    fun `a missing Slack post stops the wait before a day is up`() {
+    fun `a missing Slack post stops the wait before 30 days are up`() {
         val start = 1_000_000L
         val soon = start + 60_000L
         assertTrue(
@@ -555,6 +555,8 @@ class ChapterImagesTest {
         assertEquals("about 5 minutes", ChapterImages.waitLabel(5L * 60L * 1000L))
         assertEquals("about 50 minutes", ChapterImages.waitLabel(50L * 60L * 1000L))
         assertEquals("about 1 hour", ChapterImages.waitLabel(60L * 60L * 1000L))
-        assertEquals("about 24 hours", ChapterImages.waitLabel(ChapterImages.GIVE_UP_MS))
+        assertEquals("about 23 hours", ChapterImages.waitLabel(23L * 60L * 60L * 1000L))
+        assertEquals("about 1 day", ChapterImages.waitLabel(24L * 60L * 60L * 1000L))
+        assertEquals("about 30 days", ChapterImages.waitLabel(ChapterImages.GIVE_UP_MS))
     }
 }
