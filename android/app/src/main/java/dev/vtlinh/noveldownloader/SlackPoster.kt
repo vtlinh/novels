@@ -316,7 +316,7 @@ class SlackPoster(
             }
 
         /* Slack answered and there is no png. Not a transport failure
-           and not a permission deny — the day-long give-up may stop. */
+           and not a permission deny — the 30-day give-up may stop. */
         fun lookMissing(png: ByteArray?, readError: String?): Boolean =
             png == null && readError.isNullOrEmpty()
 
