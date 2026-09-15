@@ -671,6 +671,7 @@ class DownloadStore(context: Context) :
                 "folder,slug,chapter,hash,thread_ts,started_at) VALUES(?,?,?,?,?,?)",
             arrayOf(folder, slug, chapter, hash, threadTs, startedAt),
         )
+        if (threadTs.isNotEmpty()) setChapterSlack(folder, slug, chapter, threadTs)
     }
 
     fun markImageReqLooked(folder: String, slug: String, chapter: String) {
@@ -709,9 +710,9 @@ class DownloadStore(context: Context) :
         val out = ArrayList<ChapterImageReq>()
         readableDatabase.rawQuery(
             "SELECT r.folder, r.slug, r.chapter, r.hash, r.thread_ts, r.started_at, r.looked " +
-                "FROM chapter_image_req r LEFT JOIN chapter_image i " +
-                "ON i.folder=r.folder AND i.slug=r.slug AND i.chapter=r.chapter " +
-                "WHERE (i.image IS NULL OR i.image='') AND r.looked=0",
+                "FROM chapter_image_req r LEFT JOIN chapters c " +
+                "ON c.folder=r.folder AND c.slug=r.slug AND c.filename=r.chapter " +
+                "WHERE (c.image IS NULL OR c.image='') AND r.looked=0",
             null,
         ).use { c ->
             while (c.moveToNext()) {
@@ -731,6 +732,46 @@ class DownloadStore(context: Context) :
         return out
     }
 
+    private fun ensureChapterRow(folder: String, slug: String, chapter: String) {
+        writableDatabase.execSQL(
+            "INSERT OR IGNORE INTO chapters(folder,slug,filename,uri) VALUES(?,?,?,'')",
+            arrayOf(folder, slug, chapter),
+        )
+    }
+
+    fun setChapterSlack(folder: String, slug: String, chapter: String, threadTs: String) {
+        if (threadTs.isEmpty()) return
+        ensureChapterRow(folder, slug, chapter)
+        writableDatabase.execSQL(
+            "UPDATE chapters SET slack_thread=? WHERE folder=? AND slug=? AND filename=?",
+            arrayOf(threadTs, folder, slug, chapter),
+        )
+    }
+
+    fun chapterSlack(folder: String, slug: String, chapter: String): String {
+        readableDatabase.query(
+            "chapters", arrayOf("slack_thread"),
+            "folder=? AND slug=? AND filename=?",
+            arrayOf(folder, slug, chapter),
+            null, null, null,
+        ).use { c ->
+            if (!c.moveToFirst()) return ""
+            return c.getString(0).orEmpty()
+        }
+    }
+
+    fun clearChapterSlack(folder: String, slug: String, chapter: String) {
+        writableDatabase.execSQL(
+            "UPDATE chapters SET slack_thread='' WHERE folder=? AND slug=? AND filename=?",
+            arrayOf(folder, slug, chapter),
+        )
+        writableDatabase.delete(
+            "chapter_image_req",
+            "folder=? AND slug=? AND chapter=?",
+            arrayOf(folder, slug, chapter),
+        )
+    }
+
     fun setChapterImage(
         folder: String,
         slug: String,
@@ -740,20 +781,31 @@ class DownloadStore(context: Context) :
     ) {
         /* A blank alt keeps whatever is already stored — adoptDiskImage
            rewrites the image path and must not wipe a caption saved from
-           Slack. INSERT OR REPLACE (not UPSERT): minSdk 26 is SQLite
-           3.18, which has no ON CONFLICT DO UPDATE. */
+           Slack. The Slack thread is dropped once the disk path is set:
+           the file is the record, and we must not list Slack for it. */
         val kept = alt.trim().ifEmpty { chapterImageAlt(folder, slug, chapter) }
+        ensureChapterRow(folder, slug, chapter)
+        writableDatabase.execSQL(
+            "UPDATE chapters SET image=?, image_alt=?, slack_thread='' " +
+                "WHERE folder=? AND slug=? AND filename=?",
+            arrayOf(image, kept, folder, slug, chapter),
+        )
         writableDatabase.execSQL(
             "INSERT OR REPLACE INTO chapter_image(folder,slug,chapter,image,alt) VALUES(?,?,?,?,?)",
             arrayOf(folder, slug, chapter, image, kept),
+        )
+        writableDatabase.delete(
+            "chapter_image_req",
+            "folder=? AND slug=? AND chapter=?",
+            arrayOf(folder, slug, chapter),
         )
     }
 
     fun chapterImages(folder: String, slug: String): List<ChapterImage> {
         val out = ArrayList<ChapterImage>()
         readableDatabase.query(
-            "chapter_image",
-            arrayOf("chapter", "image", "alt"),
+            "chapters",
+            arrayOf("filename", "image", "image_alt"),
             "folder=? AND slug=? AND image<>''",
             arrayOf(folder, slug),
             null, null, null,
@@ -772,8 +824,8 @@ class DownloadStore(context: Context) :
 
     fun chapterImage(folder: String, slug: String, chapter: String): String? {
         readableDatabase.query(
-            "chapter_image", arrayOf("image"),
-            "folder=? AND slug=? AND chapter=? AND image<>''",
+            "chapters", arrayOf("image"),
+            "folder=? AND slug=? AND filename=? AND image<>''",
             arrayOf(folder, slug, chapter),
             null, null, null,
         ).use { c ->
@@ -784,8 +836,8 @@ class DownloadStore(context: Context) :
 
     fun chapterImageAlt(folder: String, slug: String, chapter: String): String {
         readableDatabase.query(
-            "chapter_image", arrayOf("alt"),
-            "folder=? AND slug=? AND chapter=?",
+            "chapters", arrayOf("image_alt"),
+            "folder=? AND slug=? AND filename=?",
             arrayOf(folder, slug, chapter),
             null, null, null,
         ).use { c ->
@@ -795,14 +847,14 @@ class DownloadStore(context: Context) :
     }
 
     fun clearImageReqs(folder: String, slug: String, chapter: String) {
-        writableDatabase.delete(
-            "chapter_image_req",
-            "folder=? AND slug=? AND chapter=?",
-            arrayOf(folder, slug, chapter),
-        )
+        clearChapterSlack(folder, slug, chapter)
     }
 
     fun clearChapterImage(folder: String, slug: String, chapter: String) {
+        writableDatabase.execSQL(
+            "UPDATE chapters SET image='', image_alt='' WHERE folder=? AND slug=? AND filename=?",
+            arrayOf(folder, slug, chapter),
+        )
         writableDatabase.delete(
             "chapter_image",
             "folder=? AND slug=? AND chapter=?",
@@ -1248,9 +1300,17 @@ class DownloadStore(context: Context) :
     }
 
     fun add(folder: String, slug: String, filename: String, uri: String, url: String = "") {
+        /* INSERT OR REPLACE would drop the row and wipe the picture path
+           and Slack thread. Insert only what's missing, then update the
+           location — the same shape as addAll. */
         writableDatabase.execSQL(
-            "INSERT OR REPLACE INTO chapters(folder,slug,filename,uri,url) VALUES(?,?,?,?,?)",
+            "INSERT OR IGNORE INTO chapters(folder,slug,filename,uri,url) VALUES(?,?,?,?,?)",
             arrayOf(folder, slug, filename, uri, url),
+        )
+        writableDatabase.execSQL(
+            "UPDATE chapters SET uri=?, url=CASE WHEN ?='' THEN url ELSE ? END " +
+                "WHERE folder=? AND slug=? AND filename=?",
+            arrayOf(uri, url, url, folder, slug, filename),
         )
         clearChapterList(folder, slug)   // listing changed
     }

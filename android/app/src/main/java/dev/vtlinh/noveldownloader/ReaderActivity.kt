@@ -472,6 +472,7 @@ class ReaderActivity : AppCompatActivity() {
         scroll = findViewById(R.id.readerScroll)
         pictureBtn = findViewById(R.id.pictureBtn)
         pictureBtn.setOnClickListener { showChapterPicture(auto = false) }
+        if (!asDocument()) pictureBtn.visibility = android.view.View.VISIBLE
         lastAutoPictureChapter = savedInstanceState?.getString(STATE_AUTO_PICTURE)
         titleBar.text = novelTitle
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
@@ -3078,30 +3079,35 @@ class ReaderActivity : AppCompatActivity() {
         loadedChapters.firstOrNull { it.idx == currentChapterIdx }
 
     private fun bindPictureButton() {
-        val show = ChapterImagePreview.shouldShowButton(
-            !asDocument() && currentLoadedChapter()?.hasImage == true,
+        val show = !asDocument() && ChapterImagePreview.shouldShowButton(
+            currentLoadedChapter()?.hasImage == true,
         )
         pictureBtn.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
     }
 
-    /* Dialog with the picture and its alt. auto = fade after 15s unless
-       the reader touches the card. The toolbar button always holds. */
+    /* Toolbar button: the picture for this chapter, or the next
+       chapter that has one, in a vertical list. Auto-open still
+       only shows the picture that belongs to this chapter. */
     private fun showChapterPicture(auto: Boolean) {
         if (asDocument()) return
         val folder = prefs.getString("tree", null) ?: return
         val dir = intent.getStringExtra("dir") ?: return
         val slug = intent.getStringExtra("slug") ?: return
         val chapter = currentChapterFile() ?: return
-        if (currentLoadedChapter()?.hasImage != true) return
-        lifecycleScope.launch {
-            val uri = withContext(Dispatchers.IO) {
-                ChapterImages.chapterUri(this@ReaderActivity, folder, dir, chapter, slug)
-            } ?: return@launch
-            if (isFinishing || isDestroyed) return@launch
-            val alt = ChapterImages.linkedAlt(this@ReaderActivity, folder, slug, chapter)
-            val one = ChapterImages.savedOf(chapter, uri, alt)
-            ChapterImagePreview.show(this@ReaderActivity, one, null, auto)
+        if (auto) {
+            if (currentLoadedChapter()?.hasImage != true) return
+            lifecycleScope.launch {
+                val uri = withContext(Dispatchers.IO) {
+                    ChapterImages.chapterUri(this@ReaderActivity, folder, dir, chapter, slug)
+                } ?: return@launch
+                if (isFinishing || isDestroyed) return@launch
+                val alt = ChapterImages.linkedAlt(this@ReaderActivity, folder, slug, chapter)
+                val one = ChapterImages.savedOf(chapter, uri, alt)
+                ChapterImagePreview.show(this@ReaderActivity, one, null, auto = true)
+            }
+            return
         }
+        openChapterPictureList(folder, dir, slug, chapter)
     }
 
     private fun maybeAutoShowPicture() {
@@ -3123,21 +3129,23 @@ class ReaderActivity : AppCompatActivity() {
         val slug = intent.getStringExtra("slug") ?: return
         val lc = loadedChapters.lastOrNull { it.start <= off } ?: return
         val chapter = chapters?.ordered?.getOrNull(lc.idx) ?: return
+        openChapterPictureList(folder, dir, slug, chapter)
+    }
+
+    private fun openChapterPictureList(
+        folder: String,
+        dir: String,
+        slug: String,
+        chapter: String,
+    ) {
         lifecycleScope.launch {
             val items = withContext(Dispatchers.IO) {
                 ChapterImages.listSaved(this@ReaderActivity, folder, dir, slug)
             }
             if (isFinishing || isDestroyed) return@launch
-            val start = ChapterImages.indexOfSaved(items, chapter)
-            if (start >= 0) {
-                PictureGallery.show(this@ReaderActivity, items.map { it to null }, start)
-                return@launch
-            }
-            val uri = ChapterImages.chapterUri(this@ReaderActivity, folder, dir, chapter, slug)
-                ?: return@launch
-            val alt = ChapterImages.linkedAlt(this@ReaderActivity, folder, slug, chapter)
-            val one = ChapterImages.savedOf(chapter, uri, alt)
-            PictureGallery.show(this@ReaderActivity, listOf(one to null), 0)
+            val start = ChapterImages.startSavedIndex(items, chapter)
+            if (start < 0) return@launch
+            PictureGallery.show(this@ReaderActivity, items.map { it to null }, start)
         }
     }
 
@@ -3149,7 +3157,7 @@ class ReaderActivity : AppCompatActivity() {
         val folder = prefs.getString("tree", null) ?: return raw
         val dir = intent.getStringExtra("dir") ?: return raw
         val slug = intent.getStringExtra("slug") ?: ""
-        if (ChapterImages.adoptDiskImage(this, folder, dir, slug, chapter) == null) return raw
+        if (ChapterImages.linkedImage(this, folder, slug, chapter) == null) return raw
         val uri = ChapterImages.chapterUri(this, folder, dir, chapter, slug) ?: return raw
         val maxW = (text.width - text.paddingLeft - text.paddingRight)
             .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }
@@ -3159,7 +3167,6 @@ class ReaderActivity : AppCompatActivity() {
             DownloadService.appendLog(
                 "image: ${ChapterImages.describe(dir, chapter)} — could not open the picture on this phone",
             )
-            ChapterImages.forgetMissingImage(this, folder, slug, chapter)
             return raw
         }
         val alt = ChapterImages.linkedAlt(this, folder, slug, chapter)

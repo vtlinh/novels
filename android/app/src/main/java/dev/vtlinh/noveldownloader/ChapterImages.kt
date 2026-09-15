@@ -14,13 +14,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 
-/* One chapter image: post {hash}.txt, record that Slack thread in
-   the database, poll for {hash}.png, and save it under scenes/. The
-   chapter→image row is how the reader knows to draw a picture. Request
-   threads stay until that save — a 30-day give-up only stops
-   polling after a Slack look completed and found no png. The wait
-   stops sooner if Slack confirms the chapter post itself is gone.
-   A network or service error is not a look.
+/* One chapter image: post {hash}.txt, record that Slack thread on
+   the chapter row, poll that thread for {hash}.png, and save the
+   disk path on the same row. The reader trusts those columns — it
+   does not walk scenes/. A stored thread is how we look up a
+   missing png without listing the Slack channel. The thread is
+   dropped only when Slack says that post is gone, or when the png
+   is saved and the disk path is set. A network or service error
+   is not a look.
 
    Auto-generate: Settings can turn this on for the whole library,
    with a minimum star rating and an unread-only filter. A
@@ -435,10 +436,18 @@ object ChapterImages {
             val reqs = try { store.imageReqs(folder, slug, chapter) } catch (e: Exception) {
                 emptyList()
             }
+            val slack = try { store.chapterSlack(folder, slug, chapter) } catch (e: Exception) {
+                ""
+            }
             val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
                 ?: chapterText(ctx, folder, dirName, slug, chapter)?.let { Scenes.contentHash(it) }
                 ?: continue
-            looks.add(Triple(chapter, hash, reqs.map { it.threadTs }.filter { it.isNotEmpty() }))
+            looks.add(
+                Triple(
+                    chapter, hash,
+                    storedThreads(slack, reqs.map { it.threadTs }),
+                ),
+            )
         }
         if (looks.isEmpty()) return
         report(catalogLookLine(dirName, looks.size))
@@ -466,9 +475,12 @@ object ChapterImages {
                 }
             } else {
                 missing++
+                dropSlackIfGone(ctx, folder, slug, chapter, ex)
             }
-            for (ts in ex.threads) {
-                if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+            if (ex.png == null && !ex.knownThreadsGone) {
+                for (ts in ex.threads) {
+                    if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+                }
             }
         }
         report(catalogResultLine(dirName, saved, missing))
@@ -524,7 +536,7 @@ object ChapterImages {
                     emptyList()
                 }
                 val blankAlt = chapters.filter { ch ->
-                    adoptDiskImage(app, folder, dirName, slug, ch) != null &&
+                    linkedImage(app, folder, slug, ch) != null &&
                         needsAltRefresh(true, linkedAlt(app, folder, slug, ch))
                 }
                 adoptFromSlack(app, slack, folder, dirName, slug, (dueCh + blankAlt).distinct())
@@ -588,7 +600,7 @@ object ChapterImages {
                     due(n, novel.from, novel.every)
                 }
                 val blankAlt = chapters.filter { ch ->
-                    adoptDiskImage(app, novel.folder, novel.dirName, novel.slug, ch) != null &&
+                    linkedImage(app, novel.folder, novel.slug, ch) != null &&
                         needsAltRefresh(true, linkedAlt(app, novel.folder, novel.slug, ch))
                 }
                 adoptFromSlack(
@@ -740,9 +752,11 @@ object ChapterImages {
             return ImageAction.GENERATE
         }
         importLegacyWaits(ctx)
+        val store = DownloadStore(ctx)
         return imageAction(
-            hasImage = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null,
-            hasReq = DownloadStore(ctx).imageReqs(folder, slug, chapter).isNotEmpty(),
+            hasImage = linkedImage(ctx, folder, slug, chapter) != null,
+            hasReq = store.chapterSlack(folder, slug, chapter).isNotEmpty() ||
+                store.imageReqs(folder, slug, chapter).isNotEmpty(),
         )
     }
 
@@ -798,7 +812,7 @@ object ChapterImages {
         val store = DownloadStore(ctx)
         val where = describe(dirName, chapter)
         return try {
-            val onDisk = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
+            val onDisk = linkedImage(ctx, folder, slug, chapter) != null
             if (onDisk && !needsAltRefresh(true, linkedAlt(ctx, folder, slug, chapter))) {
                 report("$where — already on this phone")
                 return Result.success(true)
@@ -809,7 +823,10 @@ object ChapterImages {
             }
             val slack = SlackPoster(token, channel)
             val reqs = store.imageReqs(folder, slug, chapter)
-            val threads = reqs.map { it.threadTs }.filter { it.isNotEmpty() }
+            val threads = storedThreads(
+                store.chapterSlack(folder, slug, chapter),
+                reqs.map { it.threadTs },
+            )
             val text = chapterText(ctx, folder, dirName, slug, chapter)
             if (text == null) {
                 report("$where — could not read this chapter")
@@ -832,10 +849,15 @@ object ChapterImages {
                 report("$where — already on this phone")
                 return Result.success(true)
             }
-            for (ts in found.threads) {
-                if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+            if (dropSlackIfGone(ctx, folder, slug, chapter, found)) {
+                report("$where — Slack no longer has this chapter posted")
             }
-            val posted = reqs.isNotEmpty() || found.threads.isNotEmpty()
+            if (!found.knownThreadsGone) {
+                for (ts in found.threads) {
+                    if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+                }
+            }
+            val posted = threads.isNotEmpty() || found.threads.isNotEmpty()
             if (posted && SlackPoster.lookTopLevelMissing(found)) {
                 return lastLook(ctx, slack, folder, dirName, slug, chapter, hash, threads + found.threads)
             }
@@ -878,6 +900,7 @@ object ChapterImages {
             }
         } catch (e: Exception) {
             report("${describe(dirName, chapter)} — could not finish (${e.message})")
+            dropSlackIfGone(ctx, folder, slug, chapter, e)
             val reqs = store.imageReqs(folder, slug, chapter)
             val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
             val started = reqs.minOfOrNull { it.startedAt } ?: 0L
@@ -997,7 +1020,7 @@ object ChapterImages {
         importLegacyWaits(ctx)
         val where = describe(dirName, chapter)
         report("$where — checking Slack again")
-        val onDisk = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
+        val onDisk = linkedImage(ctx, folder, slug, chapter) != null
         if (onDisk && !needsAltRefresh(true, linkedAlt(ctx, folder, slug, chapter))) {
             report("$where — already on this phone")
             return Result.success(true)
@@ -1008,7 +1031,10 @@ object ChapterImages {
         }
         val store = DownloadStore(ctx)
         val reqs = store.imageReqs(folder, slug, chapter)
-        val threads = reqs.map { it.threadTs }.filter { it.isNotEmpty() }
+        val threads = storedThreads(
+            store.chapterSlack(folder, slug, chapter),
+            reqs.map { it.threadTs },
+        )
         val hash = reqs.firstOrNull { it.hash.isNotEmpty() }?.hash
             ?: chapterText(ctx, folder, dirName, slug, chapter)?.let { Scenes.contentHash(it) }
         if (hash == null) {
@@ -1018,6 +1044,7 @@ object ChapterImages {
         val slack = SlackPoster(token, channel)
         val found = try { slack.findExisting(hash, threads) } catch (e: Exception) {
             report("$where — could not read Slack (${e.message})")
+            dropSlackIfGone(ctx, folder, slug, chapter, e)
             return Result.failure(e)
         }
         deniedLook(dirName, chapter, found)?.let { return it }
@@ -1029,8 +1056,14 @@ object ChapterImages {
             report("$where — already on this phone")
             return Result.success(true)
         }
-        for (ts in found.threads) {
-            if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+        if (dropSlackIfGone(ctx, folder, slug, chapter, found)) {
+            report("$where — Slack no longer has this chapter posted")
+            return Result.failure(IOException("Slack no longer has this chapter posted."))
+        }
+        if (!found.knownThreadsGone) {
+            for (ts in found.threads) {
+                if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+            }
         }
         store.markImageReqLooked(folder, slug, chapter)
         report("$where — Slack has no picture yet")
@@ -1054,6 +1087,7 @@ object ChapterImages {
         report("$where — checking Slack one last time")
         val found = try { slack.findExisting(hash, threads) } catch (e: Exception) {
             report("$where — could not read Slack (${e.message})")
+            dropSlackIfGone(ctx, folder, slug, chapter, e)
             return Result.failure(e)
         }
         deniedLook(dirName, chapter, found)?.let { return it }
@@ -1061,8 +1095,14 @@ object ChapterImages {
             keepImage(ctx, folder, dirName, slug, chapter, found.png, found.alt)
             return Result.success(true)
         }
-        for (ts in found.threads) {
-            if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+        if (dropSlackIfGone(ctx, folder, slug, chapter, found)) {
+            report("$where — Slack no longer has this chapter posted")
+            return Result.failure(IOException("Slack no longer has this chapter posted."))
+        }
+        if (!found.knownThreadsGone) {
+            for (ts in found.threads) {
+                if (ts.isNotEmpty()) markRequested(ctx, folder, slug, chapter, hash, ts)
+            }
         }
         val gone = SlackPoster.lookTopLevelMissing(found)
         val missing = SlackPoster.lookMissing(found.png, found.readError)
@@ -1129,8 +1169,9 @@ object ChapterImages {
     fun needsAltRefresh(hasImage: Boolean, storedAlt: String): Boolean =
         hasImage && !showAlt(storedAlt)
 
-    /* chapter_image rows for this novel, lowest chapter number first.
-       One exists-query per row — not a listing of scenes/. */
+    /* Chapter rows with a picture path, lowest chapter number first.
+       The database is the record — do not walk scenes/ or drop a row
+       because a file query failed. */
     fun listSaved(
         ctx: Context,
         folder: String,
@@ -1145,16 +1186,73 @@ object ChapterImages {
         }
         val out = mutableListOf<Saved>()
         for (row in rows) {
-            if (!imageOnDisk(ctx, folder, dirName, row.image)) {
-                forgetMissingImage(ctx, folder, slug, row.chapter)
-                continue
-            }
+            if (row.image.isEmpty()) continue
             val uri = DocumentsContract.buildDocumentUriUsingTree(
                 tree, resolveImageDocId(rootId, dirName, row.image),
             )
             out.add(savedOf(row.chapter, uri, row.alt))
         }
         return sortSaved(out)
+    }
+
+    /* This chapter's picture, or the next chapter that has one.
+       No later picture still opens the last earlier one so the
+       button is never a dead end when any picture exists.
+       `pictured` is already lowest-number first. */
+    fun startImageChapter(pictured: List<String>, from: String): String? {
+        if (pictured.isEmpty()) return null
+        if (pictured.contains(from)) return from
+        val n = Scenes.chapterNumber(from)
+        if (n != null) {
+            pictured.firstOrNull { (Scenes.chapterNumber(it) ?: Int.MAX_VALUE) >= n }
+                ?.let { return it }
+            pictured.lastOrNull { (Scenes.chapterNumber(it) ?: Int.MAX_VALUE) < n }
+                ?.let { return it }
+        }
+        return pictured.last()
+    }
+
+    fun startSavedIndex(items: List<Saved>, chapter: String): Int {
+        val name = startImageChapter(items.map { it.chapter }, chapter) ?: return -1
+        return items.indexOfFirst { it.chapter == name }
+    }
+
+    fun storedThreads(slackThread: String, reqThreads: Collection<String>): List<String> {
+        val out = linkedSetOf<String>()
+        if (slackThread.isNotEmpty()) out.add(slackThread)
+        for (ts in reqThreads) if (ts.isNotEmpty()) out.add(ts)
+        return out.toList()
+    }
+
+    /* Drop the Slack link only when Slack said that post is gone,
+       or when the png is on the chapter row. A miss or a network
+       error keeps the thread so we can look there again. */
+    fun shouldClearSlack(threadGone: Boolean, imageSaved: Boolean): Boolean =
+        threadGone || imageSaved
+
+    private fun dropSlackIfGone(
+        ctx: Context,
+        folder: String,
+        slug: String,
+        chapter: String,
+        found: SlackPoster.Existing,
+    ): Boolean {
+        if (!shouldClearSlack(found.knownThreadsGone, imageSaved = false)) return false
+        try { DownloadStore(ctx).clearChapterSlack(folder, slug, chapter) } catch (e: Exception) {}
+        return true
+    }
+
+    private fun dropSlackIfGone(
+        ctx: Context,
+        folder: String,
+        slug: String,
+        chapter: String,
+        e: Exception,
+    ): Boolean {
+        val gone = (e as? SlackPoster.ApiException)?.let { SlackPoster.threadGone(it.code) } == true
+        if (!shouldClearSlack(gone, imageSaved = false)) return false
+        try { DownloadStore(ctx).clearChapterSlack(folder, slug, chapter) } catch (ex: Exception) {}
+        return true
     }
 
     fun savedOf(chapter: String, uri: Uri, alt: String = ""): Saved {
@@ -1238,33 +1336,17 @@ object ChapterImages {
         dirName: String,
         chapter: String,
         slug: String = "",
-    ): Boolean = adoptDiskImage(ctx, folder, dirName, slug, chapter) != null
+    ): Boolean = linkedImage(ctx, folder, slug, chapter) != null
 
-    /* One document query for scenes/{chapter}.png — not a listing of
-       scenes/. Generate image does this before any Slack call. A
-       database row whose file is gone is dropped. */
+    /* The chapter row is the record. Do not walk scenes/ or drop a
+       path because a document query failed. */
     fun adoptDiskImage(
         ctx: Context,
         folder: String,
         dirName: String,
         slug: String,
         chapter: String,
-    ): String? {
-        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return null
-        val linked = linkedImage(ctx, folder, slug, chapter)
-        if (!linked.isNullOrEmpty()) {
-            if (imageOnDisk(ctx, folder, dirName, linked)) return linked
-            report("${describe(dirName, chapter)} — the saved picture is missing from this phone")
-            forgetMissingImage(ctx, folder, slug, chapter)
-        }
-        val name = Scenes.imageName(chapter)
-        if (!imageOnDisk(ctx, folder, dirName, name)) return null
-        try { DownloadStore(ctx).setChapterImage(folder, slug, chapter, name) } catch (e: Exception) {
-            report("${describe(dirName, chapter)} — could not remember the picture on this phone (${e.message})")
-            return null
-        }
-        return name
-    }
+    ): String? = linkedImage(ctx, folder, slug, chapter)
 
     fun imageOnDisk(ctx: Context, folder: String, dirName: String, image: String): Boolean {
         if (folder.isEmpty() || dirName.isEmpty() || image.isEmpty()) return false
@@ -1334,7 +1416,7 @@ object ChapterImages {
         alt: String,
     ) {
         val existing = linkedImage(ctx, folder, slug, chapter)
-        if (!existing.isNullOrEmpty() && imageOnDisk(ctx, folder, dirName, existing)) {
+        if (!existing.isNullOrEmpty()) {
             DownloadStore(ctx).setChapterImage(folder, slug, chapter, existing, alt)
             if (altText(alt).isNotEmpty()) {
                 report("${describe(dirName, chapter)} — saved the picture's description")
@@ -1364,9 +1446,6 @@ object ChapterImages {
         val store = DownloadStore(ctx)
         store.setChapterImage(folder, slug, chapter, docId, alt)
         report("${describe(dirName, chapter)} — saved (${sizeLabel(bytes.size)})")
-        /* Keep the Slack threads. Clearing them was why Chapter 400
-           posted a second {hash}.txt after the saved png could not be
-           opened — the hash was gone, so the next tap hashed new text. */
         try { store.forgetDiskBytes(folder, slug) } catch (e: Exception) {}
     }
 

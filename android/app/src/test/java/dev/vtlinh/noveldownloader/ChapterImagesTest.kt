@@ -442,6 +442,37 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `the list opens this chapter or the next pictured one`() {
+        val pictured = listOf("Chapter 1.txt", "Chapter 21.txt", "Chapter 41.txt")
+        assertEquals("Chapter 21.txt", ChapterImages.startImageChapter(pictured, "Chapter 21.txt"))
+        assertEquals("Chapter 21.txt", ChapterImages.startImageChapter(pictured, "Chapter 15.txt"))
+        assertEquals("Chapter 1.txt", ChapterImages.startImageChapter(pictured, "Chapter 1.txt"))
+        assertEquals("Chapter 41.txt", ChapterImages.startImageChapter(pictured, "Chapter 50.txt"))
+        assertEquals(null, ChapterImages.startImageChapter(emptyList(), "Chapter 1.txt"))
+    }
+
+    @Test
+    fun `a stored Slack thread is enough to look up a missing picture`() {
+        assertEquals(
+            listOf("1.1"),
+            ChapterImages.storedThreads("1.1", emptyList()),
+        )
+        assertEquals(
+            listOf("1.1", "2.2"),
+            ChapterImages.storedThreads("1.1", listOf("1.1", "2.2", "")),
+        )
+        assertEquals(emptyList<String>(), ChapterImages.storedThreads("", emptyList()))
+    }
+
+    @Test
+    fun `the Slack thread is dropped only when Slack says it is gone or the picture is saved`() {
+        assertTrue(ChapterImages.shouldClearSlack(threadGone = true, imageSaved = false))
+        assertTrue(ChapterImages.shouldClearSlack(threadGone = false, imageSaved = true))
+        assertTrue(ChapterImages.shouldClearSlack(threadGone = true, imageSaved = true))
+        assertFalse(ChapterImages.shouldClearSlack(threadGone = false, imageSaved = false))
+    }
+
+    @Test
     fun `a tap on the object-replacement char is a tap on the picture`() {
         assertTrue(ChapterImages.objectReplacementAt("A\uFFFC\nmore", 1))
         assertTrue(ChapterImages.objectReplacementAt("A\uFFFC\nmore", 2))

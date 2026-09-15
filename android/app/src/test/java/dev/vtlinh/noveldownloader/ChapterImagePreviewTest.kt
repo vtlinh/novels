@@ -11,9 +11,9 @@ import org.junit.Test
 class ChapterImagePreviewTest {
 
     @Test
-    fun `the menu button is only for a chapter that has a picture`() {
+    fun `the reader picture button is on every chapter`() {
         assertTrue(ChapterImagePreview.shouldShowButton(true))
-        assertFalse(ChapterImagePreview.shouldShowButton(false))
+        assertTrue(ChapterImagePreview.shouldShowButton(false))
     }
 
     @Test

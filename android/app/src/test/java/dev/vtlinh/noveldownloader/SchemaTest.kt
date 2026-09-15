@@ -115,7 +115,7 @@ class SchemaTest {
     @Test
     fun `v26 stores chapter image alt text`() {
         open().use { c ->
-            Schema.create(Jdbc(c))
+            at(26, c)
             val s = shape(c)
             assertEquals(
                 setOf("folder", "slug", "chapter", "hash", "thread_ts", "started_at", "looked"),
@@ -124,6 +124,19 @@ class SchemaTest {
             assertEquals(
                 setOf("folder", "slug", "chapter", "image", "alt"),
                 s["chapter_image"],
+            )
+        }
+    }
+
+    @Test
+    fun `v27 keeps the picture and Slack thread on the chapter row`() {
+        open().use { c ->
+            Schema.create(Jdbc(c))
+            val s = shape(c)
+            assertTrue(
+                s["chapters"]!!.containsAll(
+                    setOf("image", "image_alt", "slack_thread"),
+                ),
             )
         }
     }
@@ -147,6 +160,60 @@ class SchemaTest {
                     assertTrue(r.next())
                     assertEquals("Chapter 1.png", r.getString(1))
                     assertEquals("A lantern in the rain", r.getString(2))
+                }
+            }
+        }
+    }
+
+    /* A saved picture and its Slack thread move onto the chapter row
+       so the reader can trust the index and not list Slack. A chapter
+       that already has a png does not keep the thread. */
+    @Test
+    fun `an existing picture and waiting thread land on the chapter row`() {
+        open().use { c ->
+            at(26, c)
+            c.createStatement().use {
+                it.execute(
+                    "INSERT INTO chapters(folder,slug,filename,uri,url) " +
+                        "VALUES('f','s','Chapter 1.txt','content://x','https://site/c1/')",
+                )
+                it.execute(
+                    "INSERT INTO chapters(folder,slug,filename,uri,url) " +
+                        "VALUES('f','s','Chapter 21.txt','content://y','https://site/c21/')",
+                )
+                it.execute(
+                    "INSERT INTO chapter_image(folder,slug,chapter,image,alt) " +
+                        "VALUES('f','s','Chapter 1.txt','Chapter 1.png','A lantern in the rain')",
+                )
+                it.execute(
+                    "INSERT INTO chapter_image_req(folder,slug,chapter,hash,thread_ts,started_at) " +
+                        "VALUES('f','s','Chapter 1.txt','abc','1.1',10)",
+                )
+                it.execute(
+                    "INSERT INTO chapter_image_req(folder,slug,chapter,hash,thread_ts,started_at) " +
+                        "VALUES('f','s','Chapter 21.txt','def','2.2',20)",
+                )
+            }
+            Schema.upgrade(Jdbc(c), 26)
+            c.createStatement().use { s ->
+                s.executeQuery(
+                    "SELECT image, image_alt, slack_thread, url FROM chapters " +
+                        "WHERE filename='Chapter 1.txt'",
+                ).use { r ->
+                    assertTrue(r.next())
+                    assertEquals("Chapter 1.png", r.getString(1))
+                    assertEquals("A lantern in the rain", r.getString(2))
+                    assertEquals("", r.getString(3))
+                    assertEquals("https://site/c1/", r.getString(4))
+                }
+            }
+            c.createStatement().use { s ->
+                s.executeQuery(
+                    "SELECT image, slack_thread FROM chapters WHERE filename='Chapter 21.txt'",
+                ).use { r ->
+                    assertTrue(r.next())
+                    assertEquals("", r.getString(1))
+                    assertEquals("2.2", r.getString(2))
                 }
             }
         }

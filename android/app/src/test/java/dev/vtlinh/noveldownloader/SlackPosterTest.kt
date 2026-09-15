@@ -282,6 +282,14 @@ class SlackPosterTest {
     }
 
     @Test
+    fun `a stored thread is enough — do not list the Slack channel`() {
+        assertFalse(SlackPoster.shouldListChannel(listOf("1.1")))
+        assertFalse(SlackPoster.shouldListChannel(listOf("", "2.2")))
+        assertTrue(SlackPoster.shouldListChannel(emptyList()))
+        assertTrue(SlackPoster.shouldListChannel(listOf("", "")))
+    }
+
+    @Test
     fun `the chapter post is missing only when Slack confirmed the txt is gone`() {
         assertTrue(SlackPoster.lookTopLevelMissing(null, null, false, true))
         assertTrue(SlackPoster.lookTopLevelMissing(null, "", false, true))
