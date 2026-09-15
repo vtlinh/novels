@@ -4,7 +4,9 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Open the nearest later chapter picture, not only the next chapter
+	Back from pictures stays on the reading page
+	Keep the opened chapter picture in place while others load
+1.38.3	Open the nearest later chapter picture, not only the next chapter
 1.38.2	Open chapter pictures from any chapter in a scrolling list
 1.38.1	Wait 30 days for a chapter picture from Slack
 1.37.54	Choose how long to wait between chapter pictures

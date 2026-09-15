@@ -780,7 +780,10 @@ class ReaderActivity : AppCompatActivity() {
         }
         updateMediaSessionState()
 
-        findViewById<android.widget.ImageView>(R.id.backBtn).setOnClickListener { leaveReader() }
+        findViewById<android.widget.ImageView>(R.id.backBtn).setOnClickListener {
+            if (ChapterImages.backFromPictures(PictureGallery.closeIfOpen())) return@setOnClickListener
+            leaveReader()
+        }
         findViewById<android.widget.ImageView>(R.id.chaptersBtn).setOnClickListener { openChapterList() }
         /* highlight + scroll-to-current runs when the drawer opens from
            an edge swipe, as soon as it starts sliding in */
@@ -2296,6 +2299,9 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
+        /* Picture list first so Back returns to the chapter, not
+           the library. */
+        if (ChapterImages.backFromPictures(PictureGallery.closeIfOpen())) return
         val drawer = findViewById<DrawerLayout>(R.id.readerDrawer)
         if (drawer.isDrawerOpen(GravityCompat.END)) {
             drawer.closeDrawer(GravityCompat.END)

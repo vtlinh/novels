@@ -442,6 +442,20 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `Back from the picture list stays on the reading page`() {
+        assertTrue(ChapterImages.backFromPictures(true))
+        assertFalse(ChapterImages.backFromPictures(false))
+    }
+
+    @Test
+    fun `a picture loading above the opened one keeps the scroll on it`() {
+        assertEquals(400, ChapterImages.scrollShiftWhenAboveGrows(true, 80, 480))
+        assertEquals(0, ChapterImages.scrollShiftWhenAboveGrows(false, 80, 480))
+        assertEquals(0, ChapterImages.scrollShiftWhenAboveGrows(true, 480, 480))
+        assertEquals(-20, ChapterImages.scrollShiftWhenAboveGrows(true, 100, 80))
+    }
+
+    @Test
     fun `the list opens this chapter or the closest later pictured one`() {
         val pictured = listOf("Chapter 1.txt", "Chapter 21.txt", "Chapter 41.txt")
         val ordered = (1..50).map { "Chapter $it.txt" }
