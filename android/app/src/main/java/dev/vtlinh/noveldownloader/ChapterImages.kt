@@ -1233,6 +1233,10 @@ object ChapterImages {
         newHeight: Int,
     ): Int = if (aboveStart) newHeight - oldHeight else 0
 
+    /* Back from the picture list closes it and stays in the book.
+       The library is only for Back when the list is not open. */
+    fun backFromPictures(galleryOpen: Boolean): Boolean = galleryOpen
+
     fun startSavedIndex(
         items: List<Saved>,
         chapter: String,

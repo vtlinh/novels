@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -40,6 +39,14 @@ object PictureGallery {
         (cur.first.parent as? ViewGroup)?.removeView(cur.first)
     }
 
+    /* True when the picture list was up and is now gone — Back
+       should stay on the reading page, not leave the book. */
+    fun closeIfOpen(): Boolean {
+        if (shown == null) return false
+        close()
+        return true
+    }
+
     fun show(
         activity: AppCompatActivity,
         items: List<Pair<ChapterImages.Saved, Bitmap?>>,
@@ -56,7 +63,8 @@ object PictureGallery {
                 activity.resources.displayMetrics.widthPixels,
                 activity.resources.displayMetrics.heightPixels,
             )
-            val overlay = FrameLayout(activity).apply {
+            val overlay = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
                 setBackgroundColor(activity.getColor(R.color.bg))
                 isClickable = true
                 isFocusable = true
@@ -68,14 +76,40 @@ object PictureGallery {
             val back = object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() { close() }
             }
+            val bar = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(activity.getColor(R.color.card))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            bar.addView(
+                ImageView(activity).apply {
+                    setImageResource(R.drawable.ic_back)
+                    contentDescription = "Back"
+                    imageTintList = android.content.res.ColorStateList.valueOf(
+                        activity.getColor(R.color.fg),
+                    )
+                    val box = dp(40)
+                    val pad = dp(8)
+                    setPadding(pad, pad, pad, pad)
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    isClickable = true
+                    isFocusable = true
+                    layoutParams = LinearLayout.LayoutParams(box, box)
+                    setOnClickListener { close() }
+                },
+            )
             val column = LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
                 val pad = dp(18)
                 setPadding(pad, pad, pad, pad)
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
                 )
             }
             val rows = ArrayList<View>(items.size)
@@ -86,30 +120,15 @@ object PictureGallery {
             }
             val scroll = ScrollView(activity).apply {
                 isFillViewport = true
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT,
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f,
                 )
                 addView(column)
             }
+            overlay.addView(bar)
             overlay.addView(scroll)
-            val backPad = dp(16)
-            overlay.addView(
-                TextView(activity).apply {
-                    text = "←"
-                    textSize = 24f
-                    setTextColor(activity.getColor(R.color.fg))
-                    setPadding(backPad, backPad, backPad, backPad)
-                    isClickable = true
-                    isFocusable = true
-                    layoutParams = FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        Gravity.TOP or Gravity.START,
-                    )
-                    setOnClickListener { close() }
-                },
-            )
             activity.onBackPressedDispatcher.addCallback(activity, back)
             shown = overlay to back
             host.addView(overlay)
