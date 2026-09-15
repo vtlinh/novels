@@ -1293,6 +1293,11 @@ object ChapterImages {
        height so the picture that was on screen stays put. */
     fun galleryPrependShift(addedHeight: Int): Int = addedHeight.coerceAtLeast(0)
 
+    /* Empty box the picture later fills. Same height before and
+       after the file is drawn, so the list does not jump. */
+    fun galleryImageSlot(screenH: Int, minH: Int): Int =
+        (screenH * 55 / 100).coerceAtLeast(minH.coerceAtLeast(1))
+
     /* Back from the picture list closes it and stays in the book.
        The library is only for Back when the list is not open. */
     fun backFromPictures(galleryOpen: Boolean): Boolean = galleryOpen

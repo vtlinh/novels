@@ -23,8 +23,10 @@ import kotlin.coroutines.resume
    and then fills in the pictures before and after. Each row is the
    picture with its title under it, centered in the list.
 
-   Only a few neighbours are drawn at first. Reaching the first or
-   last picture on screen loads the next batch.
+   Only a few neighbours are drawn at first. Each row keeps a
+   fixed empty box; the picture fills that box so the list does
+   not jump. Reaching the first or last picture on screen loads
+   the next batch.
 
    This is an overlay on the activity window — not a Dialog.
    Dialog is a second window; a second pointer often never reached
@@ -148,7 +150,10 @@ object PictureGallery {
         item: ChapterImages.Saved,
         dp: (Int) -> Int,
     ): LinearLayout {
-        val maxImgH = (activity.resources.displayMetrics.heightPixels * 0.55f).toInt()
+        val slotH = ChapterImages.galleryImageSlot(
+            activity.resources.displayMetrics.heightPixels,
+            dp(120),
+        )
         val title = if (ChapterImages.showAlt(item.alt)) item.alt.trim()
             else if (item.label.isNotEmpty()) "Chapter ${item.label}"
             else item.chapter
@@ -164,14 +169,13 @@ object PictureGallery {
             addView(
                 ImageView(activity).apply {
                     tag = "img"
-                    adjustViewBounds = true
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = title
+                    setBackgroundColor(activity.getColor(R.color.card))
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        slotH,
                     )
-                    maxHeight = maxImgH.coerceAtLeast(dp(120))
                 },
             )
             addView(
@@ -200,11 +204,10 @@ object PictureGallery {
         )
     }
 
-    /* Decode the opened picture first and put it in the middle.
-       Only the nearby pictures are in the list. Reaching the first
-       or last one loads the next batch. A picture above that grows
-       shifts the list by the extra height so the opened one
-       does not slide away. */
+    /* Place the empty boxes first and put the opened one in the
+       middle. Pictures then fill those boxes. Reaching the first
+       or last one loads the next batch. New boxes above shift the
+       list by their height so the opened one does not slide away. */
     private fun loadWindow(
         activity: AppCompatActivity,
         items: List<Pair<ChapterImages.Saved, Bitmap?>>,
@@ -228,15 +231,7 @@ object PictureGallery {
 
         suspend fun bind(i: Int) {
             val (item, preview) = items[i]
-            val row = rows[i - low]
-            val beforeH = row.height
-            bindRow(activity, item, preview, row, edge)
-            if (!stillOpen()) return
-            awaitLayout(row)
-            val shift = ChapterImages.scrollShiftWhenAboveGrows(
-                i < start, beforeH, row.height,
-            )
-            if (shift != 0) scroll.scrollBy(0, shift)
+            bindRow(activity, item, preview, rows[i - low], edge)
         }
 
         suspend fun extendUp() {
@@ -245,9 +240,7 @@ object PictureGallery {
             val added = ArrayList<View>(next.high - next.low + 1)
             for (i in next.low..next.high) {
                 if (!stillOpen()) return
-                val (item, preview) = items[i]
-                val row = makeRow(activity, item, dp)
-                bindRow(activity, item, preview, row, edge)
+                val row = makeRow(activity, items[i].first, dp)
                 added.add(row)
             }
             if (!stillOpen()) return
@@ -259,21 +252,31 @@ object PictureGallery {
             added.lastOrNull()?.let { awaitLayout(it) }
             val shift = ChapterImages.galleryPrependShift(added.sumOf { it.height })
             if (shift != 0) scroll.scrollBy(0, shift)
+            for ((n, i) in (next.low..next.high).withIndex()) {
+                if (!stillOpen()) return
+                val (item, preview) = items[i]
+                bindRow(activity, item, preview, added[n], edge)
+            }
         }
 
         suspend fun extendDown() {
             val next = ChapterImages.galleryExtendDown(high, items.size)
             if (next.isEmpty) return
+            val added = ArrayList<View>(next.high - next.low + 1)
             for (i in next.low..next.high) {
                 if (!stillOpen()) return
-                val (item, preview) = items[i]
-                val row = makeRow(activity, item, dp)
-                bindRow(activity, item, preview, row, edge)
+                val row = makeRow(activity, items[i].first, dp)
                 column.addView(row)
                 rows.add(row)
+                added.add(row)
                 high = i
             }
-            rows.lastOrNull()?.let { awaitLayout(it) }
+            added.lastOrNull()?.let { awaitLayout(it) }
+            for ((n, row) in added.withIndex()) {
+                if (!stillOpen()) return
+                val (item, preview) = items[next.low + n]
+                bindRow(activity, item, preview, row, edge)
+            }
         }
 
         fun maybeMore() {
@@ -297,18 +300,18 @@ object PictureGallery {
         scroll.setOnScrollChangeListener { _, _, _, _, _ -> maybeMore() }
 
         activity.lifecycleScope.launch {
-            val (item, preview) = items[start]
-            bindRow(activity, item, preview, rows[start - low], edge)
             if (!stillOpen()) return@launch
             awaitLayout(rows[start - low])
             centerRow(scroll, rows[start - low])
+            ready = true
+            maybeMore()
+            val (item, preview) = items[start]
+            bindRow(activity, item, preview, rows[start - low], edge)
             for (i in low..high) {
                 if (i == start) continue
                 if (!stillOpen()) return@launch
                 bind(i)
             }
-            ready = true
-            maybeMore()
         }
     }
 
@@ -323,7 +326,10 @@ object PictureGallery {
         val bmp = preview ?: withContext(Dispatchers.IO) {
             ChapterImages.thumb(activity, item.uri, edge)
         }
-        if (bmp != null) img.setImageBitmap(bmp)
+        if (bmp != null) {
+            img.setImageBitmap(bmp)
+            img.setBackgroundColor(activity.getColor(R.color.bg))
+        }
     }
 
     private suspend fun awaitLayout(view: View) =

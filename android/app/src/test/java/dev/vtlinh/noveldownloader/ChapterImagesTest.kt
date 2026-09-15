@@ -497,6 +497,9 @@ class ChapterImagesTest {
         assertFalse(ChapterImages.galleryRowOnScreen(800, 800, 0, 800))
         assertEquals(600, ChapterImages.galleryPrependShift(600))
         assertEquals(0, ChapterImages.galleryPrependShift(-20))
+        assertEquals(1100, ChapterImages.galleryImageSlot(2000, 120))
+        assertEquals(120, ChapterImages.galleryImageSlot(100, 120))
+        assertEquals(1, ChapterImages.galleryImageSlot(0, 0))
     }
 
     @Test

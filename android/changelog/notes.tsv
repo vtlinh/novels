@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Hold a space for each picture so the list does not jump
 	Load a few chapter pictures at a time as you scroll
 1.38.4	Back from pictures stays on the reading page
 1.38.4	Keep the opened chapter picture in place while others load
