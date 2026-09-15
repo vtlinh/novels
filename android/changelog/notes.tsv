@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Stop the picture list jumping when you scroll up
+	Scroll chapter pictures without the list jumping
+1.38.7	Stop the picture list jumping when you scroll up
 1.38.6	Keep picture titles close and stop the list jumping at the top
 1.38.5	Hold a space for each picture so the list does not jump
 1.38.5	Load a few chapter pictures at a time as you scroll
