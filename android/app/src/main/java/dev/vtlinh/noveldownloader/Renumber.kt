@@ -491,6 +491,15 @@ object Renumber {
         }
     }
 
+    /* Index rows whose document URI is set. A blank URI is not a file:
+       saving a Slack picture wait writes a chapter row so the thread
+       lives on it, and clearUris drops locations after a folder move.
+       Treating those names as on disk skipped the fetch — a deleted
+       chapter never came back, and the count used to resume a check
+       looked complete. */
+    fun locatedNames(cached: Map<String, String>): Set<String> =
+        cached.filterValues { it.isNotEmpty() }.keys.toSet()
+
     /* One entry in the site's listing: the page it came from, and the name
        its POSITION gives it. `want` is null for an entry with no usable name. */
     data class Slot(val url: String, val want: String?)

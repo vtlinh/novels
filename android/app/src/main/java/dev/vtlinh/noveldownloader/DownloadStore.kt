@@ -732,6 +732,9 @@ class DownloadStore(context: Context) :
         return out
     }
 
+    /* Empty URI on purpose: this is a place to hang a Slack thread or
+       picture path, not a claim that the chapter file is on disk.
+       chapterCount and the download skip look at uri, not the row. */
     private fun ensureChapterRow(folder: String, slug: String, chapter: String) {
         writableDatabase.execSQL(
             "INSERT OR IGNORE INTO chapters(folder,slug,filename,uri) VALUES(?,?,?,'')",
@@ -917,8 +920,15 @@ class DownloadStore(context: Context) :
     }
 
     fun chapterCount(folder: String, slug: String): Int {
+        /* A row with no location is not a file. Picture / Slack waits
+           insert one so the thread can live on the chapter, and that
+           empty URI used to count as a downloaded chapter: the Library
+           looked complete, a resumed check skipped the repair, and the
+           fetch skipped the name. Same predicate as Renumber.locatedNames. */
         readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM chapters WHERE folder=? AND slug=?", arrayOf(folder, slug),
+            "SELECT COUNT(*) FROM chapters WHERE folder=? AND slug=? " +
+                "AND uri IS NOT NULL AND uri<>''",
+            arrayOf(folder, slug),
         ).use { c -> if (c.moveToNext()) return c.getInt(0) }
         return 0
     }

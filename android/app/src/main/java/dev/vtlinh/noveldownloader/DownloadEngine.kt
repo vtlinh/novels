@@ -228,7 +228,7 @@ class DownloadEngine(
     ) {
         val cr = context.contentResolver
         val byUrl = store.urlMap(folderKey, slug)
-        val onRecord = store.get(folderKey, slug)
+        val onRecord = Renumber.locatedNames(store.get(folderKey, slug))
         if (byUrl.isEmpty() && onRecord.isEmpty()) return    // nothing downloaded yet
         val legacy = legacyNames(inSiteOrder)
 
@@ -242,7 +242,7 @@ class DownloadEngine(
         val plan = Renumber.plan(
             inSiteOrder.map { Renumber.Slot(it.url, it.filename) },
             byUrl,
-            onRecord.keys,
+            onRecord,
             legacy,
         )
         val pending = plan.pending
@@ -1905,7 +1905,10 @@ class DownloadEngine(
                 DocumentFile.fromSingleUri(context, Uri.parse(sampleUri))?.exists() == true
             } catch (e: Exception) { false }
             if (ok) {
-                existing.addAll(cached.keys)
+                /* Only names that still have a location. A Slack picture
+                   wait writes a row with an empty URI; counting that name
+                   as present skipped the fetch after the file was gone. */
+                existing.addAll(Renumber.locatedNames(cached))
                 usedCache = true
             } else {
                 /* Only the locations are wrong. Which chapter each file IS is

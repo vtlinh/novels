@@ -254,4 +254,44 @@ class RenumberTest {
     fun `numbered entries keep the site's own numbers`() {
         assertEquals(listOf(7, 9, 12), Renumber.headingNumbers(listOf(7, 9, 12)))
     }
+
+    /* A Slack picture wait writes a chapter row with no location.
+       That name is not a file — the fetch and the completeness
+       count must not treat it as one. */
+    @Test
+    fun `a blank URI is not a file on disk`() {
+        assertEquals(
+            setOf("Chapter 1.txt"),
+            Renumber.locatedNames(
+                mapOf(
+                    "Chapter 1.txt" to "content://doc/1",
+                    "Chapter 21.txt" to "",
+                    "Chapter 41.txt" to "",
+                ),
+            ),
+        )
+        assertTrue(Renumber.locatedNames(mapOf("Chapter 21.txt" to "")).isEmpty())
+        assertTrue(Renumber.locatedNames(emptyMap()).isEmpty())
+    }
+
+    /* A ghost name must not make the legacy fallback claim a file
+       that is not there, or the rename pass drops the real move. */
+    @Test
+    fun `a blank-URI name is not on record for a rename`() {
+        val onRecord = Renumber.locatedNames(
+            mapOf(
+                "Chapter 1.txt" to "content://doc/1",
+                "Chapter 2.txt" to "",
+            ),
+        )
+        val plan = Renumber.plan(
+            slots("u1" to "Chapter 1.txt", "u2" to "Chapter 2.txt"),
+            byUrl = mapOf("u1" to "Chapter 1.txt"),
+            onRecord = onRecord,
+            legacy = mapOf("u2" to "Chapter 2.txt"),
+        )
+        assertFalse(onRecord.contains("Chapter 2.txt"))
+        assertTrue(plan.pending.isEmpty())
+        assertTrue(plan.linkNow.isEmpty())
+    }
 }
