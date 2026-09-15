@@ -22,8 +22,9 @@ import kotlinx.coroutines.withContext
 
    This is a RecyclerView, not a ScrollView. Rows are bound as they
    come on screen; inserting above does not rewrite a pixel scroll
-   offset. The opened row is placed with scrollToPositionWithOffset
-   so it stays the same row, the same distance from the top.
+   offset. A decode that finishes before the row is attached is
+   still kept, so neighbours are not left empty. The opened row
+   is placed with scrollToPositionWithOffset.
 
    This is an overlay on the activity window — not a Dialog.
    Dialog is a second window; a second pointer often never reached
@@ -110,10 +111,21 @@ object PictureGallery {
             dp(120),
             boxW,
         )
-        val layout = LinearLayoutManager(activity)
+        val layout = object : LinearLayoutManager(activity) {
+            override fun calculateExtraLayoutSpace(
+                state: RecyclerView.State,
+                extraLayoutSpace: IntArray,
+            ) {
+                val extra = slotH * 2
+                extraLayoutSpace[0] = extra
+                extraLayoutSpace[1] = extra
+            }
+        }
+        layout.initialPrefetchItemCount = ChapterImages.GALLERY_BATCH
         val list = RecyclerView(activity).apply {
             layoutManager = layout
             itemAnimator = null
+            setItemViewCacheSize(8)
             setBackgroundColor(activity.getColor(R.color.bg))
             setPadding(pad, pad, pad, pad)
             clipToPadding = false
@@ -152,6 +164,11 @@ object PictureGallery {
         private val dp: (Int) -> Int,
         private val slotH: Int,
     ) : RecyclerView.Adapter<Holder>() {
+
+        private val thumbs = object : LinkedHashMap<String, Bitmap>(32, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean =
+                size > 40
+        }
 
         override fun getItemCount(): Int = items.size
 
@@ -193,30 +210,38 @@ object PictureGallery {
             holder.chapter = item.chapter
             holder.caption.text = title
             holder.img.contentDescription = title
-            holder.img.setImageBitmap(null)
-            holder.img.setBackgroundColor(activity.getColor(R.color.card))
-            if (preview != null) {
-                holder.img.setImageBitmap(preview)
-                holder.img.setBackgroundColor(activity.getColor(R.color.bg))
+            val ready = preview ?: thumbs[item.chapter]
+            if (ready != null) {
+                show(holder.img, ready)
                 return
             }
+            holder.img.setImageBitmap(null)
+            holder.img.setBackgroundColor(activity.getColor(R.color.card))
             val chapter = item.chapter
             activity.lifecycleScope.launch {
-                val bmp = withContext(Dispatchers.IO) {
+                val bmp = thumbs[chapter] ?: withContext(Dispatchers.IO) {
                     ChapterImages.thumb(activity, item.uri, edge)
                 }
-                if (bmp != null && holder.chapter == chapter &&
-                    holder.img.isAttachedToWindow
-                ) {
-                    holder.img.setImageBitmap(bmp)
-                    holder.img.setBackgroundColor(activity.getColor(R.color.bg))
+                if (bmp != null) thumbs[chapter] = bmp
+                if (bmp != null && KeepVisible.stillThisRow(holder.chapter, chapter)) {
+                    show(holder.img, bmp)
                 }
             }
+        }
+
+        override fun onViewAttachedToWindow(holder: Holder) {
+            val bmp = thumbs[holder.chapter] ?: return
+            show(holder.img, bmp)
         }
 
         override fun onViewRecycled(holder: Holder) {
             holder.chapter = ""
             holder.img.setImageBitmap(null)
+        }
+
+        private fun show(img: ImageView, bmp: Bitmap) {
+            img.setImageBitmap(bmp)
+            img.setBackgroundColor(activity.getColor(R.color.bg))
         }
     }
 }
