@@ -3085,9 +3085,9 @@ class ReaderActivity : AppCompatActivity() {
         pictureBtn.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
     }
 
-    /* Toolbar button: the picture for this chapter, or the next
-       chapter that has one, in a vertical list. Auto-open still
-       only shows the picture that belongs to this chapter. */
+    /* Toolbar button: the picture for this chapter, or the closest
+       later chapter that has one, in a vertical list. Auto-open
+       still only shows the picture that belongs to this chapter. */
     private fun showChapterPicture(auto: Boolean) {
         if (asDocument()) return
         val folder = prefs.getString("tree", null) ?: return
@@ -3143,7 +3143,9 @@ class ReaderActivity : AppCompatActivity() {
                 ChapterImages.listSaved(this@ReaderActivity, folder, dir, slug)
             }
             if (isFinishing || isDestroyed) return@launch
-            val start = ChapterImages.startSavedIndex(items, chapter)
+            val start = ChapterImages.startSavedIndex(
+                items, chapter, chapters?.ordered ?: emptyList(),
+            )
             if (start < 0) return@launch
             PictureGallery.show(this@ReaderActivity, items.map { it to null }, start)
         }

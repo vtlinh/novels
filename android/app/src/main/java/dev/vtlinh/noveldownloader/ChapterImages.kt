@@ -1195,25 +1195,43 @@ object ChapterImages {
         return sortSaved(out)
     }
 
-    /* This chapter's picture, or the next chapter that has one.
-       No later picture still opens the last earlier one so the
-       button is never a dead end when any picture exists.
-       `pictured` is already lowest-number first. */
-    fun startImageChapter(pictured: List<String>, from: String): String? {
-        if (pictured.isEmpty()) return null
-        if (pictured.contains(from)) return from
-        val n = Scenes.chapterNumber(from)
-        if (n != null) {
-            pictured.firstOrNull { (Scenes.chapterNumber(it) ?: Int.MAX_VALUE) >= n }
-                ?.let { return it }
-            pictured.lastOrNull { (Scenes.chapterNumber(it) ?: Int.MAX_VALUE) < n }
-                ?.let { return it }
+    /* This chapter's picture, or the closest later chapter that has
+       one — walk the book's order from here, skip every chapter
+       with no picture. Do not fall back to an earlier chapter. */
+    fun startImageChapter(
+        ordered: List<String>,
+        pictured: Collection<String>,
+        from: String,
+    ): String? {
+        val have = pictured.toSet()
+        if (have.isEmpty()) return null
+        val at = ordered.indexOf(from)
+        val fromIdx = if (at >= 0) {
+            at
+        } else {
+            val n = Scenes.chapterNumber(from) ?: return null
+            val i = ordered.indexOfFirst {
+                (Scenes.chapterNumber(it) ?: Int.MAX_VALUE) >= n
+            }
+            if (i < 0) return null else i
         }
-        return pictured.last()
+        for (i in fromIdx until ordered.size) {
+            if (ordered[i] in have) return ordered[i]
+        }
+        return null
     }
 
-    fun startSavedIndex(items: List<Saved>, chapter: String): Int {
-        val name = startImageChapter(items.map { it.chapter }, chapter) ?: return -1
+    fun startImageChapter(pictured: List<String>, from: String): String? =
+        startImageChapter(pictured, pictured, from)
+
+    fun startSavedIndex(
+        items: List<Saved>,
+        chapter: String,
+        ordered: List<String> = emptyList(),
+    ): Int {
+        val pictured = items.map { it.chapter }
+        val walk = ordered.ifEmpty { pictured }
+        val name = startImageChapter(walk, pictured, chapter) ?: return -1
         return items.indexOfFirst { it.chapter == name }
     }
 

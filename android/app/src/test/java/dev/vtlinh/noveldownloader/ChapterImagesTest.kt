@@ -442,12 +442,23 @@ class ChapterImagesTest {
     }
 
     @Test
-    fun `the list opens this chapter or the next pictured one`() {
+    fun `the list opens this chapter or the closest later pictured one`() {
         val pictured = listOf("Chapter 1.txt", "Chapter 21.txt", "Chapter 41.txt")
+        val ordered = (1..50).map { "Chapter $it.txt" }
         assertEquals("Chapter 21.txt", ChapterImages.startImageChapter(pictured, "Chapter 21.txt"))
-        assertEquals("Chapter 21.txt", ChapterImages.startImageChapter(pictured, "Chapter 15.txt"))
+        assertEquals(
+            "Chapter 21.txt",
+            ChapterImages.startImageChapter(ordered, pictured, "Chapter 15.txt"),
+        )
+        assertEquals(
+            "Chapter 21.txt",
+            ChapterImages.startImageChapter(ordered, pictured, "Chapter 2.txt"),
+        )
         assertEquals("Chapter 1.txt", ChapterImages.startImageChapter(pictured, "Chapter 1.txt"))
-        assertEquals("Chapter 41.txt", ChapterImages.startImageChapter(pictured, "Chapter 50.txt"))
+        assertEquals(
+            null,
+            ChapterImages.startImageChapter(ordered, pictured, "Chapter 50.txt"),
+        )
         assertEquals(null, ChapterImages.startImageChapter(emptyList(), "Chapter 1.txt"))
     }
 
