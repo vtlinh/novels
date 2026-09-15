@@ -1270,14 +1270,31 @@ object ChapterImages {
         return GallerySpan(high + 1, (high + batch).coerceAtMost(size - 1))
     }
 
-    fun galleryShouldExtendUp(low: Int, topOnScreen: Boolean): Boolean =
-        low > 0 && topOnScreen
+    fun galleryShouldExtendUp(low: Int, atListTop: Boolean): Boolean =
+        low > 0 && atListTop
 
     fun galleryShouldExtendDown(
         high: Int,
         size: Int,
-        bottomOnScreen: Boolean,
-    ): Boolean = size > 0 && high < size - 1 && bottomOnScreen
+        atListBottom: Boolean,
+    ): Boolean = size > 0 && high < size - 1 && atListBottom
+
+    /* Load more only after the reader has actually reached the
+       end of what is already on the list — not as soon as the
+       first or last picture peeks into view. */
+    fun galleryAtListTop(scrollY: Int, slop: Int = 0): Boolean =
+        scrollY <= slop.coerceAtLeast(0)
+
+    fun galleryAtListBottom(
+        scrollY: Int,
+        viewH: Int,
+        contentH: Int,
+        slop: Int = 0,
+    ): Boolean {
+        if (viewH <= 0) return false
+        if (contentH <= viewH) return true
+        return scrollY + viewH >= contentH - slop.coerceAtLeast(0)
+    }
 
     fun galleryRowOnScreen(
         rowTop: Int,
@@ -1293,10 +1310,18 @@ object ChapterImages {
        height so the picture that was on screen stays put. */
     fun galleryPrependShift(addedHeight: Int): Int = addedHeight.coerceAtLeast(0)
 
-    /* Empty box the picture later fills. Same height before and
-       after the file is drawn, so the list does not jump. */
-    fun galleryImageSlot(screenH: Int, minH: Int): Int =
-        (screenH * 55 / 100).coerceAtLeast(minH.coerceAtLeast(1))
+    fun galleryScrollAfterPrepend(oldY: Int, addedH: Int): Int =
+        (oldY + addedH.coerceAtLeast(0)).coerceAtLeast(0)
+
+    /* Empty box the picture later fills. Capped to the row width
+       so a tall screen does not leave a hole under the picture
+       before the title. Same height before and after the file
+       is drawn, so the list does not jump. */
+    fun galleryImageSlot(screenH: Int, minH: Int, boxW: Int = 0): Int {
+        val fromH = (screenH * 55 / 100).coerceAtLeast(minH.coerceAtLeast(1))
+        if (boxW <= 0) return fromH
+        return minOf(fromH, boxW).coerceAtLeast(minH.coerceAtLeast(1))
+    }
 
     /* Back from the picture list closes it and stays in the book.
        The library is only for Back when the list is not open. */
