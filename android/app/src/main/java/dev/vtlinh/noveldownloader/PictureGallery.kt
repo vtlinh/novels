@@ -1,7 +1,10 @@
 package dev.vtlinh.noveldownloader
 
 import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -27,7 +30,9 @@ import kotlin.coroutines.resume
    Only a few neighbours are drawn at first. Each row keeps a
    fixed empty box; the picture fills that box so the list does
    not jump. The title sits just under the box. Reaching the
-   top or bottom of the list loads the next batch.
+   top or bottom of the list loads the next batch. Adding
+   pictures above waits until the scroll has stopped, then
+   keeps the row that was on screen in the same place.
 
    This is an overlay on the activity window — not a Dialog.
    Dialog is a second window; a second pointer often never reached
@@ -206,41 +211,49 @@ object PictureGallery {
         scroll.scrollTo(0, mid.coerceAtLeast(0))
     }
 
-    private fun measureHeight(view: View, width: Int): Int {
-        val w = View.MeasureSpec.makeMeasureSpec(width.coerceAtLeast(0), View.MeasureSpec.EXACTLY)
-        val h = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        view.measure(w, h)
-        return view.measuredHeight
-    }
-
-    private suspend fun pinScroll(scroll: ScrollView, y: Int) =
-        suspendCancellableCoroutine { cont ->
-            val vto = scroll.viewTreeObserver
-            val listener = object : ViewTreeObserver.OnPreDrawListener {
-                override fun onPreDraw(): Boolean {
-                    if (vto.isAlive) vto.removeOnPreDrawListener(this)
+    /* Wait until the kept row has actually moved, then put it
+       back where it was on screen — before that frame is drawn.
+       A guessed height, or a pin while a fling is still running,
+       is what made the list jump. */
+    private suspend fun pinToAnchor(
+        scroll: ScrollView,
+        anchor: View,
+        fromTop: Int,
+        beforeTop: Int,
+    ) = suspendCancellableCoroutine { cont ->
+        val vto = scroll.viewTreeObserver
+        var waits = 0
+        val listener = object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                val moved = !anchor.isAttachedToWindow || anchor.top != beforeTop
+                waits++
+                if (!moved && waits < 5) return true
+                if (vto.isAlive) vto.removeOnPreDrawListener(this)
+                if (anchor.isAttachedToWindow) {
+                    val y = ChapterImages.galleryAnchorScrollY(anchor.top, fromTop)
                     if (scroll.scrollY != y) scroll.scrollTo(0, y)
-                    if (cont.isActive) cont.resume(Unit)
-                    return true
                 }
-            }
-            if (!vto.isAlive) {
-                scroll.scrollTo(0, y)
-                cont.resume(Unit)
-                return@suspendCancellableCoroutine
-            }
-            vto.addOnPreDrawListener(listener)
-            scroll.invalidate()
-            cont.invokeOnCancellation {
-                if (vto.isAlive) vto.removeOnPreDrawListener(listener)
+                if (cont.isActive) cont.resume(Unit)
+                return true
             }
         }
+        if (!vto.isAlive) {
+            val y = ChapterImages.galleryAnchorScrollY(anchor.top, fromTop)
+            scroll.scrollTo(0, y)
+            cont.resume(Unit)
+            return@suspendCancellableCoroutine
+        }
+        vto.addOnPreDrawListener(listener)
+        scroll.invalidate()
+        cont.invokeOnCancellation {
+            if (vto.isAlive) vto.removeOnPreDrawListener(listener)
+        }
+    }
 
     /* Place the empty boxes first and put the opened one in the
-       middle. Pictures then fill those boxes. Reaching the top or
-       bottom of the list loads the next batch. New boxes are
-       measured and the scroll is pinned before the next draw so
-       the picture that was on screen does not jump. */
+       middle. Pictures then fill those boxes. Adding pictures
+       above waits until the scroll has stopped, then pins the
+       row that was on screen so a fling cannot throw it away. */
     private fun loadWindow(
         activity: AppCompatActivity,
         items: List<Pair<ChapterImages.Saved, Bitmap?>>,
@@ -257,10 +270,25 @@ object PictureGallery {
         var high = last
         var ready = false
         var loading = false
+        var fingerDown = false
+        var idle = true
+        lateinit var maybeMore: () -> Unit
+        val settleHandler = Handler(Looper.getMainLooper())
+        val settleMs = 140L
+        val markIdle = Runnable {
+            idle = true
+            maybeMore()
+        }
 
         fun stillOpen(): Boolean =
             rows.firstOrNull()?.isAttachedToWindow == true &&
                 !activity.isFinishing && !activity.isDestroyed
+
+        fun noteScroll() {
+            idle = false
+            settleHandler.removeCallbacks(markIdle)
+            if (!fingerDown) settleHandler.postDelayed(markIdle, settleMs)
+        }
 
         suspend fun bind(i: Int) {
             val (item, preview) = items[i]
@@ -270,6 +298,9 @@ object PictureGallery {
         suspend fun extendUp() {
             val next = ChapterImages.galleryExtendUp(low)
             if (next.isEmpty) return
+            val anchor = rows.firstOrNull() ?: return
+            val fromTop = ChapterImages.galleryFromTop(anchor.top, scroll.scrollY)
+            val beforeTop = anchor.top
             val boxW = rowWidth(column, activity, dp)
             val added = ArrayList<View>(next.high - next.low + 1)
             for (i in next.low..next.high) {
@@ -277,20 +308,12 @@ object PictureGallery {
                 added.add(makeRow(activity, items[i].first, dp, boxW))
             }
             if (!stillOpen()) return
-            val oldY = scroll.scrollY
-            var addedH = 0
             for ((n, row) in added.withIndex()) {
-                addedH += measureHeight(row, boxW)
                 column.addView(row, n)
                 rows.add(n, row)
             }
             low = next.low
-            pinScroll(
-                scroll,
-                ChapterImages.galleryScrollAfterPrepend(
-                    oldY, ChapterImages.galleryPrependShift(addedH),
-                ),
-            )
+            pinToAnchor(scroll, anchor, fromTop, beforeTop)
             for ((n, i) in (next.low..next.high).withIndex()) {
                 if (!stillOpen()) return
                 val (item, preview) = items[i]
@@ -318,28 +341,51 @@ object PictureGallery {
             }
         }
 
-        fun maybeMore() {
-            if (!ready || loading || !stillOpen()) return
-            val slop = dp(16)
-            val top = ChapterImages.galleryAtListTop(scroll.scrollY, slop)
-            val bottom = ChapterImages.galleryAtListBottom(
-                scroll.scrollY, scroll.height, column.height, slop,
-            )
-            val up = ChapterImages.galleryShouldExtendUp(low, top)
-            val down = ChapterImages.galleryShouldExtendDown(high, items.size, bottom)
-            if (!up && !down) return
-            loading = true
-            activity.lifecycleScope.launch {
-                try {
-                    if (up) extendUp() else extendDown()
-                } finally {
-                    loading = false
+        maybeMore = {
+            if (ready && !loading && stillOpen()) {
+                val slop = dp(16)
+                val atTop = ChapterImages.galleryAtListTop(scroll.scrollY, slop)
+                val atBottom = ChapterImages.galleryAtListBottom(
+                    scroll.scrollY, scroll.height, column.height, slop,
+                )
+                val up = ChapterImages.galleryMayPrepend(
+                    fingerDown, idle, atTop, low > 0,
+                )
+                val down = ChapterImages.galleryShouldExtendDown(
+                    high, items.size, atBottom,
+                )
+                if (up || down) {
+                    loading = true
+                    activity.lifecycleScope.launch {
+                        try {
+                            if (up) extendUp() else extendDown()
+                        } finally {
+                            loading = false
+                        }
+                        if (stillOpen()) maybeMore()
+                    }
                 }
-                if (stillOpen()) maybeMore()
             }
         }
 
-        scroll.setOnScrollChangeListener { _, _, _, _, _ -> maybeMore() }
+        scroll.setOnTouchListener { _, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    fingerDown = true
+                    idle = false
+                    settleHandler.removeCallbacks(markIdle)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    fingerDown = false
+                    noteScroll()
+                }
+            }
+            false
+        }
+        scroll.setOnScrollChangeListener { _, _, _, _, _ ->
+            noteScroll()
+            maybeMore()
+        }
 
         activity.lifecycleScope.launch {
             if (!stillOpen()) return@launch
