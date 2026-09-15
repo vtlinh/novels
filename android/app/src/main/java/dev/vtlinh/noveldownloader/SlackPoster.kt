@@ -323,6 +323,11 @@ class SlackPoster(
         fun threadGone(code: String): Boolean =
             code == "thread_not_found" || code == "message_not_found"
 
+        /* A stored Slack thread is enough — do not list the channel
+           looking for a png we already asked for in that thread. */
+        fun shouldListChannel(knownThreads: Collection<String>): Boolean =
+            knownThreads.none { it.isNotEmpty() }
+
         /* The chapter post itself is gone: Slack answered, no png, no
            {hash}.txt in history or files.list, and every stored thread
            Slack was asked about came back as not there. A stored
@@ -448,28 +453,21 @@ class SlackPoster(
     fun findImage(hash: String, threadTs: String?): ByteArray? = findPng(hash, threadTs)?.bytes
 
     private fun findPng(hash: String, threadTs: String?): FoundPng? {
-        var tried = 0
-        var denied = 0
         if (!threadTs.isNullOrEmpty()) {
-            tried++
             try {
-                pickImage(hash, replies(threadTs))?.let { return it }
+                return pickImage(hash, replies(threadTs))
             } catch (e: ApiException) {
-                if (e.code == "missing_scope") denied++
-                else if (!threadGone(e.code)) {
-                    throw e
-                }
+                if (threadGone(e.code)) throw e
+                if (e.code == "missing_scope") return null
+                throw e
             }
         }
-        tried++
         try {
-            pickImage(hash, listedFiles())?.let { return it }
+            return pickImage(hash, listedFiles())
         } catch (e: ApiException) {
-            if (e.code == "missing_scope") denied++
-            else throw e
+            if (e.code == "missing_scope") return null
+            throw e
         }
-        if (denied > 0 && denied == tried) throw ApiException("missing_scope")
-        return null
     }
 
     /* Stored request threads, then every {hash}.txt in channel
@@ -484,17 +482,68 @@ class SlackPoster(
         wants: List<Pair<String, Collection<String>>>,
     ): Map<String, Existing> {
         if (wants.isEmpty()) return emptyMap()
-        val cat = catalog()
         val out = linkedMapOf<String, Existing>()
+        var cat: Catalog? = null
         for ((hash, threads) in wants) {
             if (hash.isEmpty() || hash in out) continue
-            out[hash] = findExisting(hash, threads, cat)
+            val known = threads.filter { it.isNotEmpty() }
+            out[hash] = if (!shouldListChannel(known)) {
+                findInThreads(hash, known)
+            } else {
+                val loaded = cat ?: catalog().also { cat = it }
+                findExisting(hash, threads, loaded)
+            }
         }
         return out
     }
 
-    fun findExisting(hash: String, knownThreads: Collection<String> = emptyList()): Existing =
-        findExisting(hash, knownThreads, catalog())
+    fun findExisting(hash: String, knownThreads: Collection<String> = emptyList()): Existing {
+        val known = knownThreads.filter { it.isNotEmpty() }
+        if (!shouldListChannel(known)) return findInThreads(hash, known)
+        return findExisting(hash, known, catalog())
+    }
+
+    /* Walk only the stored threads. Slack saying the message is gone
+       is how the chapter row drops that link — a miss is not. */
+    fun findInThreads(hash: String, threads: Collection<String>): Existing {
+        val known = threads.filter { it.isNotEmpty() }.toSet()
+        var png: ByteArray? = null
+        var alt = ""
+        var readError: String? = null
+        var txtSeen = false
+        val knownLive = mutableSetOf<String>()
+        val knownGone = mutableSetOf<String>()
+        for (ts in known) {
+            try {
+                val files = replies(ts)
+                knownLive.add(ts)
+                txtSeen = true
+                if (png == null) {
+                    val got = pickImage(hash, files)
+                    if (got != null) {
+                        png = got.bytes
+                        alt = got.alt
+                    }
+                }
+            } catch (e: ApiException) {
+                log("Slack thread: ${describe(e.code)}")
+                if (readError == null &&
+                    (e.code == "missing_scope" || e.code == "not_in_channel" ||
+                        e.code == "channel_not_found")
+                ) {
+                    readError = e.code
+                }
+                if (threadGone(e.code)) knownGone.add(ts)
+                if (e.code != "missing_scope" && !threadGone(e.code)) {
+                    throw e
+                }
+            }
+        }
+        val knownThreadsGone = known.isNotEmpty() &&
+            knownLive.isEmpty() &&
+            knownGone.containsAll(known)
+        return Existing(png, known.toList(), readError, alt, txtSeen, knownThreadsGone)
+    }
 
     fun findExisting(
         hash: String,
@@ -605,11 +654,22 @@ class SlackPoster(
     fun findImage(hash: String, threads: Collection<String>): ByteArray? = findPng(hash, threads)?.bytes
 
     private fun findPng(hash: String, threads: Collection<String>): FoundPng? {
-        for (ts in threads) {
-            if (ts.isEmpty()) continue
-            findPng(hash, ts)?.let { return it }
+        val known = threads.filter { it.isNotEmpty() }
+        if (known.isEmpty()) return findPng(hash, null as String?)
+        var gone = 0
+        for (ts in known) {
+            try {
+                findPng(hash, ts)?.let { return it }
+            } catch (e: ApiException) {
+                if (threadGone(e.code)) {
+                    gone++
+                    continue
+                }
+                throw e
+            }
         }
-        return findPng(hash, null)
+        if (gone == known.size) throw ApiException("thread_not_found")
+        return null
     }
 
     private fun pickImage(hash: String, files: List<JSONObject>): FoundPng? {

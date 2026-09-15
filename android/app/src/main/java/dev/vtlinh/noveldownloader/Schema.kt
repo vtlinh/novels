@@ -15,12 +15,18 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 26
+    const val VERSION = 27
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
             "folder TEXT, slug TEXT, filename TEXT, uri TEXT, url TEXT DEFAULT '', " +
             "size INTEGER DEFAULT 0, hash TEXT DEFAULT '', " +
+            /* Disk path of the chapter picture, its Slack description, and
+               the Slack thread we asked for it. The reader trusts these
+               columns — it does not walk scenes/. A stored thread is how
+               we look up a missing png without listing the channel. */
+            "image TEXT DEFAULT '', image_alt TEXT DEFAULT '', " +
+            "slack_thread TEXT DEFAULT '', " +
             "PRIMARY KEY(folder, slug, filename))"
     const val NAMES_TABLE =
         "CREATE TABLE names (" +
@@ -307,6 +313,41 @@ object Schema {
            be the picture's own description. */
         if (oldVersion < 26) {
             db.soft("ALTER TABLE chapter_image ADD COLUMN alt TEXT DEFAULT ''")
+        }
+        /* Picture path + Slack thread on the chapter row itself. Seed
+           from the older side tables so a library that already saved
+           pictures or posted threads keeps them. A chapter that already
+           has a png does not keep its thread — the file is the record. */
+        if (oldVersion < 27) {
+            db.soft("ALTER TABLE chapters ADD COLUMN image TEXT DEFAULT ''")
+            db.soft("ALTER TABLE chapters ADD COLUMN image_alt TEXT DEFAULT ''")
+            db.soft("ALTER TABLE chapters ADD COLUMN slack_thread TEXT DEFAULT ''")
+            db.soft(
+                "UPDATE chapters SET " +
+                    "image = COALESCE((" +
+                    "SELECT image FROM chapter_image " +
+                    "WHERE chapter_image.folder = chapters.folder " +
+                    "AND chapter_image.slug = chapters.slug " +
+                    "AND chapter_image.chapter = chapters.filename" +
+                    "), image), " +
+                    "image_alt = COALESCE((" +
+                    "SELECT alt FROM chapter_image " +
+                    "WHERE chapter_image.folder = chapters.folder " +
+                    "AND chapter_image.slug = chapters.slug " +
+                    "AND chapter_image.chapter = chapters.filename" +
+                    "), image_alt)",
+            )
+            db.soft(
+                "UPDATE chapters SET slack_thread = COALESCE((" +
+                    "SELECT thread_ts FROM chapter_image_req " +
+                    "WHERE chapter_image_req.folder = chapters.folder " +
+                    "AND chapter_image_req.slug = chapters.slug " +
+                    "AND chapter_image_req.chapter = chapters.filename " +
+                    "AND chapter_image_req.thread_ts <> '' " +
+                    "ORDER BY started_at DESC LIMIT 1" +
+                    "), slack_thread) " +
+                    "WHERE image = ''",
+            )
         }
     }
 }

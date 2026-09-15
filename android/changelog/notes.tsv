@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Wait 30 days for a chapter picture from Slack
+	Open chapter pictures from any chapter in a scrolling list
+1.38.1	Wait 30 days for a chapter picture from Slack
 1.37.54	Choose how long to wait between chapter pictures
 1.37.53	Don't flood Logs when Slack is looking up pictures
 1.37.52	Don't show a Slack join error when the picture channel is private
