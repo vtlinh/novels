@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -25,8 +26,8 @@ import kotlin.coroutines.resume
 
    Only a few neighbours are drawn at first. Each row keeps a
    fixed empty box; the picture fills that box so the list does
-   not jump. Reaching the first or last picture on screen loads
-   the next batch.
+   not jump. The title sits just under the box. Reaching the
+   top or bottom of the list loads the next batch.
 
    This is an overlay on the activity window — not a Dialog.
    Dialog is a second window; a second pointer often never reached
@@ -119,13 +120,14 @@ object PictureGallery {
                 )
             }
             val rows = ArrayList<View>()
+            val boxW = rowWidth(column, activity, dp)
             for (i in window.low..window.high) {
-                val row = makeRow(activity, items[i].first, dp)
+                val row = makeRow(activity, items[i].first, dp, boxW)
                 rows.add(row)
                 column.addView(row)
             }
             val scroll = ScrollView(activity).apply {
-                isFillViewport = true
+                isFillViewport = false
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     0,
@@ -145,14 +147,22 @@ object PictureGallery {
         }
     }
 
+    private fun rowWidth(column: LinearLayout, activity: AppCompatActivity, dp: (Int) -> Int): Int {
+        val inner = column.width - column.paddingLeft - column.paddingRight
+        if (inner > 0) return inner
+        return activity.resources.displayMetrics.widthPixels - dp(36)
+    }
+
     private fun makeRow(
         activity: AppCompatActivity,
         item: ChapterImages.Saved,
         dp: (Int) -> Int,
+        boxW: Int,
     ): LinearLayout {
         val slotH = ChapterImages.galleryImageSlot(
             activity.resources.displayMetrics.heightPixels,
             dp(120),
+            boxW,
         )
         val title = if (ChapterImages.showAlt(item.alt)) item.alt.trim()
             else if (item.label.isNotEmpty()) "Chapter ${item.label}"
@@ -160,8 +170,7 @@ object PictureGallery {
         return LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            val gap = dp(28)
-            setPadding(0, gap, 0, gap)
+            setPadding(0, dp(16), 0, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -185,7 +194,7 @@ object PictureGallery {
                     setTextColor(activity.getColor(R.color.fg))
                     gravity = Gravity.CENTER
                     setLineSpacing(0f, 1.25f)
-                    setPadding(0, dp(12), 0, 0)
+                    setPadding(0, dp(6), 0, 0)
                 },
             )
         }
@@ -197,17 +206,41 @@ object PictureGallery {
         scroll.scrollTo(0, mid.coerceAtLeast(0))
     }
 
-    private fun rowOnScreen(scroll: ScrollView, row: View?): Boolean {
-        if (row == null) return false
-        return ChapterImages.galleryRowOnScreen(
-            row.top, row.bottom, scroll.scrollY, scroll.height,
-        )
+    private fun measureHeight(view: View, width: Int): Int {
+        val w = View.MeasureSpec.makeMeasureSpec(width.coerceAtLeast(0), View.MeasureSpec.EXACTLY)
+        val h = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        view.measure(w, h)
+        return view.measuredHeight
     }
 
+    private suspend fun pinScroll(scroll: ScrollView, y: Int) =
+        suspendCancellableCoroutine { cont ->
+            val vto = scroll.viewTreeObserver
+            val listener = object : ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    if (vto.isAlive) vto.removeOnPreDrawListener(this)
+                    if (scroll.scrollY != y) scroll.scrollTo(0, y)
+                    if (cont.isActive) cont.resume(Unit)
+                    return true
+                }
+            }
+            if (!vto.isAlive) {
+                scroll.scrollTo(0, y)
+                cont.resume(Unit)
+                return@suspendCancellableCoroutine
+            }
+            vto.addOnPreDrawListener(listener)
+            scroll.invalidate()
+            cont.invokeOnCancellation {
+                if (vto.isAlive) vto.removeOnPreDrawListener(listener)
+            }
+        }
+
     /* Place the empty boxes first and put the opened one in the
-       middle. Pictures then fill those boxes. Reaching the first
-       or last one loads the next batch. New boxes above shift the
-       list by their height so the opened one does not slide away. */
+       middle. Pictures then fill those boxes. Reaching the top or
+       bottom of the list loads the next batch. New boxes are
+       measured and the scroll is pinned before the next draw so
+       the picture that was on screen does not jump. */
     private fun loadWindow(
         activity: AppCompatActivity,
         items: List<Pair<ChapterImages.Saved, Bitmap?>>,
@@ -237,21 +270,27 @@ object PictureGallery {
         suspend fun extendUp() {
             val next = ChapterImages.galleryExtendUp(low)
             if (next.isEmpty) return
+            val boxW = rowWidth(column, activity, dp)
             val added = ArrayList<View>(next.high - next.low + 1)
             for (i in next.low..next.high) {
                 if (!stillOpen()) return
-                val row = makeRow(activity, items[i].first, dp)
-                added.add(row)
+                added.add(makeRow(activity, items[i].first, dp, boxW))
             }
             if (!stillOpen()) return
+            val oldY = scroll.scrollY
+            var addedH = 0
             for ((n, row) in added.withIndex()) {
+                addedH += measureHeight(row, boxW)
                 column.addView(row, n)
                 rows.add(n, row)
             }
             low = next.low
-            added.lastOrNull()?.let { awaitLayout(it) }
-            val shift = ChapterImages.galleryPrependShift(added.sumOf { it.height })
-            if (shift != 0) scroll.scrollBy(0, shift)
+            pinScroll(
+                scroll,
+                ChapterImages.galleryScrollAfterPrepend(
+                    oldY, ChapterImages.galleryPrependShift(addedH),
+                ),
+            )
             for ((n, i) in (next.low..next.high).withIndex()) {
                 if (!stillOpen()) return
                 val (item, preview) = items[i]
@@ -262,16 +301,16 @@ object PictureGallery {
         suspend fun extendDown() {
             val next = ChapterImages.galleryExtendDown(high, items.size)
             if (next.isEmpty) return
+            val boxW = rowWidth(column, activity, dp)
             val added = ArrayList<View>(next.high - next.low + 1)
             for (i in next.low..next.high) {
                 if (!stillOpen()) return
-                val row = makeRow(activity, items[i].first, dp)
+                val row = makeRow(activity, items[i].first, dp, boxW)
                 column.addView(row)
                 rows.add(row)
                 added.add(row)
                 high = i
             }
-            added.lastOrNull()?.let { awaitLayout(it) }
             for ((n, row) in added.withIndex()) {
                 if (!stillOpen()) return
                 val (item, preview) = items[next.low + n]
@@ -281,8 +320,11 @@ object PictureGallery {
 
         fun maybeMore() {
             if (!ready || loading || !stillOpen()) return
-            val top = rowOnScreen(scroll, rows.firstOrNull())
-            val bottom = rowOnScreen(scroll, rows.lastOrNull())
+            val slop = dp(16)
+            val top = ChapterImages.galleryAtListTop(scroll.scrollY, slop)
+            val bottom = ChapterImages.galleryAtListBottom(
+                scroll.scrollY, scroll.height, column.height, slop,
+            )
             val up = ChapterImages.galleryShouldExtendUp(low, top)
             val down = ChapterImages.galleryShouldExtendDown(high, items.size, bottom)
             if (!up && !down) return

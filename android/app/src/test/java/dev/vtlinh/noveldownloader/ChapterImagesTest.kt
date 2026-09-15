@@ -492,12 +492,23 @@ class ChapterImagesTest {
         assertFalse(ChapterImages.galleryShouldExtendDown(12, 40, false))
         assertFalse(ChapterImages.galleryShouldExtendDown(39, 40, true))
 
+        assertTrue(ChapterImages.galleryAtListTop(0))
+        assertTrue(ChapterImages.galleryAtListTop(8, 16))
+        assertFalse(ChapterImages.galleryAtListTop(80, 16))
+        assertTrue(ChapterImages.galleryAtListBottom(0, 800, 800))
+        assertTrue(ChapterImages.galleryAtListBottom(1200, 800, 2000))
+        assertFalse(ChapterImages.galleryAtListBottom(200, 800, 2000))
+
         assertTrue(ChapterImages.galleryRowOnScreen(800, 1400, 900, 800))
         assertFalse(ChapterImages.galleryRowOnScreen(800, 1400, 0, 800))
         assertFalse(ChapterImages.galleryRowOnScreen(800, 800, 0, 800))
         assertEquals(600, ChapterImages.galleryPrependShift(600))
         assertEquals(0, ChapterImages.galleryPrependShift(-20))
+        assertEquals(1400, ChapterImages.galleryScrollAfterPrepend(800, 600))
+        assertEquals(800, ChapterImages.galleryScrollAfterPrepend(800, -20))
         assertEquals(1100, ChapterImages.galleryImageSlot(2000, 120))
+        assertEquals(800, ChapterImages.galleryImageSlot(2000, 120, 800))
+        assertEquals(1100, ChapterImages.galleryImageSlot(2000, 120, 2000))
         assertEquals(120, ChapterImages.galleryImageSlot(100, 120))
         assertEquals(1, ChapterImages.galleryImageSlot(0, 0))
     }
