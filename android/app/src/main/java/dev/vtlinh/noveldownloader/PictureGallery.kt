@@ -23,6 +23,9 @@ import kotlin.coroutines.resume
    and then fills in the pictures before and after. Each row is the
    picture with its title under it, centered in the list.
 
+   Only a few neighbours are drawn at first. Reaching the first or
+   last picture on screen loads the next batch.
+
    This is an overlay on the activity window — not a Dialog.
    Dialog is a second window; a second pointer often never reached
    the picture, so pinch did nothing. Overlay keeps every pointer
@@ -52,7 +55,8 @@ object PictureGallery {
         items: List<Pair<ChapterImages.Saved, Bitmap?>>,
         start: Int,
     ) {
-        if (start !in items.indices) return
+        val window = ChapterImages.galleryOpenWindow(start, items.size)
+        if (window.isEmpty) return
         val host = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
         activity.lifecycleScope.launch {
             if (activity.isFinishing || activity.isDestroyed) return@launch
@@ -112,9 +116,9 @@ object PictureGallery {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 )
             }
-            val rows = ArrayList<View>(items.size)
-            for ((item, _) in items) {
-                val row = makeRow(activity, item, dp)
+            val rows = ArrayList<View>()
+            for (i in window.low..window.high) {
+                val row = makeRow(activity, items[i].first, dp)
                 rows.add(row)
                 column.addView(row)
             }
@@ -132,7 +136,10 @@ object PictureGallery {
             activity.onBackPressedDispatcher.addCallback(activity, back)
             shown = overlay to back
             host.addView(overlay)
-            loadAround(activity, items, rows, start, edge, scroll)
+            loadWindow(
+                activity, items, rows, start, window.low, window.high,
+                edge, dp, column, scroll,
+            )
         }
     }
 
@@ -186,56 +193,137 @@ object PictureGallery {
         scroll.scrollTo(0, mid.coerceAtLeast(0))
     }
 
+    private fun rowOnScreen(scroll: ScrollView, row: View?): Boolean {
+        if (row == null) return false
+        return ChapterImages.galleryRowOnScreen(
+            row.top, row.bottom, scroll.scrollY, scroll.height,
+        )
+    }
+
     /* Decode the opened picture first and put it in the middle.
-       Neighbours then load around it. A picture above that grows
+       Only the nearby pictures are in the list. Reaching the first
+       or last one loads the next batch. A picture above that grows
        shifts the list by the extra height so the opened one
        does not slide away. */
-    private fun loadAround(
+    private fun loadWindow(
         activity: AppCompatActivity,
         items: List<Pair<ChapterImages.Saved, Bitmap?>>,
-        rows: List<View>,
+        rows: ArrayList<View>,
         start: Int,
+        first: Int,
+        last: Int,
         edge: Int,
+        dp: (Int) -> Int,
+        column: LinearLayout,
         scroll: ScrollView,
     ) {
+        var low = first
+        var high = last
+        var ready = false
+        var loading = false
+
+        fun stillOpen(): Boolean =
+            rows.firstOrNull()?.isAttachedToWindow == true &&
+                !activity.isFinishing && !activity.isDestroyed
+
+        suspend fun bind(i: Int) {
+            val (item, preview) = items[i]
+            val row = rows[i - low]
+            val beforeH = row.height
+            bindRow(activity, item, preview, row, edge)
+            if (!stillOpen()) return
+            awaitLayout(row)
+            val shift = ChapterImages.scrollShiftWhenAboveGrows(
+                i < start, beforeH, row.height,
+            )
+            if (shift != 0) scroll.scrollBy(0, shift)
+        }
+
+        suspend fun extendUp() {
+            val next = ChapterImages.galleryExtendUp(low)
+            if (next.isEmpty) return
+            val added = ArrayList<View>(next.high - next.low + 1)
+            for (i in next.low..next.high) {
+                if (!stillOpen()) return
+                val (item, preview) = items[i]
+                val row = makeRow(activity, item, dp)
+                bindRow(activity, item, preview, row, edge)
+                added.add(row)
+            }
+            if (!stillOpen()) return
+            for ((n, row) in added.withIndex()) {
+                column.addView(row, n)
+                rows.add(n, row)
+            }
+            low = next.low
+            added.lastOrNull()?.let { awaitLayout(it) }
+            val shift = ChapterImages.galleryPrependShift(added.sumOf { it.height })
+            if (shift != 0) scroll.scrollBy(0, shift)
+        }
+
+        suspend fun extendDown() {
+            val next = ChapterImages.galleryExtendDown(high, items.size)
+            if (next.isEmpty) return
+            for (i in next.low..next.high) {
+                if (!stillOpen()) return
+                val (item, preview) = items[i]
+                val row = makeRow(activity, item, dp)
+                bindRow(activity, item, preview, row, edge)
+                column.addView(row)
+                rows.add(row)
+                high = i
+            }
+            rows.lastOrNull()?.let { awaitLayout(it) }
+        }
+
+        fun maybeMore() {
+            if (!ready || loading || !stillOpen()) return
+            val top = rowOnScreen(scroll, rows.firstOrNull())
+            val bottom = rowOnScreen(scroll, rows.lastOrNull())
+            val up = ChapterImages.galleryShouldExtendUp(low, top)
+            val down = ChapterImages.galleryShouldExtendDown(high, items.size, bottom)
+            if (!up && !down) return
+            loading = true
+            activity.lifecycleScope.launch {
+                try {
+                    if (up) extendUp() else extendDown()
+                } finally {
+                    loading = false
+                }
+                if (stillOpen()) maybeMore()
+            }
+        }
+
+        scroll.setOnScrollChangeListener { _, _, _, _, _ -> maybeMore() }
+
         activity.lifecycleScope.launch {
-            bindRow(activity, items, rows, start, edge)
-            if (!rows[start].isAttachedToWindow) return@launch
-            awaitLayout(rows[start])
-            centerRow(scroll, rows[start])
-            val order = ArrayList<Int>(items.size - 1)
-            var before = start - 1
-            var after = start + 1
-            while (before >= 0 || after < items.size) {
-                if (after < items.size) order.add(after++)
-                if (before >= 0) order.add(before--)
+            val (item, preview) = items[start]
+            bindRow(activity, item, preview, rows[start - low], edge)
+            if (!stillOpen()) return@launch
+            awaitLayout(rows[start - low])
+            centerRow(scroll, rows[start - low])
+            for (i in low..high) {
+                if (i == start) continue
+                if (!stillOpen()) return@launch
+                bind(i)
             }
-            for (i in order) {
-                if (!rows[i].isAttachedToWindow) return@launch
-                val beforeH = rows[i].height
-                bindRow(activity, items, rows, i, edge)
-                awaitLayout(rows[i])
-                val shift = ChapterImages.scrollShiftWhenAboveGrows(
-                    i < start, beforeH, rows[i].height,
-                )
-                if (shift != 0) scroll.scrollBy(0, shift)
-            }
+            ready = true
+            maybeMore()
         }
     }
 
     private suspend fun bindRow(
         activity: AppCompatActivity,
-        items: List<Pair<ChapterImages.Saved, Bitmap?>>,
-        rows: List<View>,
-        i: Int,
+        item: ChapterImages.Saved,
+        preview: Bitmap?,
+        row: View,
         edge: Int,
     ) {
-        val (item, preview) = items[i]
-        val img = rows[i].findViewWithTag<ImageView>("img") ?: return
+        val img = row.findViewWithTag<ImageView>("img") ?: return
         val bmp = preview ?: withContext(Dispatchers.IO) {
             ChapterImages.thumb(activity, item.uri, edge)
         }
-        if (bmp != null && img.isAttachedToWindow) img.setImageBitmap(bmp)
+        if (bmp != null) img.setImageBitmap(bmp)
     }
 
     private suspend fun awaitLayout(view: View) =

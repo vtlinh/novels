@@ -1233,6 +1233,66 @@ object ChapterImages {
         newHeight: Int,
     ): Int = if (aboveStart) newHeight - oldHeight else 0
 
+    /* The picture list starts with a few neighbours, then adds more
+       when the reader reaches the first or last one on screen. */
+    const val GALLERY_BEFORE = 2
+    const val GALLERY_AFTER = 2
+    const val GALLERY_BATCH = 5
+
+    data class GallerySpan(val low: Int, val high: Int) {
+        val isEmpty: Boolean get() = low > high
+    }
+
+    fun galleryOpenWindow(
+        start: Int,
+        size: Int,
+        before: Int = GALLERY_BEFORE,
+        after: Int = GALLERY_AFTER,
+    ): GallerySpan {
+        if (size <= 0 || start !in 0 until size) return GallerySpan(1, 0)
+        return GallerySpan(
+            (start - before).coerceAtLeast(0),
+            (start + after).coerceAtMost(size - 1),
+        )
+    }
+
+    fun galleryExtendUp(low: Int, batch: Int = GALLERY_BATCH): GallerySpan {
+        if (low <= 0 || batch < 1) return GallerySpan(1, 0)
+        return GallerySpan((low - batch).coerceAtLeast(0), low - 1)
+    }
+
+    fun galleryExtendDown(
+        high: Int,
+        size: Int,
+        batch: Int = GALLERY_BATCH,
+    ): GallerySpan {
+        if (batch < 1 || size <= 0 || high >= size - 1) return GallerySpan(1, 0)
+        return GallerySpan(high + 1, (high + batch).coerceAtMost(size - 1))
+    }
+
+    fun galleryShouldExtendUp(low: Int, topOnScreen: Boolean): Boolean =
+        low > 0 && topOnScreen
+
+    fun galleryShouldExtendDown(
+        high: Int,
+        size: Int,
+        bottomOnScreen: Boolean,
+    ): Boolean = size > 0 && high < size - 1 && bottomOnScreen
+
+    fun galleryRowOnScreen(
+        rowTop: Int,
+        rowBottom: Int,
+        scrollY: Int,
+        viewH: Int,
+    ): Boolean {
+        if (viewH <= 0 || rowBottom <= rowTop) return false
+        return rowBottom > scrollY && rowTop < scrollY + viewH
+    }
+
+    /* New rows inserted above must push the list down by their
+       height so the picture that was on screen stays put. */
+    fun galleryPrependShift(addedHeight: Int): Int = addedHeight.coerceAtLeast(0)
+
     /* Back from the picture list closes it and stays in the book.
        The library is only for Back when the list is not open. */
     fun backFromPictures(galleryOpen: Boolean): Boolean = galleryOpen
