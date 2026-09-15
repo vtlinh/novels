@@ -1313,6 +1313,23 @@ object ChapterImages {
     fun galleryScrollAfterPrepend(oldY: Int, addedH: Int): Int =
         (oldY + addedH.coerceAtLeast(0)).coerceAtLeast(0)
 
+    /* How far the kept row sits from the top of the viewport.
+       After new rows land above it, scroll so that distance
+       is unchanged. */
+    fun galleryFromTop(anchorTop: Int, scrollY: Int): Int = anchorTop - scrollY
+
+    fun galleryAnchorScrollY(anchorTop: Int, fromTop: Int): Int =
+        (anchorTop - fromTop).coerceAtLeast(0)
+
+    /* Inserting above shifts every later row. Do not do that
+       while a finger is down or the list is still sliding. */
+    fun galleryMayPrepend(
+        fingerDown: Boolean,
+        idle: Boolean,
+        atTop: Boolean,
+        hasMore: Boolean,
+    ): Boolean = !fingerDown && idle && atTop && hasMore
+
     /* Empty box the picture later fills. Capped to the row width
        so a tall screen does not leave a hole under the picture
        before the title. Same height before and after the file
