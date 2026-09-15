@@ -456,6 +456,53 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `the picture list opens two neighbours and later loads five at a time`() {
+        val mid = ChapterImages.galleryOpenWindow(10, 40)
+        assertEquals(8, mid.low)
+        assertEquals(12, mid.high)
+        val head = ChapterImages.galleryOpenWindow(0, 40)
+        assertEquals(0, head.low)
+        assertEquals(2, head.high)
+        val tail = ChapterImages.galleryOpenWindow(39, 40)
+        assertEquals(37, tail.low)
+        assertEquals(39, tail.high)
+        assertTrue(ChapterImages.galleryOpenWindow(0, 0).isEmpty)
+        assertTrue(ChapterImages.galleryOpenWindow(-1, 10).isEmpty)
+
+        val up = ChapterImages.galleryExtendUp(8)
+        assertEquals(3, up.low)
+        assertEquals(7, up.high)
+        val upNearStart = ChapterImages.galleryExtendUp(3)
+        assertEquals(0, upNearStart.low)
+        assertEquals(2, upNearStart.high)
+        assertTrue(ChapterImages.galleryExtendUp(0).isEmpty)
+
+        val down = ChapterImages.galleryExtendDown(12, 40)
+        assertEquals(13, down.low)
+        assertEquals(17, down.high)
+        val downNearEnd = ChapterImages.galleryExtendDown(37, 40)
+        assertEquals(38, downNearEnd.low)
+        assertEquals(39, downNearEnd.high)
+        assertTrue(ChapterImages.galleryExtendDown(39, 40).isEmpty)
+
+        assertTrue(ChapterImages.galleryShouldExtendUp(8, true))
+        assertFalse(ChapterImages.galleryShouldExtendUp(8, false))
+        assertFalse(ChapterImages.galleryShouldExtendUp(0, true))
+        assertTrue(ChapterImages.galleryShouldExtendDown(12, 40, true))
+        assertFalse(ChapterImages.galleryShouldExtendDown(12, 40, false))
+        assertFalse(ChapterImages.galleryShouldExtendDown(39, 40, true))
+
+        assertTrue(ChapterImages.galleryRowOnScreen(800, 1400, 900, 800))
+        assertFalse(ChapterImages.galleryRowOnScreen(800, 1400, 0, 800))
+        assertFalse(ChapterImages.galleryRowOnScreen(800, 800, 0, 800))
+        assertEquals(600, ChapterImages.galleryPrependShift(600))
+        assertEquals(0, ChapterImages.galleryPrependShift(-20))
+        assertEquals(1100, ChapterImages.galleryImageSlot(2000, 120))
+        assertEquals(120, ChapterImages.galleryImageSlot(100, 120))
+        assertEquals(1, ChapterImages.galleryImageSlot(0, 0))
+    }
+
+    @Test
     fun `the list opens this chapter or the closest later pictured one`() {
         val pictured = listOf("Chapter 1.txt", "Chapter 21.txt", "Chapter 41.txt")
         val ordered = (1..50).map { "Chapter $it.txt" }
