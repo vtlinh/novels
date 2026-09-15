@@ -20,4 +20,11 @@ object KeepVisible {
     /* Center a row of rowH in a viewport of viewH. */
     fun centerOffset(viewH: Int, rowH: Int): Int =
         ((viewH - rowH) / 2).coerceAtLeast(0)
+
+    /* A decode that finished for another row, or after this
+       row was recycled, must not be drawn. The view does not
+       have to be attached yet — prefetch binds before attach,
+       and skipping those left empty boxes. */
+    fun stillThisRow(bound: String, decoded: String): Boolean =
+        bound.isNotEmpty() && bound == decoded
 }
