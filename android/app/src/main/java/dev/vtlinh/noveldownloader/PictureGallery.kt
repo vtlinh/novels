@@ -48,7 +48,7 @@ object PictureGallery {
             if (activity.isFinishing || activity.isDestroyed) return@launch
             close()
             val density = activity.resources.displayMetrics.density
-            fun dp(n: Int) = (n * density).toInt()
+            val dp: (Int) -> Int = { n -> (n * density).toInt() }
             val edge = maxOf(
                 activity.resources.displayMetrics.widthPixels,
                 activity.resources.displayMetrics.heightPixels,
