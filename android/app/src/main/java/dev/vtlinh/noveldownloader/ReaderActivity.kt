@@ -3800,7 +3800,12 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* load up to n chapters above the current content in ONE text update,
-       keeping the reader's place (single anchor compensation) */
+       keeping the reader's place (single anchor compensation).
+
+       A RecyclerView of one row per chapter would keep place with
+       KeepVisible.afterInsert + scrollToPositionWithOffset instead
+       of shifting every character offset. TTS, a tap, and resume
+       still share one TextView, so this stays a character anchor. */
     private fun prependChapters(n: Int) {
         val ch = chapters ?: return
         /* same stale-index hazard the append gate blocks: after a rename,
