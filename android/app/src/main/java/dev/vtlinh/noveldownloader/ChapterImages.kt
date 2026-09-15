@@ -1224,6 +1224,15 @@ object ChapterImages {
     fun startImageChapter(pictured: List<String>, from: String): String? =
         startImageChapter(pictured, pictured, from)
 
+    /* A row above the picture we opened grew as it loaded.
+       Shift the list by that extra height so the opened picture
+       stays where it was. Growth below it does not move the view. */
+    fun scrollShiftWhenAboveGrows(
+        aboveStart: Boolean,
+        oldHeight: Int,
+        newHeight: Int,
+    ): Int = if (aboveStart) newHeight - oldHeight else 0
+
     fun startSavedIndex(
         items: List<Saved>,
         chapter: String,

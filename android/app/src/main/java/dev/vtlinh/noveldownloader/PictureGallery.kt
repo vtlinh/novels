@@ -14,7 +14,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 /* Vertical list of chapter pictures. The reader toolbar opens this
    at the current chapter — or the closest later chapter that has a
@@ -111,10 +113,7 @@ object PictureGallery {
             activity.onBackPressedDispatcher.addCallback(activity, back)
             shown = overlay to back
             host.addView(overlay)
-            scroll.post {
-                centerRow(scroll, rows.getOrNull(start))
-            }
-            loadAround(activity, items, rows, start, edge)
+            loadAround(activity, items, rows, start, edge, scroll)
         }
     }
 
@@ -168,33 +167,62 @@ object PictureGallery {
         scroll.scrollTo(0, mid.coerceAtLeast(0))
     }
 
-    /* Decode the starting picture first, then walk outward so the
-       list fills from the chapter the reader is on. */
+    /* Decode the opened picture first and put it in the middle.
+       Neighbours then load around it. A picture above that grows
+       shifts the list by the extra height so the opened one
+       does not slide away. */
     private fun loadAround(
         activity: AppCompatActivity,
         items: List<Pair<ChapterImages.Saved, Bitmap?>>,
         rows: List<View>,
         start: Int,
         edge: Int,
+        scroll: ScrollView,
     ) {
-        val order = ArrayList<Int>(items.size)
-        order.add(start)
-        var before = start - 1
-        var after = start + 1
-        while (before >= 0 || after < items.size) {
-            if (after < items.size) order.add(after++)
-            if (before >= 0) order.add(before--)
-        }
         activity.lifecycleScope.launch {
+            bindRow(activity, items, rows, start, edge)
+            if (!rows[start].isAttachedToWindow) return@launch
+            awaitLayout(rows[start])
+            centerRow(scroll, rows[start])
+            val order = ArrayList<Int>(items.size - 1)
+            var before = start - 1
+            var after = start + 1
+            while (before >= 0 || after < items.size) {
+                if (after < items.size) order.add(after++)
+                if (before >= 0) order.add(before--)
+            }
             for (i in order) {
                 if (!rows[i].isAttachedToWindow) return@launch
-                val (item, preview) = items[i]
-                val img = rows[i].findViewWithTag<ImageView>("img") ?: continue
-                val bmp = preview ?: withContext(Dispatchers.IO) {
-                    ChapterImages.thumb(activity, item.uri, edge)
-                }
-                if (bmp != null && img.isAttachedToWindow) img.setImageBitmap(bmp)
+                val beforeH = rows[i].height
+                bindRow(activity, items, rows, i, edge)
+                awaitLayout(rows[i])
+                val shift = ChapterImages.scrollShiftWhenAboveGrows(
+                    i < start, beforeH, rows[i].height,
+                )
+                if (shift != 0) scroll.scrollBy(0, shift)
             }
         }
     }
+
+    private suspend fun bindRow(
+        activity: AppCompatActivity,
+        items: List<Pair<ChapterImages.Saved, Bitmap?>>,
+        rows: List<View>,
+        i: Int,
+        edge: Int,
+    ) {
+        val (item, preview) = items[i]
+        val img = rows[i].findViewWithTag<ImageView>("img") ?: return
+        val bmp = preview ?: withContext(Dispatchers.IO) {
+            ChapterImages.thumb(activity, item.uri, edge)
+        }
+        if (bmp != null && img.isAttachedToWindow) img.setImageBitmap(bmp)
+    }
+
+    private suspend fun awaitLayout(view: View) =
+        suspendCancellableCoroutine { cont ->
+            view.post {
+                if (cont.isActive) cont.resume(Unit)
+            }
+        }
 }
