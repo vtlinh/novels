@@ -17,7 +17,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /* Vertical list of chapter pictures. The reader toolbar opens this
-   at the current chapter — or the next chapter that has a picture —
+   at the current chapter — or the closest later chapter that has a
+   picture —
    and then fills in the pictures before and after. Each row is the
    picture with its title under it, centered in the list.
 

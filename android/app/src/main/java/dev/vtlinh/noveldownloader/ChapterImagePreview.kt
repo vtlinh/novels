@@ -31,7 +31,8 @@ object ChapterImagePreview {
     enum class Mode { AUTO, HOLD }
 
     /* The reader toolbar shows the picture button on every chapter.
-       A tap opens this chapter's picture, or the next one that has one. */
+       A tap opens this chapter's picture, or the closest later
+       chapter that has one. */
     fun shouldShowButton(hasImage: Boolean): Boolean = true
 
     fun shouldAutoOpen(
