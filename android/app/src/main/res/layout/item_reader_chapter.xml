@@ -16,7 +16,7 @@
         android:text="&#x2042;"
         android:textSize="16sp"
         android:textColor="@color/muted"
-        android:visibility="gone" />
+        android:visibility="invisible" />
 
     <TextView
         android:id="@+id/chapterText"

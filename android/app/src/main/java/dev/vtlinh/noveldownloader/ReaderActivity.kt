@@ -3789,8 +3789,10 @@ class ReaderActivity : AppCompatActivity() {
 
         fun bind(position: Int) {
             val lc = loadedChapters[position]
+            /* INVISIBLE, not GONE: the first row keeps the same height so
+               showing the mark after a prepend does not push the text down. */
             sep.visibility =
-                if (position == 0) android.view.View.GONE else android.view.View.VISIBLE
+                if (position == 0) android.view.View.INVISIBLE else android.view.View.VISIBLE
             text.setText(lc.body, TextView.BufferType.SPANNABLE)
             applyFont(fontSp)
             text.isFocusable = textFocusable
@@ -3872,7 +3874,7 @@ class ReaderActivity : AppCompatActivity() {
             val pos = holder.bindingAdapterPosition
             if (pos != RecyclerView.NO_POSITION) {
                 holder.sep.visibility =
-                    if (pos == 0) android.view.View.GONE else android.view.View.VISIBLE
+                    if (pos == 0) android.view.View.INVISIBLE else android.view.View.VISIBLE
             }
         }
     }
