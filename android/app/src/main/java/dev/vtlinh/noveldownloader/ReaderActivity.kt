@@ -588,26 +588,30 @@ class ReaderActivity : AppCompatActivity() {
                     )
                     pic.visibility =
                         if (hasPic) android.view.View.VISIBLE else android.view.View.GONE
+                    pic.isFocusable = ChapterImagePreview.listButtonTakesFocus()
+                    pic.isFocusableInTouchMode = ChapterImagePreview.listButtonTakesFocus()
                     pic.setOnClickListener {
                         if (name == null) return@setOnClickListener
                         drawer.closeDrawer(GravityCompat.END)
                         val slug = intent.getStringExtra("slug") ?: return@setOnClickListener
                         openChapterPictureList(folder, dirName, slug, name)
                     }
+                    /* Same as the novel page: a pictured row still
+                       opens from a tap on the name. */
+                    v.setOnClickListener {
+                        drawer.closeDrawer(GravityCompat.END)
+                        /* an explicit pick IS a new place, so start recording again */
+                        spotLost = false
+                        /* staggered: waits out any in-flight load, then scrolls within
+                           the buffer if the chapter is loaded, else rebuilds. Picking
+                           the chapter TTS stopped at recovers that exact spot. */
+                        val t = restoreTargetFor(position)
+                        goTo(position, t.first, t.second)
+                    }
                     return v
                 }
             }
             drawerList.adapter = drawerAdapter
-            drawerList.setOnItemClickListener { _, _, pos, _ ->
-                drawer.closeDrawer(GravityCompat.END)
-                /* an explicit pick IS a new place, so start recording again */
-                spotLost = false
-                /* staggered: waits out any in-flight load, then scrolls within
-                   the buffer if the chapter is loaded, else rebuilds. Picking
-                   the chapter TTS stopped at recovers that exact spot. */
-                val t = restoreTargetFor(pos)
-                goTo(pos, t.first, t.second)
-            }
             /* Not found means the saved chapter is gone — a dedupe removed it,
                or it was deleted outside the app. Coercing -1 to 0 opened
                chapter 1 of a 3000-chapter novel with no explanation, and then

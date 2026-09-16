@@ -283,6 +283,10 @@ class ChapterListActivity : AppCompatActivity() {
     private fun openChapter(name: String) {
         val dirName = intent.getStringExtra("dir") ?: return
         val title = intent.getStringExtra("title") ?: dirName
+        /* REORDER_TO_FRONT: if the reader for this novel is still
+           alive behind us (e.g. reading aloud), bring THAT instance
+           forward (it gets onNewIntent and jumps to the chapter)
+           instead of building a new reader over it. */
         startActivity(
             Intent(this, ReaderActivity::class.java)
                 .putExtra("dir", dirName)
@@ -756,8 +760,16 @@ class ChapterListActivity : AppCompatActivity() {
                 )
                 pic.visibility =
                     if (hasPic) android.view.View.VISIBLE else android.view.View.GONE
+                pic.isFocusable = ChapterImagePreview.listButtonTakesFocus()
+                pic.isFocusableInTouchMode = ChapterImagePreview.listButtonTakesFocus()
                 pic.setOnClickListener {
                     if (name != null) openChapterPicture(name)
+                }
+                /* Bind the chapter tap on the row itself. ListView's
+                   item click is dropped when a child is clickable, so
+                   pictured rows used to open only from the mark. */
+                v.setOnClickListener {
+                    if (name != null) openChapter(name)
                 }
                 return v
             }
@@ -955,15 +967,6 @@ class ChapterListActivity : AppCompatActivity() {
                 false
             }
 
-            listView.setOnItemClickListener { _, _, pos, _ ->
-                val abs = winStart + pos
-                if (abs !in allOrdered.indices) return@setOnItemClickListener
-                /* REORDER_TO_FRONT: if the reader for this novel is still
-                   alive behind us (e.g. reading aloud), bring THAT instance
-                   forward (it gets onNewIntent and jumps to the chapter)
-                   instead of building a new reader over it */
-                openChapter(allOrdered[abs])
-            }
             bindWindow(
                 listView,
                 preserveScroll = preserveScroll && keptWindow,
