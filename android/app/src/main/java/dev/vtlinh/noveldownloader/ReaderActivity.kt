@@ -12,6 +12,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -19,9 +21,9 @@ import kotlinx.coroutines.withContext
 /* Reading mode, screen 3: the reader.
 
    Opening a chapter loads a small window around it — LOAD_BATCH either side
-   — and the buffer is topped up from there: reaching the last loaded chapter
-   appends the next ones, scrolling back into the first prepends the previous
-   ones (scroll position preserved), so reading is seamless in both
+   — as one RecyclerView row per chapter. Reaching the last loaded chapter
+   appends the next ones; scrolling back into the first prepends the previous
+   ones (the same row stays on screen), so reading is seamless in both
    directions.
 
    The ≡ button opens the novel's chapter list. A right-edge swipe still
@@ -36,8 +38,8 @@ import kotlinx.coroutines.withContext
 class ReaderActivity : AppCompatActivity() {
 
     companion object {
-        private const val SEP = "\n\n⁂\n\n"
         private const val STATE_AUTO_PICTURE = "autoPictureChapter"
+        private const val READER_LINE_MULT = 1.45f
 
         /* the reader instance currently owning TTS. Opening a new reader
            finishes the old one so two chapters never read at once — but
@@ -81,20 +83,32 @@ class ReaderActivity : AppCompatActivity() {
     private var firstIdx = 0   // first loaded chapter
     private var nextIdx = 0    // next chapter to append
 
-    /* each loaded chapter's character offset in the text + its heading line,
-       so the header can show the chapter actually being READ */
+    /* each loaded chapter's own body + its heading line, so the header
+       can show the chapter actually being READ. Offsets into `body` stay
+       valid when a chapter is inserted above — only the row index moves. */
     /* `idx` is a position in the current listing, and a rename pass can move
        it under us — resyncIfRenamed carries the whole buffer across by name */
     private class LoadedChapter(
         var idx: Int,
-        var start: Int,
+        val body: android.text.SpannableStringBuilder,
         val heading: String,
         val hasImage: Boolean = false,
     )
     private val loadedChapters = ArrayList<LoadedChapter>()
 
-    private fun loadedOf(idx: Int, start: Int, body: CharSequence) =
-        LoadedChapter(idx, start, headingOf(body), ChapterImages.hasEmbeddedPicture(body))
+    private fun loadedOf(idx: Int, body: CharSequence) =
+        LoadedChapter(
+            idx,
+            if (body is android.text.SpannableStringBuilder) body
+            else android.text.SpannableStringBuilder(body),
+            headingOf(body),
+            ChapterImages.hasEmbeddedPicture(body),
+        )
+
+    private fun bodies(): List<CharSequence> = loadedChapters.map { it.body }
+
+    private fun rowOf(listingIdx: Int): Int =
+        loadedChapters.indexOfFirst { it.idx == listingIdx }
 
     private fun headingOf(body: CharSequence): String {
         val nl = body.indexOf('\n')
@@ -113,15 +127,11 @@ class ReaderActivity : AppCompatActivity() {
        same two-line bias updateHeader uses, so a heading at the top of the
        screen is not rounded back to the previous chapter. */
     private fun currentPosition(): Pair<Int, Int>? {
-        val layout = text.layout ?: return null
-        val bias = (fontSp * 2f * resources.displayMetrics.scaledDensity).toInt()
-        val y = (scroll.scrollY - text.totalPaddingTop + bias).coerceAtLeast(0)
-        val viewOff = layout.getLineStart(layout.getLineForVertical(y))
-        val off = ReaderPos.reloadOffset(resumeCursor, viewOff)
-        val starts = loadedChapters.map { it.start }
-        val pos = ReaderPos.positionAt(starts, text.text, off) ?: return null
-        val idx = loadedChapters.getOrNull(pos.first)?.idx ?: return null
-        return Pair(idx, pos.second)
+        val view = viewportPlace()
+        val listen = resumeAt
+        val place = if (listen != null) listen else view ?: return null
+        val lc = loadedChapters.getOrNull(place.row) ?: return null
+        return Pair(lc.idx, ReaderText.paragraphIndex(lc.body, place.off))
     }
 
     private fun asDocument() = intent.getBooleanExtra(Documents.EXTRA_DOCUMENT, false)
@@ -131,11 +141,8 @@ class ReaderActivity : AppCompatActivity() {
        at (or within a line of) the top wins — boundary rounding can no
        longer resolve to the previous chapter. */
     private fun updateHeader() {
-        val layout = text.layout ?: return
-        val bias = (fontSp * 2f * resources.displayMetrics.scaledDensity).toInt()
-        val y = (scroll.scrollY - text.totalPaddingTop + bias).coerceAtLeast(0)
-        val off = layout.getLineStart(layout.getLineForVertical(y))
-        val cur = loadedChapters.lastOrNull { it.start <= off } ?: return
+        val place = viewportPlace() ?: return
+        val cur = loadedChapters.getOrNull(place.row) ?: return
         /* A document has no chapter heading — the first line of pasted text
            is not its title. Keep the name the user gave it. */
         val heading = if (asDocument()) {
@@ -148,7 +155,7 @@ class ReaderActivity : AppCompatActivity() {
             currentChapterIdx = cur.idx
             /* While reading aloud, "the chapter I'm on" is the one being
                SPOKEN — saveTtsPos owns lastCh then. The viewport top sits a
-               fifth of a page above the spoken line (scrollToSpoken), so it
+               fifth of a page above the spoken line, so it
                still reports the PREVIOUS chapter for the first screenful of a
                new one; letting it write lastCh made the app reopen a chapter
                the TTS position doesn't belong to, and the restore then found
@@ -168,9 +175,9 @@ class ReaderActivity : AppCompatActivity() {
 
     /* the text of the paragraph containing `off`, capped — long enough to
        identify the paragraph, short enough to keep in prefs */
-    private fun anchorOf(off: Int): String {
-        val body = text.text
-        val s = paraStartOf(off)
+    private fun anchorOf(place: ReaderPlace): String {
+        val body = loadedChapters.getOrNull(place.row)?.body ?: return ""
+        val s = ReaderText.paraStartOf(body, place.off)
         val nl = body.toString().indexOf('\n', s)
         val e = if (nl == -1) body.length else nl
         return body.subSequence(s, e).toString().take(160)
@@ -328,6 +335,7 @@ class ReaderActivity : AppCompatActivity() {
             if (currentChapterIdx >= 0) currentChapterIdx += d
             loadedChapters.firstOrNull()?.let { firstIdx = it.idx }
             loadedChapters.lastOrNull()?.let { nextIdx = it.idx + 1 }
+            if (::readerAdapter.isInitialized) readerAdapter.notifyDataSetChanged()
             chaptersEpoch = now
         }
         job.invokeOnCompletion { resyncing = false }
@@ -379,8 +387,8 @@ class ReaderActivity : AppCompatActivity() {
     private var speechGen = 0L
     private var ttsReady = false
     private var speaking = false
-    private var speakCursor = 0        // char offset where the NEXT sentence starts
-    private var resumeCursor = -1      // start of the sentence being/last spoken
+    private var speakAt = ReaderPlace(0, 0)   // where the NEXT sentence starts
+    private var resumeAt: ReaderPlace? = null // sentence being/last spoken
     private var pendingSpeakContinue = false
     private var pendingSpeakAfterOpen = false
     /* true while playSilentUtterance is the current utterance: its onDone
@@ -389,13 +397,16 @@ class ReaderActivity : AppCompatActivity() {
     private var curTtsLang = ""        // language profile currently applied ("en"/"vi")
     /* Per-novel pin from NovelSettings. Null is Auto — judge the chapter. */
     private var novelTtsLang: String? = null
+    private var curSentRow = -1
     private var curSentStart = -1
     private var curSentEnd = -1
     private val highlightSpan = android.text.style.BackgroundColorSpan(0x554F8CFF.toInt())
 
-    private lateinit var text: TextView
+    private lateinit var list: RecyclerView
+    private lateinit var listLm: LinearLayoutManager
+    private lateinit var readerAdapter: ReaderAdapter
+    private var textFocusable = true
     private lateinit var titleBar: TextView
-    private lateinit var scroll: ScrollView
     private lateinit var pictureBtn: android.widget.ImageView
     /* Chapter we already auto-opened the picture dialog for, so a
        rotation or a re-pick of the same chapter does not pop it again. */
@@ -473,14 +484,26 @@ class ReaderActivity : AppCompatActivity() {
         fontSp = prefs.getFloat("readerFontSize", 16f)
 
         titleBar = findViewById(R.id.readerTitle)
-        text = findViewById(R.id.readerText)
-        scroll = findViewById(R.id.readerScroll)
+        list = findViewById(R.id.readerList)
+        listLm = object : LinearLayoutManager(this) {
+            override fun calculateExtraLayoutSpace(
+                state: RecyclerView.State,
+                extraLayoutSpace: IntArray,
+            ) {
+                val extra = height.coerceAtLeast(0)
+                extraLayoutSpace[0] = extra
+                extraLayoutSpace[1] = extra
+            }
+        }
+        readerAdapter = ReaderAdapter()
+        list.layoutManager = listLm
+        list.adapter = readerAdapter
+        list.itemAnimator = null
         pictureBtn = findViewById(R.id.pictureBtn)
         pictureBtn.setOnClickListener { showChapterPicture(auto = false) }
         if (!asDocument()) pictureBtn.visibility = android.view.View.VISIBLE
         lastAutoPictureChapter = savedInstanceState?.getString(STATE_AUTO_PICTURE)
         titleBar.text = novelTitle
-        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
         /* no "Loading…" placeholder — the chapter renders almost immediately,
            and a blank background reads cleaner than a flash of loading text */
 
@@ -639,64 +662,20 @@ class ReaderActivity : AppCompatActivity() {
            then crossing into the LAST loaded chapter appends LOAD_BATCH more
            and crossing into the FIRST prepends LOAD_BATCH (loadReady gates
            this until the open placement has landed). */
-        scroll.setOnScrollChangeListener { _, _, sy, _, oldY ->
-            noteScrollActivity()   // keep the settle clock running
-            if (loading) return@setOnScrollChangeListener
-            updateHeader()
-            maybeLoadMore(sy, oldY)
-        }
+        list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
+                noteScrollActivity()   // keep the settle clock running
+                if (loading) return
+                updateHeader()
+                maybeLoadMore(dy)
+            }
+        })
 
         /* TTS: double-tap anywhere in the text starts reading from there.
-           Google TTS only — no other engine is ever used. */
+           Google TTS only — no other engine is ever used. The detector
+           lives on each chapter row so the tap offset is already local. */
         loadNovelTtsLang()
         initTts()
-        /* Double tap = start TTS, and ONLY that: the second tap is swallowed
-           so the selectable TextView never runs its own double-tap
-           word-selection. Long-press text selection is untouched. */
-        var swallowTap = false
-        val doubleTap = android.view.GestureDetector(
-            this,
-            object : android.view.GestureDetector.SimpleOnGestureListener() {
-                override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
-                    val off = textOffsetAt(e) ?: return false
-                    startTtsFrom(off)
-                    swallowTap = true
-                    return true
-                }
-
-                override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
-                    val off = textOffsetAt(e) ?: return false
-                    if (!ChapterImages.imageAt(text.text, off)) return false
-                    openChapterPicture(off)
-                    return true
-                }
-            },
-        )
-        text.setOnTouchListener { _, ev ->
-            doubleTap.onTouchEvent(ev)
-            val consume = swallowTap
-            if (ev.actionMasked == android.view.MotionEvent.ACTION_UP ||
-                ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL
-            ) {
-                /* Center the tapped sentence AGAIN once the finger is off the
-                   glass. speakNext already centered it, but that scroll starts
-                   while the double-tap's second touch is still down — a few
-                   pixels of drift past the touch slop and the ScrollView
-                   intercepts the gesture and kills the animation, and nothing
-                   retries until the NEXT sentence: a long one leaves the page
-                   parked at the tap for its entire reading (reported from
-                   device — highlight and speech moved, the page didn't).
-                   Re-issuing when the gesture ends leaves no touch stream to
-                   interfere. Skipped while a border append is pending:
-                   resumeCursor still names the pre-tap sentence there, and
-                   the append's own speakNext centers the right one. */
-                if (swallowTap && speaking && !pendingSpeakContinue && resumeCursor >= 0) {
-                    scrollToSpoken(resumeCursor)
-                }
-                swallowTap = false
-            }
-            consume
-        }
 
         findViewById<TextView>(R.id.ttsPlayBtn).setOnClickListener { playButtonAction() }
         findViewById<TextView>(R.id.ttsPrevBtn).apply {
@@ -1109,18 +1088,13 @@ class ReaderActivity : AppCompatActivity() {
        Not the first N characters of the buffer either: that window starts two
        chapters before the one on screen, so sampling from offset 0 asks about
        a chapter the reader may never have reached. */
-    private fun chapterTextAt(off: Int): String? {
-        val body = text.text.toString()
-        if (body.isBlank()) return null
-        val (s, e) = chapterSpanAt(off) ?: return null
-        val from = s.coerceIn(0, body.length)
-        val to = e.coerceIn(from, body.length)
-        return body.substring(from, to).ifBlank { null }
-    }
+    private fun chapterTextAt(place: ReaderPlace): String? =
+        loadedChapters.getOrNull(place.row)?.body?.toString()?.ifBlank { null }
 
     /* The chapter on screen. */
     private fun currentChapterText(): String? =
-        loadedChapters.firstOrNull { it.idx == currentChapterIdx }?.let { chapterTextAt(it.start) }
+        loadedChapters.firstOrNull { it.idx == currentChapterIdx }
+            ?.body?.toString()?.ifBlank { null }
 
     /* Which language profile a screen is about: the one being spoken if
        there is one, otherwise whatever is on screen. Only for SHOWING and
@@ -1336,81 +1310,10 @@ class ReaderActivity : AppCompatActivity() {
         playButtonAction()
     }
 
-    private fun paraStartOf(off: Int): Int {
-        val body = text.text.toString()
-        val o = off.coerceIn(0, body.length)
-        return body.lastIndexOf('\n', (o - 1).coerceAtLeast(0)) + 1
-    }
-
-    /* start of the SENTENCE containing `off`: walk the paragraph's sentences
-       until the one that spans the tap. Reading starts exactly at the
-       double-tapped sentence, not at the top of its paragraph. (For an `off`
-       already at a paragraph start this returns that same position, so saved
-       paragraph restores are unaffected.) */
-    private fun sentStartOf(off: Int): Int {
-        val body = text.text.toString()
-        val o = off.coerceIn(0, body.length)
-        var cursor = paraStartOf(o)
-        while (true) {
-            val s = nextSentence(body, cursor) ?: return cursor
-            if (o < s.second || s.second <= cursor) return s.first
-            cursor = s.second
-        }
-    }
-
-    /* scroll Y that places the line at `off` a small gap below the top edge,
-       so a navigated-to chapter's heading isn't jammed under the header (the
-       plain top-of-line position scrolls past the text's top padding) */
-    private fun navScrollY(off: Int, fifth: Boolean = false): Int {
-        val layout = text.layout ?: return 0
-        val line = layout.getLineForOffset(off.coerceIn(0, text.length()))
-        val top = layout.getLineTop(line) + text.totalPaddingTop
-        /* fifth: sit the line ~20% down the viewport, the same framing TTS
-           uses while reading, so a resumed spot has its lead-in visible
-           instead of being pinned under the header */
-        return (if (fifth) top - scroll.height / 5 else top - dp(16)).coerceAtLeast(0)
-    }
-
-    /* Counting paragraphs stops at `limit`. Without a bound it walked
-       newlines to the end of the BUFFER, so a paragraph index that outruns
-       its chapter — a translation with different paragraph splitting, a
-       chapter re-fetched shorter, a language toggle — landed somewhere in a
-       LATER chapter. The reader then resolved the viewport to that chapter
-       and saved the spot there, so the place the user actually left was not
-       merely unreachable, it was overwritten two chapters ahead. */
-    private fun offsetOfPara(chapterStart: Int, para: Int, limit: Int = -1): Int {
-        val body = text.text.toString()
-        val end = if (limit < 0) body.length else limit.coerceIn(chapterStart, body.length)
-        var off = chapterStart
-        var n = 0
-        while (n < para) {
-            val i = body.indexOf('\n', off)
-            if (i == -1 || i + 1 >= end) break
-            off = i + 1
-            n++
-        }
-        return off
-    }
-
     /* next sentence at/after `from`: bounded by paragraph breaks, split on
        terminator punctuation followed by a space (so "3.5" stays intact) */
-    private fun nextSentence(body: String, from: Int): Pair<Int, Int>? {
-        var i = from.coerceAtLeast(0)
-        while (i < body.length && (body[i] == '\n' || body[i] == ' ' || body[i] == '\u2042' || body[i] == '\uFFFC')) i++
-        if (i >= body.length) return null
-        var j = i
-        while (j < body.length) {
-            val c = body[j]
-            if (c == '\n') break
-            if (c == '.' || c == '!' || c == '?' || c == '\u2026') {
-                var k = j + 1
-                while (k < body.length && (body[k] == '"' || body[k] == '\u201d' || body[k] == '\u2019' || body[k] == ')' || body[k] == '\u3011' || body[k] == '\u300f')) k++
-                if (k >= body.length || body[k] == ' ' || body[k] == '\n') { j = k; break }
-            }
-            j++
-        }
-        return Pair(i, j.coerceAtMost(body.length))
-    }
+    private fun nextSentence(body: CharSequence, from: Int): Pair<Int, Int>? =
+        ReaderText.nextSentence(body, from)
 
     private var mediaSession: android.support.v4.media.session.MediaSessionCompat? = null
     private var ttsToggleReceiver: android.content.BroadcastReceiver? = null
@@ -1425,16 +1328,6 @@ class ReaderActivity : AppCompatActivity() {
     private var coverBitmap: android.graphics.Bitmap? = null
     private var metaChapterIdx = -1
 
-    /* char span [start, end) of the loaded chapter that contains `off` */
-    private fun chapterSpanAt(off: Int): Pair<Int, Int>? {
-        if (off < 0) return null
-        val i = loadedChapters.indexOfLast { it.start <= off }
-        if (i < 0) return null
-        val start = loadedChapters[i].start
-        val end = loadedChapters.getOrNull(i + 1)?.let { it.start - SEP.length } ?: text.length()
-        return start to end
-    }
-
     /* the MediaStyle notification's seekbar is fed by the session: duration =
        current chapter length, position = how far TTS has read into it. */
     private fun updateMediaSessionState() {
@@ -1444,17 +1337,17 @@ class ReaderActivity : AppCompatActivity() {
         } else {
             android.support.v4.media.session.PlaybackStateCompat.STATE_PAUSED
         }
-        val cursor = if (resumeCursor >= 0) resumeCursor else speakCursor
-        val spanIdx = loadedChapters.indexOfLast { it.start <= cursor }
-        val span = chapterSpanAt(cursor)
-        val dur = span?.let { (it.second - it.first).toLong() } ?: 0L
-        val pos = span?.let { (cursor - it.first).coerceIn(0, (it.second - it.first)).toLong() } ?: 0L
+        val cursor = resumeAt ?: speakAt
+        val lc = loadedChapters.getOrNull(cursor.row)
+        val spanIdx = cursor.row
+        val dur = lc?.body?.length?.toLong() ?: 0L
+        val pos = cursor.off.coerceIn(0, lc?.body?.length ?: 0).toLong()
 
         /* metadata (duration + cover art) only when the chapter changes —
            speed 0 so the bar sits at the reported position between sentences */
         if (spanIdx != metaChapterIdx) {
             metaChapterIdx = spanIdx
-            val heading = loadedChapters.getOrNull(spanIdx)?.heading ?: currentHeading()
+            val heading = lc?.heading ?: currentHeading()
             val meta = android.support.v4.media.MediaMetadataCompat.Builder()
                 .putString(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_TITLE, heading)
                 .putString(
@@ -1524,8 +1417,8 @@ class ReaderActivity : AppCompatActivity() {
             pauseTts()
             return
         }
-        if (resumeCursor >= 0) {
-            startTtsFrom(resumeCursor)
+        resumeAt?.let {
+            startTtsFrom(it)
             return
         }
         /* Saved position from a previous session: continue from it. The spot
@@ -1548,17 +1441,16 @@ class ReaderActivity : AppCompatActivity() {
                only record of where the user actually stopped. */
             val idx = ord.indexOfFirst { sameChapter(name, it) }
             if (idx >= 0) {
-                val lc = loadedChapters.firstOrNull { it.idx == idx }
+                val row = rowOf(idx)
+                val lc = loadedChapters.getOrNull(row)
                 if (lc != null) {
                     /* Through the same restore every other path uses: bounded
                        by this chapter, and corrected by the stored paragraph
                        text when the index has drifted. Raw, it could run off
                        the end of the chapter into a later one — and this is
                        the button users press most. */
-                    val next = loadedChapters.firstOrNull { it.start > lc.start }
-                    val chEnd = next?.let { it.start - SEP.length } ?: text.length()
                     val anchor = slugX.let { prefs.getString("ttsParaText:$it", null) }
-                    startTtsFrom(restoreOffsetIn(lc.start, chEnd, para, anchor))
+                    startTtsFrom(ReaderPlace(row, ReaderText.restoreOffsetIn(lc.body, para, anchor)))
                 } else {
                     pendingSpeakAfterOpen = true
                     /* with the anchor, exactly as the loaded branch three
@@ -1570,16 +1462,10 @@ class ReaderActivity : AppCompatActivity() {
                 return
             }
         }
-        val layout = text.layout
-        val off = if (layout != null) {
-            layout.getLineStart(
-                layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
-            )
-        } else 0
-        startTtsFrom(off)
+        startTtsFrom(viewportPlace() ?: ReaderPlace(0, 0))
     }
 
-    private fun startTtsFrom(off: Int) {
+    private fun startTtsFrom(place: ReaderPlace) {
         if (!TtsPlay.canSpeak(ttsReady, hasOfferableVoices())) {
             /* The engine drops its binding while the reader sits paused with
                the screen off, which is precisely when the next thing to
@@ -1606,7 +1492,8 @@ class ReaderActivity : AppCompatActivity() {
         /* retire any in-flight sentence or silence so its report cannot
            advance us after this new start (a skip mid-pause, a replay) */
         speechGen++
-        speakCursor = sentStartOf(off)
+        val body = loadedChapters.getOrNull(place.row)?.body ?: return
+        speakAt = ReaderPlace(place.row, ReaderText.sentStartOf(body, place.off))
         speaking = true
         clearTextSelection()  // remove the start-tap cursor so it can't yank later
         requestAudioFocus()
@@ -1635,43 +1522,17 @@ class ReaderActivity : AppCompatActivity() {
        and is highlighted and scrolled to, so the next play — tonight's or
        next week's — picks it up: the move is saved like a spoken sentence. */
     private fun skipParagraph(forward: Boolean) {
-        val body = text.text.toString()
-        if (body.isEmpty()) return
+        if (loadedChapters.isEmpty()) return
         val anchor = ttsAnchor() ?: return
-        /* blank lines and the ⁂ chapter separator are not paragraphs — skips
-           step over them, landing on a chapter heading like any other line */
-        fun isBreak(c: Char) = c == '\n' || c == ' ' || c == '⁂'
-        val target: Int
-        if (forward) {
-            var i = body.indexOf('\n', anchor)
-            if (i == -1) return   // last loaded paragraph — nowhere to go yet
-            while (i < body.length && isBreak(body[i])) i++
-            if (i >= body.length) return
-            target = i
-        } else {
-            val pStart = paraStartOf(anchor)
-            val firstSent = nextSentence(body, pStart)?.first ?: pStart
-            if (anchor > firstSent) {
-                target = firstSent   // mid-paragraph → its start
-            } else {
-                var i = pStart - 1
-                while (i >= 0 && isBreak(body[i])) i--
-                if (i < 0) return   // top of the buffer
-                target = paraStartOf(i)
-            }
-        }
+        /* blank lines are not paragraphs — skips step over them, and a
+           chapter edge lands on the neighbour's heading like any other line */
+        val target = ReaderText.skipParagraph(bodies(), anchor, forward) ?: return
         moveTo(target)
     }
 
     /* the sentence being/last spoken; before any reading, the top of the
        viewport — the same place the play button would start from */
-    private fun ttsAnchor(): Int? {
-        if (resumeCursor >= 0) return resumeCursor
-        val layout = text.layout ?: return null
-        return layout.getLineStart(
-            layout.getLineForVertical((scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)),
-        )
-    }
+    private fun ttsAnchor(): ReaderPlace? = resumeAt ?: viewportPlace()
 
     /* HOLDING ❮/❯: move a CHAPTER at a time. ❯ goes to the top of the next
        chapter; ❮ back to the top of the one being read when it is
@@ -1685,49 +1546,42 @@ class ReaderActivity : AppCompatActivity() {
        point, the same way an in-buffer skip does. */
     private fun skipChapter(forward: Boolean) {
         val ch = chapters ?: return
-        val body = text.text.toString()
-        if (body.isEmpty()) return
+        if (loadedChapters.isEmpty()) return
         val anchor = ttsAnchor() ?: return
-        val cur = loadedChapters.lastOrNull { it.start <= anchor } ?: return
-        /* Neighbours by buffer POSITION, not by idx ± 1: an unreadable
-           chapter is skipped when the buffer loads, so the chapter next to
+        /* Neighbours by window POSITION, not by idx ± 1: an unreadable
+           chapter is skipped when the window loads, so the chapter next to
            this one on screen — the one a skip should land on — may not be
            the next index in the listing. */
-        if (!forward) {
-            val firstSent = nextSentence(body, cur.start)?.first ?: cur.start
-            if (anchor > firstSent) return moveTo(cur.start)   // mid-chapter → its top
-        }
-        val neighbour = if (forward) {
-            loadedChapters.firstOrNull { it.start > cur.start }
-        } else {
-            loadedChapters.lastOrNull { it.start < cur.start }
-        }
-        if (neighbour != null) return moveTo(neighbour.start)
+        val target = ReaderText.skipChapter(bodies(), anchor, forward)
+        if (target != null) return moveTo(target)
 
+        val cur = loadedChapters.getOrNull(anchor.row) ?: return
         val targetIdx = cur.idx + if (forward) 1 else -1
         if (targetIdx !in ch.ordered.indices) return
         reopenAt(targetIdx)
     }
 
-    /* land a chapter skip on `off` in the loaded buffer — the same move a
+    /* land a chapter skip on `place` in the loaded window — the same move a
        paragraph skip makes: keep speaking from it, or shift the paused
        resume point there */
-    private fun moveTo(off: Int) {
+    private fun moveTo(place: ReaderPlace) {
         if (speaking) {
-            startTtsFrom(off)
+            startTtsFrom(place)
             return
         }
-        markPausedSkip(off)
-        scroll.smoothScrollTo(0, navScrollY(resumeCursor, fifth = true))
+        markPausedSkip(place)
+        resumeAt?.let { scrollPlaceIntoView(it, fifth = true, smooth = true) }
     }
 
-    /* paused skip / reopen: Play reads resumeCursor, then ttsPos. Clearing
+    /* paused skip / reopen: Play reads resumeAt, then ttsPos. Clearing
        the cursor without writing ttsPos sent Play back to the previous
        listen chapter. */
-    private fun markPausedSkip(off: Int) {
-        resumeCursor = sentStartOf(off)
-        nextSentence(text.text.toString(), resumeCursor)?.let { setHighlight(it.first, it.second) }
-        saveTtsPos(resumeCursor)
+    private fun markPausedSkip(place: ReaderPlace) {
+        val body = loadedChapters.getOrNull(place.row)?.body ?: return
+        val start = ReaderText.sentStartOf(body, place.off)
+        resumeAt = ReaderPlace(place.row, start)
+        nextSentence(body, start)?.let { setHighlight(place.row, it.first, it.second) }
+        saveTtsPos(resumeAt!!)
         updateMediaSessionState()
     }
 
@@ -1740,7 +1594,7 @@ class ReaderActivity : AppCompatActivity() {
             pendingSpeakAfterOpen = true
             openAt(idx)
         } else {
-            /* goTo/openAt otherwise reset resumeCursor and only write lastCh,
+            /* goTo/openAt otherwise reset resumeAt and only write lastCh,
                so Play (which prefers ttsPos over lastCh) jumped back */
             goTo(idx, 0, saveTts = true)
         }
@@ -1764,12 +1618,9 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun playBoundaryPauseOrSpeak() {
         val t = tts ?: run { speakNext(); return }
-        val body = text.text.toString()
-        val next = nextSentence(body, speakCursor) ?: run { speakNext(); return }
-        val from = speakCursor.coerceIn(0, next.first)
-        val gap = body.subSequence(from, next.first)
-        val starts = loadedChapters.map { it.start }
-        val level = TtsPause.level(gap, TtsPause.crossesChapter(from, next.first, starts))
+        val next = ReaderText.nextSpoken(bodies(), speakAt) ?: run { speakNext(); return }
+        val (gap, crosses) = ReaderText.pauseGap(bodies(), speakAt, next.first)
+        val level = TtsPause.level(gap, crosses)
         val ms = TtsPause.millis(prefs.getFloat(TtsPause.key(level), 0f))
         if (ms <= 0L) {
             speakNext()
@@ -1793,8 +1644,7 @@ class ReaderActivity : AppCompatActivity() {
        voice profile when it changes), highlight it, and remember the spot */
     private fun speakNext() {
         val t = tts ?: return
-        val body = text.text.toString()
-        val sent = nextSentence(body, speakCursor)
+        val sent = ReaderText.nextSpoken(bodies(), speakAt)
         if (sent == null) {
             clearHighlight()
             if (nextIdx < (chapters?.ordered?.size ?: 0)) {
@@ -1837,9 +1687,9 @@ class ReaderActivity : AppCompatActivity() {
            within one chapter of running out): stop here — this fires BETWEEN
            sentences, so no audio is cut — load the next batch, then resume.
            Chapters are only ever loaded in this gap, never while a sentence is
-           being spoken. Appends don't move existing text, so s0/s1 stay valid. */
-        val lastLoaded = loadedChapters.lastOrNull()
-        if (!loading && lastLoaded != null && s0 >= lastLoaded.start &&
+           being spoken. Appends add rows at the end, so s0/s1 stay valid. */
+        val lastRow = loadedChapters.lastIndex
+        if (!loading && lastRow >= 0 && s0.row >= lastRow &&
             nextIdx < (chapters?.ordered?.size ?: 0)
         ) {
             t.stop()   // make sure nothing is mid-utterance while we load
@@ -1848,9 +1698,10 @@ class ReaderActivity : AppCompatActivity() {
             appendChapters(LOAD_BATCH)
             return
         }
-        resumeCursor = s0
-        speakCursor = s1
-        val sentence = body.substring(s0, s1)
+        resumeAt = s0
+        speakAt = s1
+        val body = loadedChapters[s0.row].body
+        val sentence = body.subSequence(s0.off, s1.off).toString()
         /* The chapter this sentence is in, not the sentence. Judging each
            sentence on its own is what let one borrowed word — `d'état` — swap
            the voice to Vietnamese half way down an English novel and leave it
@@ -1859,7 +1710,7 @@ class ReaderActivity : AppCompatActivity() {
            already in use rather than forcing one. */
         val lang = Voices.langFor(novelTtsLang, chapterTextAt(s0)) ?: curTtsLang.ifEmpty { "en" }
         if (lang != curTtsLang) applyTtsConfig(lang)
-        setHighlight(s0, s1)
+        setHighlight(s0.row, s0.off, s1.off)
         scrollToSpoken(s0)
         saveTtsPos(s0)
         updateMediaSessionState()   // advance the notification's chapter progress
@@ -1942,61 +1793,73 @@ class ReaderActivity : AppCompatActivity() {
        frame so the layout reflects any chapter text just appended; without
        that, centering right after a chapter append computes against the old
        layout and jumps to the buffer end. */
-    private fun scrollToSpoken(off: Int) {
-        scroll.post {
+    private fun scrollToSpoken(place: ReaderPlace) {
+        list.post {
             if (!speaking) return@post   // paused since this was queued
-            /* a prepend may have shifted offsets since the call — resumeCursor
+            /* a prepend may have bumped the row since the call — resumeAt
                is kept shifted, so prefer it over the captured value */
-            val target = if (resumeCursor >= 0) resumeCursor else off
-            val layout = text.layout ?: return@post
-            val line = layout.getLineForOffset(target.coerceIn(0, text.length()))
-            val y = layout.getLineTop(line) + text.totalPaddingTop
-            /* keep the spoken line at ~20% of the viewport height */
-            scroll.smoothScrollTo(0, (y - scroll.height / 5).coerceAtLeast(0))
+            scrollPlaceIntoView(resumeAt ?: place, fifth = true, smooth = true)
         }
     }
 
-    /* freeze the page where it is: a zero-delta smooth scroll replaces any
-       in-flight centering animation so pausing doesn't keep gliding */
+    /* freeze the page where it is so pausing doesn't keep gliding */
     private fun cancelAutoScroll() {
-        scroll.smoothScrollBy(0, 0)
+        list.stopScroll()
     }
 
-    private fun setHighlight(s0: Int, s1: Int) {
+    private fun setHighlight(row: Int, s0: Int, s1: Int) {
+        val oldRow = curSentRow
+        curSentRow = row
         curSentStart = s0
         curSentEnd = s1
-        val sp = text.text as? android.text.Spannable ?: return
+        if (oldRow >= 0 && oldRow != row) {
+            (list.findViewHolderForAdapterPosition(oldRow) as? ChapterHolder)?.let {
+                applyHighlightTo(it.text, oldRow)
+            }
+        }
+        (list.findViewHolderForAdapterPosition(row) as? ChapterHolder)?.let {
+            applyHighlightTo(it.text, row)
+        }
+    }
+
+    private fun applyHighlightTo(tv: TextView, row: Int) {
+        val sp = tv.text as? android.text.Spannable ?: return
         sp.removeSpan(highlightSpan)
-        if (s1 > s0 && s1 <= sp.length) {
-            sp.setSpan(highlightSpan, s0, s1, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        if (row == curSentRow && curSentEnd > curSentStart && curSentEnd <= sp.length) {
+            sp.setSpan(highlightSpan, curSentStart, curSentEnd, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
     }
 
     private fun clearHighlight() {
+        val oldRow = curSentRow
+        curSentRow = -1
         curSentStart = -1
         curSentEnd = -1
-        (text.text as? android.text.Spannable)?.removeSpan(highlightSpan)
+        if (oldRow >= 0) {
+            (list.findViewHolderForAdapterPosition(oldRow) as? ChapterHolder)?.let {
+                applyHighlightTo(it.text, oldRow)
+            }
+        }
     }
 
     /* persist "chapter file | paragraph in chapter" so the next session's
        play button continues from here (paragraphs map 1:1 across EN/VI).
        The paragraph's TEXT is stored too — the Speech-edits test box can
        offer "test against the paragraph TTS stopped at". */
-    private fun saveTtsPos(off: Int) {
+    private fun saveTtsPos(place: ReaderPlace) {
         val slug = intent.getStringExtra("slug") ?: return
         if (!spotWritable()) return
-        val ch = loadedChapters.lastOrNull { it.start <= off } ?: return
+        val ch = loadedChapters.getOrNull(place.row) ?: return
         val name = chapters?.ordered?.getOrNull(ch.idx) ?: return
-        val para = text.text.subSequence(ch.start, off.coerceAtLeast(ch.start)).count { it == '\n' }
-        val body = text.text
-        val pStart = paraStartOf(off)
-        val nl = body.toString().indexOf('\n', pStart)
-        val pEnd = if (nl == -1) body.length else nl
+        val para = ReaderText.paragraphIndex(ch.body, place.off)
+        val pStart = ReaderText.paraStartOf(ch.body, place.off)
+        val nl = ch.body.toString().indexOf('\n', pStart)
+        val pEnd = if (nl == -1) ch.body.length else nl
         /* The paragraph INDEX alone is positional and can't detect that it
            landed on the wrong line, so keep the paragraph's TEXT as an anchor
            too: the restore verifies against it and re-finds the paragraph if
            the index doesn't line up. */
-        val paraText = body.subSequence(pStart, pEnd).toString()
+        val paraText = ch.body.subSequence(pStart, pEnd).toString()
         prefs.edit().putString("ttsPos:$slug", "$name|$para")
             .putLong("ttsPosAt:$slug", System.currentTimeMillis())
             .putString("ttsParaText:$slug", paraText)
@@ -2005,35 +1868,6 @@ class ReaderActivity : AppCompatActivity() {
         /* keep "where I left off" pointing at the chapter being spoken, so
            reopening the novel lands on the chapter this position belongs to */
         saveLastChapter(ch.idx)
-    }
-
-    /* Offset of the saved paragraph inside [chapterStart, chapterEnd): the
-       stored index first, corrected by the stored paragraph text when the two
-       disagree (the index is only as good as the buffer it was counted in). */
-    private fun restoreOffsetIn(
-        chapterStart: Int,
-        chapterEnd: Int,
-        para: Int,
-        anchorText: String?,
-    ): Int {
-        val body = text.text.toString()
-        val end = chapterEnd.coerceIn(chapterStart, body.length)
-        /* bounded by the chapter: an index that outruns it must land at the
-           chapter's end, never inside the next one */
-        val byIndex = if (para > 0) offsetOfPara(chapterStart, para, end) else chapterStart
-        val anchor = anchorText?.takeIf { it.isNotBlank() } ?: return byIndex
-        if (byIndex in chapterStart until end && body.startsWith(anchor, byIndex)) {
-            return byIndex   // index agrees with the anchor
-        }
-        /* index drifted — find the paragraph itself, preferring the occurrence
-           nearest where the index pointed */
-        var best = -1
-        var i = body.indexOf(anchor, chapterStart)
-        while (i >= 0 && i < end) {
-            if (best < 0 || Math.abs(i - byIndex) < Math.abs(best - byIndex)) best = i
-            i = body.indexOf(anchor, i + 1)
-        }
-        return if (best >= 0) best else byIndex
     }
 
     /* pause replays the interrupted sentence on resume */
@@ -2051,7 +1885,7 @@ class ReaderActivity : AppCompatActivity() {
         speechGen++
         /* paused: keep the notification with a Play action (wake lock off) */
         TtsService.start(this, currentHeading(), false, mediaSession?.sessionToken, intent.getStringExtra("slug"))
-        if (resumeCursor >= 0) speakCursor = resumeCursor
+        resumeAt?.let { speakAt = it }
         clearHighlight()
         /* drop any insertion cursor left by a tap (e.g. the start-TTS double
            tap) so it can't bringPointIntoView and yank the scroll up on stop */
@@ -2228,14 +2062,16 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onStop() {
         /* park the short-page poll chain — TTS keeps its own path */
-        relistTick?.let { scroll.removeCallbacks(it) }
+        if (::list.isInitialized) relistTick?.let { list.removeCallbacks(it) }
         super.onStop()
     }
 
     override fun onStart() {
         super.onStart()
         /* resume a parked chain; one tick, the chain re-arms itself */
-        relistTick?.let { scroll.removeCallbacks(it); scroll.postDelayed(it, 1_000) }
+        if (::list.isInitialized) {
+            relistTick?.let { list.removeCallbacks(it); list.postDelayed(it, 1_000) }
+        }
     }
 
     /* Rotation (and the other config changes declared in the manifest) is
@@ -2245,28 +2081,24 @@ class ReaderActivity : AppCompatActivity() {
        scroll back to it once the new layout lands. */
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        val anchor = if (speaking && resumeCursor >= 0) resumeCursor else topOffset()
-        val oldWidth = text.width
+        val anchor = if (speaking) resumeAt ?: speakAt else viewportPlace()
+        val oldWidth = list.width
         loadReady = false   // the placement scroll must not trigger a load
         fun restore(attempt: Int) {
             /* wait for the re-wrap: the old layout stays until the new width
                is applied, and anchoring against it would land nowhere */
-            if (text.width == oldWidth && attempt < 40) {
-                scroll.postDelayed({ restore(attempt + 1) }, 16)
+            if (list.width == oldWidth && attempt < 40) {
+                list.postDelayed({ restore(attempt + 1) }, 16)
                 return
             }
-            if (speaking) scrollToSpoken(anchor) else scroll.scrollTo(0, navScrollY(anchor))
+            if (anchor != null) {
+                if (speaking) scrollToSpoken(anchor)
+                else scrollPlaceIntoView(anchor, fifth = false, smooth = false)
+            }
             updateHeader()
-            scroll.post { loadReady = true }
+            list.post { loadReady = true }
         }
-        scroll.postDelayed({ restore(0) }, 16)
-    }
-
-    /* character offset of the line at the top of the viewport */
-    private fun topOffset(): Int {
-        val layout = text.layout ?: return 0
-        val y = (scroll.scrollY - text.totalPaddingTop).coerceAtLeast(0)
-        return layout.getLineStart(layout.getLineForVertical(y))
+        list.postDelayed({ restore(0) }, 16)
     }
 
     /* The chapter TTS is saying, or last said — that is the one ≡ should
@@ -2274,12 +2106,9 @@ class ReaderActivity : AppCompatActivity() {
        the spoken line, so currentChapterIdx can still be the previous
        one for the first screenful of a new chapter. */
     private fun focusChapterName(): String? {
-        val off = if (resumeCursor >= 0) resumeCursor else -1
-        val idx = if (off >= 0) {
-            loadedChapters.lastOrNull { it.start <= off }?.idx
-        } else {
-            currentChapterIdx.takeIf { it >= 0 }
-        } ?: return null
+        val idx = resumeAt?.let { loadedChapters.getOrNull(it.row)?.idx }
+            ?: currentChapterIdx.takeIf { it >= 0 }
+            ?: return null
         return chapters?.ordered?.getOrNull(idx)
     }
 
@@ -2292,8 +2121,8 @@ class ReaderActivity : AppCompatActivity() {
         val dir = intent.getStringExtra("dir") ?: return
         /* Persist first so a later return to this page (and Continue)
            agrees with the chapter we are about to point at. */
-        if (resumeCursor >= 0) saveTtsPos(resumeCursor)
-        else if (currentChapterIdx >= 0 && !speaking) saveLastChapter(currentChapterIdx)
+        resumeAt?.let { saveTtsPos(it) }
+            ?: run { if (currentChapterIdx >= 0 && !speaking) saveLastChapter(currentChapterIdx) }
         startActivity(
             android.content.Intent(this, ChapterListActivity::class.java)
                 .putExtra("dir", dir)
@@ -3062,7 +2891,9 @@ class ReaderActivity : AppCompatActivity() {
     private fun adjustFont(delta: Float) {
         fontSp = (fontSp + delta).coerceIn(12f, 50f)
         prefs.edit().putFloat("readerFontSize", fontSp).apply()
-        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
+        for (i in 0 until list.childCount) {
+            (list.getChildViewHolder(list.getChildAt(i)) as? ChapterHolder)?.applyFont(fontSp)
+        }
     }
 
     /* First lines of the chapter at `i` — the heading, which carries the
@@ -3106,10 +2937,10 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    private fun textOffsetAt(e: android.view.MotionEvent): Int? {
-        val layout = text.layout ?: return null
-        val line = layout.getLineForVertical(e.y.toInt() - text.totalPaddingTop)
-        return layout.getOffsetForHorizontal(line, e.x - text.totalPaddingLeft)
+    private fun textOffsetAt(tv: TextView, e: android.view.MotionEvent): Int? {
+        val layout = tv.layout ?: return null
+        val line = layout.getLineForVertical(e.y.toInt() - tv.totalPaddingTop)
+        return layout.getOffsetForHorizontal(line, e.x - tv.totalPaddingLeft)
     }
 
     private fun currentLoadedChapter(): LoadedChapter? =
@@ -3158,11 +2989,11 @@ class ReaderActivity : AppCompatActivity() {
        still starts reading from there. Opens the same full-screen
        gallery the chapter-list grid uses, so pinch and swipe have a
        surface to work on. */
-    private fun openChapterPicture(off: Int) {
+    private fun openChapterPictureAt(row: Int) {
         val folder = prefs.getString("tree", null) ?: return
         val dir = intent.getStringExtra("dir") ?: return
         val slug = intent.getStringExtra("slug") ?: return
-        val lc = loadedChapters.lastOrNull { it.start <= off } ?: return
+        val lc = loadedChapters.getOrNull(row) ?: return
         val chapter = chapters?.ordered?.getOrNull(lc.idx) ?: return
         openChapterPictureList(folder, dir, slug, chapter)
     }
@@ -3196,7 +3027,7 @@ class ReaderActivity : AppCompatActivity() {
         val slug = intent.getStringExtra("slug") ?: ""
         if (ChapterImages.linkedImage(this, folder, slug, chapter) == null) return raw
         val uri = ChapterImages.chapterUri(this, folder, dir, chapter, slug) ?: return raw
-        val maxW = (text.width - text.paddingLeft - text.paddingRight)
+        val maxW = (list.width - dp(36))
             .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }
         val pad = dp(10)
         val bmp = ChapterImages.thumb(this, uri, (maxW - pad * 2).coerceAtLeast(1))
@@ -3217,7 +3048,7 @@ class ReaderActivity : AppCompatActivity() {
             ChapterImageSpan(
                 bmp, maxW, pad, dp(8), dp(10), dp(1),
                 getColor(R.color.card), getColor(R.color.input_stroke),
-                text.lineSpacingMultiplier, text.lineSpacingExtra,
+                READER_LINE_MULT, 0f,
                 alt,
                 TypedValue.applyDimension(
                     TypedValue.COMPLEX_UNIT_SP,
@@ -3243,33 +3074,29 @@ class ReaderActivity : AppCompatActivity() {
         autoPicture: Boolean = false,
     ): Boolean {
         if (loading) return false
-        val lc = loadedChapters.firstOrNull { it.idx == pos } ?: return false
-        val layout = text.layout ?: return false
+        val row = rowOf(pos)
+        val lc = loadedChapters.getOrNull(row) ?: return false
         stopTts()
-        resumeCursor = -1
+        resumeAt = null
         clearTextSelection()
-        /* end of this chapter = start of the next, minus the separator */
-        val next = loadedChapters.firstOrNull { it.start > lc.start }
-        val chEnd = next?.let { it.start - SEP.length } ?: text.length()
         val off =
-            if (targetPara > 0) restoreOffsetIn(lc.start, chEnd, targetPara, anchor) else lc.start
+            if (targetPara > 0) ReaderText.restoreOffsetIn(lc.body, targetPara, anchor) else 0
         /* this programmatic jump must not itself trigger a prepend — the small
            top gap makes it look like an upward scroll into the first chapter.
            Gate maybeLoadMore off until the placement scroll has settled. */
         loadReady = false
         prependArmed = false   // jumped to this chapter; not a scroll-up-to-top
-        scroll.smoothScrollBy(0, 0)   // kill any in-flight fling
+        list.stopScroll()
         currentChapterIdx = lc.idx
-        if (saveTts) markPausedSkip(off) else saveLastChapter(lc.idx)
-        /* placeAt, not a bare scrollTo: jumping deep into the LAST loaded
-           chapter would otherwise be clamped by the page end and stay there */
+        val place = ReaderPlace(row, off)
+        if (saveTts) markPausedSkip(place) else saveLastChapter(lc.idx)
         setTextFocusable(false)
-        placeAt(off, fifth = targetPara > 0) {
+        placeAt(place, fifth = targetPara > 0) {
             setTextFocusable(true)
             updateHeader()
             bindPictureButton()
             if (autoPicture) maybeAutoShowPicture()
-            scroll.post { loadReady = true }
+            list.post { loadReady = true }
         }
         return true
     }
@@ -3301,8 +3128,8 @@ class ReaderActivity : AppCompatActivity() {
         /* picking the chapter TTS is already reading → keep reading (nothing new
            to load); just bring the spoken line back into view */
         if (speaking) {
-            val cursor = if (resumeCursor >= 0) resumeCursor else speakCursor
-            val reading = loadedChapters.lastOrNull { it.start <= cursor }?.idx
+            val cursor = resumeAt ?: speakAt
+            val reading = loadedChapters.getOrNull(cursor.row)?.idx
             if (reading == pos) {
                 scrollToSpoken(cursor)
                 return
@@ -3351,7 +3178,7 @@ class ReaderActivity : AppCompatActivity() {
         val ch = chapters ?: run { pendingSpeakAfterOpen = false; return }
         if (loading || ch.ordered.isEmpty()) { pendingSpeakAfterOpen = false; return }
         stopTts()
-        resumeCursor = -1
+        resumeAt = null
         /* From here on `chapters` is the listing this reader was built from —
            onCreate's walk has finished and assigned it (an open only ever runs
            after that). resyncIfRenamed reads this to know whether a swap of its
@@ -3364,15 +3191,12 @@ class ReaderActivity : AppCompatActivity() {
         lifecycleScope.launch {
             loadedChapters.clear()
             /* Load the opened chapter AND the batch ahead BEFORE placing. A
-               one-chapter page is shorter than the target needs: a ScrollView
-               clamps to what fits, so a mid-chapter spot could never be
-               reached, and the page could only grow after the placement had
-               already given up. Placing last means nothing can disturb it. */
+               one-chapter page used to be shorter than the target needs: a
+               ScrollView clamped to what fits, so a mid-chapter spot could
+               never be reached. Each chapter is its own row now, so the
+               opened chapter can sit at a negative offset into itself. */
             val last = (p + LOAD_BATCH).coerceAtMost(ch.ordered.size - 1)
             val firstWanted = (p - LOAD_BATCH).coerceAtLeast(0)
-            val sb = android.text.SpannableStringBuilder()
-            /* where the opened chapter lands once the ones above it are in */
-            var openStart = 0
             var targetBodyLen = 0
             for (i in firstWanted..last) {
                 val b = readAt(i)
@@ -3396,7 +3220,7 @@ class ReaderActivity : AppCompatActivity() {
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     }
-                    /* A hole in the buffer is otherwise invisible — the text
+                    /* A hole in the window is otherwise invisible — the list
                        simply runs from one chapter into the one after next.
                        The log is where the download's own troubles are already
                        reported, and costs nothing to write. */
@@ -3405,33 +3229,31 @@ class ReaderActivity : AppCompatActivity() {
                     )
                     continue
                 }
-                if (sb.isNotEmpty()) sb.append(SEP)
-                loadedChapters.add(loadedOf(i, sb.length, b))
-                if (i == p) {
-                    openStart = sb.length
-                    targetBodyLen = b.length
-                }
-                sb.append(b)
+                loadedChapters.add(loadedOf(i, b))
+                if (i == p) targetBodyLen = b.length
             }
             /* the first chapter actually READ, which is not firstWanted when
                one above the target wouldn't open */
             firstIdx = loadedChapters.firstOrNull()?.idx ?: p
             nextIdx = (loadedChapters.lastOrNull()?.idx ?: (p - 1)) + 1
-            setTextFocusable(false)   // nothing may scroll to the text while we place it
-            text.setText(sb, TextView.BufferType.EDITABLE)
-            clearTextSelection()   // no stray insertion cursor to auto-scroll
+            setTextFocusable(false)   // nothing may steal focus while we place
+            readerAdapter.notifyDataSetChanged()
+            clearTextSelection()
             currentChapterIdx = p
             titleBar.text = loadedChapters.firstOrNull { it.idx == p }?.heading ?: ""
             saveLastChapter(p)
 
+            val row = rowOf(p).coerceAtLeast(0)
             val targetOff =
                 if (targetPara > 0 && targetBodyLen > 0) {
-                    restoreOffsetIn(openStart, openStart + targetBodyLen, targetPara, anchor)
+                    val body = loadedChapters.getOrNull(row)?.body
+                    if (body != null) ReaderText.restoreOffsetIn(body, targetPara, anchor) else 0
                 } else {
-                    openStart
+                    0
                 }
-            scroll.post {
-                placeAt(targetOff, fifth = targetPara > 0) {
+            val target = ReaderPlace(row, targetOff)
+            list.post {
+                placeAt(target, fifth = targetPara > 0) {
                     setTextFocusable(true)
                     loading = false
                     loadReady = true
@@ -3445,60 +3267,43 @@ class ReaderActivity : AppCompatActivity() {
                     if (pendingSpeakAfterOpen) {
                         pendingSpeakAfterOpen = false
                         /* TTS extends its own runway from here (speakNext) */
-                        startTtsFrom(targetOff)
+                        startTtsFrom(target)
                     } else if (saveTts && !spotLost && targetBodyLen > 0) {
-                        markPausedSkip(targetOff)
+                        markPausedSkip(target)
                     }
                 }
             }
         }
     }
 
-    /* scroll so `off` sits just under the header, once the layout reflects the
-       current text. Retries one FRAME apart (postDelayed, not post) — plain
-       post()s drain faster than layout passes run, so they'd exhaust before
-       text.layout is ready and we'd land at the top instead of the target. */
-    private fun placeAt(off: Int, fifth: Boolean = false, attempt: Int = 0, then: () -> Unit) {
-        val layout = text.layout
-        if ((layout == null || layout.text.length != text.text.length) && attempt < 40) {
-            scroll.postDelayed({ placeAt(off, fifth, attempt + 1, then) }, 16)
-            return
+    /* scroll so `place` sits just under the header (or a fifth down), once
+       that chapter row has been laid out. Retries one FRAME apart — the
+       row may not be bound on the first ask. */
+    private fun placeAt(place: ReaderPlace, fifth: Boolean = false, attempt: Int = 0, then: () -> Unit) {
+        scrollPlaceIntoView(place, fifth, smooth = false, attempt) {
+            then()
+            holdAt(place, fifth, 0)
         }
-        val want = navScrollY(off, fifth)
-        scroll.scrollTo(0, want)
-        /* A ScrollView silently CLAMPS to what currently fits, so asking is not
-           arriving: on a short page (one chapter, or one still being filled in)
-           we land above the target and never hear about it. Keep retrying while
-           the page grows — this is what makes deep positions, e.g. where TTS
-           stopped late in a chapter, actually restore. */
-        if (scroll.scrollY != want && attempt < 40) {
-            scroll.postDelayed({ placeAt(off, fifth, attempt + 1, then) }, 16)
-            return
-        }
-        then()
-        holdAt(want, 0)
     }
 
-    /* Hold the placement briefly against a LATE yank. readerText is
-       textIsSelectable, so it is focusable in touch mode: setting its text
-       drops a cursor at offset 0 and can bringPointIntoView it, and the
-       ScrollView scrolls to show a child that takes focus — either one lands
-       the page back at the very top a few frames AFTER we placed it. Re-assert
-       until things settle; back off the moment the reader touches the screen so
+    /* Hold the placement briefly against a LATE yank. A selectable
+       TextView can drop a cursor at offset 0 and bring it into view a
+       few frames after we placed the page. Re-assert until things
+       settle; back off the moment the reader touches the screen so
        this can never fight a real scroll. */
-    private fun holdAt(want: Int, attempt: Int) {
+    private fun holdAt(place: ReaderPlace, fifth: Boolean, attempt: Int) {
         if (attempt >= 8 || fingerDown) return
-        if (scroll.scrollY != want) scroll.scrollTo(0, want)
-        scroll.postDelayed({ holdAt(want, attempt + 1) }, 60)
+        scrollPlaceIntoView(place, fifth, smooth = false)
+        list.postDelayed({ holdAt(place, fifth, attempt + 1) }, 60)
     }
 
 
     /* ---- border-driven chapter loading ----
        openAt loads LOAD_BATCH either side of the opened chapter; from there
-       scrolling tops the buffer up LOAD_BATCH at a time: reaching the LAST
+       scrolling tops the window up LOAD_BATCH at a time: reaching the LAST
        loaded chapter appends more, scrolling UP into the FIRST loaded chapter
-       prepends the previous batch (never during speech, since prepends shift
-       coordinates). */
+       prepends the previous batch (never during speech — reading extends
+       its own runway between sentences). */
 
     private var loadReady = false
     /* The prepend only arms once the reader is PAST the first loaded chapter.
@@ -3511,8 +3316,8 @@ class ReaderActivity : AppCompatActivity() {
     private var prependArmed = false
 
     /* ---- touch + scroll-settle gating ----
-       Loading previous chapters (a prepend) shifts every offset, so it must
-       never happen mid-gesture: while the finger is on the screen or a fling
+       Loading previous chapters (a prepend) inserts rows above, so it must
+       not happen mid-gesture: while the finger is on the screen or a fling
        is still gliding. maybeLoadMore only QUEUES the prepend; it runs from
        onScrollSettled, which fires once the finger is up AND the scroll has
        been idle for SETTLE_MS. */
@@ -3549,7 +3354,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* global touch tap so finger down/up is known regardless of which child
-       (the selectable text, the scroll view) actually handles the gesture */
+       (the selectable text, the list) actually handles the gesture */
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
         when (ev.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> fingerDown = true
@@ -3565,23 +3370,22 @@ class ReaderActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
-    private fun maybeLoadMore(newY: Int, oldY: Int) {
+    private fun maybeLoadMore(dy: Int) {
         if (!loadReady || loading) return
         val ch = chapters ?: return
         val first = loadedChapters.firstOrNull() ?: return
         val last = loadedChapters.lastOrNull() ?: return
         val more = nextIdx < ch.ordered.size
-        /* Appending forward never shifts existing offsets, so it's safe mid
+        /* Appending forward adds rows at the end, so it's safe mid
            scroll — but NOT while TTS plays: reading extends its own runway in
            speakNext (stop → load → resume between sentences), so no chapter is
            ever loaded during active playback. */
-        if (!speaking && more && (currentChapterIdx >= last.idx ||
-                (text.height > 0 && text.height < scroll.height * 3 / 2))
+        if (!speaking && more && (currentChapterIdx >= last.idx || pageTooShort())
         ) {
             appendChapters(LOAD_BATCH)
             return
         }
-        /* The end of the buffer IS the end of the listing — but that listing
+        /* The end of the window IS the end of the listing — but that listing
            was read when the reader opened, and a download running behind us
            has been adding to the folder ever since. Ask once before treating
            this as the end of the novel. Deliberately no `return`: the check is
@@ -3593,12 +3397,12 @@ class ReaderActivity : AppCompatActivity() {
         /* arm once the viewport is past the first loaded chapter */
         if (currentChapterIdx > first.idx) prependArmed = true
         /* SCROLLING UP back into the top loaded chapter (after having read past
-           it) → QUEUE the previous LOAD_BATCH. A prepend shifts every offset,
+           it) → QUEUE the previous LOAD_BATCH. A prepend inserts rows above,
            so it must not fire mid-gesture: onScrollSettled runs it once the
            finger is off the screen and the fling has come to rest. The armed
            flag keeps a fresh open/jump — which lands on the first chapter —
            from queuing it. Never while TTS drives the scroll. */
-        if (prependArmed && !speaking && firstIdx > 0 && newY < oldY &&
+        if (prependArmed && !speaking && firstIdx > 0 && dy < 0 &&
             currentChapterIdx <= first.idx
         ) {
             prependArmed = false
@@ -3608,23 +3412,35 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* A selectable TextView keeps a cursor where the user last tapped
-       (including the TTS double-tap); appending text to it can auto-scroll
+       (including the TTS double-tap); rebinding a row can auto-scroll
        back to that cursor. Drop selection and focus before changing text. */
     private fun clearTextSelection() {
-        (text.text as? android.text.Spannable)?.let { android.text.Selection.removeSelection(it) }
-        if (text.isFocused) text.clearFocus()
+        if (!::list.isInitialized) return
+        for (i in 0 until list.childCount) {
+            val tv = (list.getChildViewHolder(list.getChildAt(i)) as? ChapterHolder)?.text
+                ?: continue
+            (tv.text as? android.text.Spannable)?.let { android.text.Selection.removeSelection(it) }
+            if (tv.isFocused) tv.clearFocus()
+        }
     }
 
     /* While the page is being rebuilt and placed, take the selectable
-       TextView out of the focus order entirely: a focusable child is what lets
-       the ScrollView scroll itself to that child's top (and lets a fresh
-       cursor at offset 0 be brought into view), undoing the placement. Focus
-       is handed back once the scroll has landed, so long-press selection keeps
-       working normally. */
+       rows out of the focus order entirely: a focusable child can yank
+       the list to show a fresh cursor at offset 0. Focus is handed back
+       once the scroll has landed, so long-press selection keeps working. */
     private fun setTextFocusable(on: Boolean) {
-        if (!on && text.isFocused) text.clearFocus()
-        text.isFocusableInTouchMode = on
-        text.isFocusable = on
+        textFocusable = on
+        if (!::list.isInitialized) return
+        list.descendantFocusability =
+            if (on) android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
+            else android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        for (i in 0 until list.childCount) {
+            val tv = (list.getChildViewHolder(list.getChildAt(i)) as? ChapterHolder)?.text
+                ?: continue
+            if (!on && tv.isFocused) tv.clearFocus()
+            tv.isFocusableInTouchMode = on
+            tv.isFocusable = on
+        }
     }
 
     /* The listing is read when the reader opens and never read again, so
@@ -3735,10 +3551,10 @@ class ReaderActivity : AppCompatActivity() {
         fun busy() = DownloadService.isBusy(Ownership.normKey(intent.getStringExtra("slug") ?: ""))
         fun rearm() {
             if (!busy()) { relistTick = null; return }
-            relistTick?.let { scroll.removeCallbacks(it) }
+            relistTick?.let { list.removeCallbacks(it) }
             val r = Runnable { armShortPageRelist(n) }
             relistTick = r
-            scroll.postDelayed(r, RELIST_MS)
+            list.postDelayed(r, RELIST_MS)
         }
         if (speaking || loading) { rearm(); return }
         val started = relistForNewChapters {
@@ -3768,21 +3584,17 @@ class ReaderActivity : AppCompatActivity() {
         loading = true
         lifecycleScope.launch {
             clearTextSelection()
+            val insertAt = loadedChapters.size
             var added = 0
+            var inserted = 0
             while (added < n && nextIdx < ch.ordered.size) {
                 val idx = nextIdx
                 val body = readAt(idx)
                 if (body != null) {
-                    val start = if (text.text.isEmpty()) 0 else text.text.length + SEP.length
-                    loadedChapters.add(loadedOf(idx, start, body))
-                    if (text.text.isEmpty()) {
-                        text.setText(body, TextView.BufferType.EDITABLE)
-                    } else {
-                        text.append(SEP)
-                        text.append(body)
-                    }
+                    loadedChapters.add(loadedOf(idx, body))
+                    inserted++
                 } else {
-                    /* the buffer runs straight from one chapter into the one
+                    /* the window runs straight from one chapter into the one
                        after next with nothing to show for it — say so */
                     DownloadService.appendLog(
                         "could not read ${ch.ordered.getOrNull(idx)} — skipped in the reader",
@@ -3791,30 +3603,29 @@ class ReaderActivity : AppCompatActivity() {
                 nextIdx = idx + 1
                 added++
             }
+            if (inserted > 0) readerAdapter.notifyItemRangeInserted(insertAt, inserted)
             loading = false
             /* TTS paused at the border waiting for this — resume reading */
             if (pendingSpeakContinue) {
                 pendingSpeakContinue = false
                 if (speaking) speakNext()
             }
-            scroll.post {
+            list.post {
                 updateHeader()
                 /* Ask again if the page still isn't tall enough to scroll.
                    Every other top-up is driven by a scroll event, and a page
                    that doesn't scroll produces none — with a batch of twenty
                    that could not happen, with a small one and short chapters
-                   it can, and the reader would sit at the end of the buffer
+                   it can, and the reader would sit at the end of the window
                    with more novel behind it and no way to ask for it. */
-                if (!speaking && loadReady && nextIdx < ch.ordered.size &&
-                    text.height in 1 until scroll.height * 3 / 2
-                ) {
+                if (!speaking && loadReady && nextIdx < ch.ordered.size && pageTooShort()) {
                     appendChapters(n)
                 } else if (!speaking && loadReady &&
                     nextIdx >= (chapters?.ordered?.size ?: 0) &&
-                    text.height in 1 until scroll.height * 3 / 2
+                    pageTooShort()
                 ) {
                     /* Out of listing on a page too short to scroll: no scroll
-                       event will EVER arrive — a ScrollView whose content is
+                       event will EVER arrive — a list whose content is
                        smaller than the viewport dispatches nothing — so this
                        branch is its own event source. A check that finds
                        nothing re-asks after the window, but only while the
@@ -3829,13 +3640,10 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /* load up to n chapters above the current content in ONE text update,
-       keeping the reader's place (single anchor compensation).
-
-       A RecyclerView of one row per chapter would keep place with
-       KeepVisible.afterInsert + scrollToPositionWithOffset instead
-       of shifting every character offset. TTS, a tap, and resume
-       still share one TextView, so this stays a character anchor. */
+    /* load up to n chapters above the current content, keeping the
+       reader's place with KeepVisible.afterInsert + scrollToPositionWithOffset.
+       Character offsets stay local to each chapter; only the row index
+       of a spoken / tapped / resume spot moves. */
     private fun prependChapters(n: Int) {
         val ch = chapters ?: return
         /* same stale-index hazard the append gate blocks: after a rename,
@@ -3870,68 +3678,204 @@ class ReaderActivity : AppCompatActivity() {
                 loading = false
                 return@launch
             }
-            /* Anchor the viewport by CHARACTER offset, not pixels: with a
-               line-spacing multiplier the text height isn't additive, so a
-               pixel delta lands slightly off. */
-            val pad = text.totalPaddingTop
-            var anchorOff = 0
-            var withinLine = 0
-            text.layout?.let { l ->
-                val y = (scroll.scrollY - pad).coerceAtLeast(0)
-                val line = l.getLineForVertical(y)
-                anchorOff = l.getLineStart(line)
-                withinLine = y - l.getLineTop(line)
-            }
+            val visible = listLm.findFirstVisibleItemPosition().coerceAtLeast(0)
+            val visHolder = list.findViewHolderForAdapterPosition(visible)
+            val anchor = KeepVisible.Anchor(visible, visHolder?.itemView?.top ?: 0)
             clearTextSelection()
-            val block = android.text.SpannableStringBuilder()
-            for ((i, pair) in bodies.withIndex()) {
-                if (i > 0) block.append(SEP)
-                block.append(pair.second)
-            }
-            val shift = block.length + SEP.length
-            for (l in loadedChapters) l.start += shift
-            speakCursor += shift
-            if (resumeCursor >= 0) resumeCursor += shift
-            var acc = 0
-            val newLoaded = ArrayList<LoadedChapter>()
-            for ((chapterIdx, body) in bodies) {
-                newLoaded.add(loadedOf(chapterIdx, acc, body))
-                acc += body.length + SEP.length
-            }
+            val newLoaded = ArrayList<LoadedChapter>(bodies.size)
+            for ((chapterIdx, body) in bodies) newLoaded.add(loadedOf(chapterIdx, body))
             loadedChapters.addAll(0, newLoaded)
-            val combined = android.text.SpannableStringBuilder(block).append(SEP).append(text.text)
-            text.setText(combined, TextView.BufferType.EDITABLE)
             firstIdx = bodies.first().first
-            if (speaking && curSentStart >= 0) {
-                setHighlight(curSentStart + shift, curSentEnd + shift)
+            val inserted = newLoaded.size
+            speakAt = speakAt.afterInsert(0, inserted)
+            resumeAt = resumeAt?.afterInsert(0, inserted)
+            if (curSentRow >= 0) curSentRow += inserted
+            list.stopScroll()
+            readerAdapter.notifyItemRangeInserted(0, inserted)
+            /* the old first row is now one down — it must show the ⁂ */
+            if (loadedChapters.size > inserted) readerAdapter.notifyItemChanged(inserted)
+            val kept = KeepVisible.afterInsert(anchor, insertedAt = 0, inserted = inserted)
+            listLm.scrollToPositionWithOffset(kept.index, kept.offset)
+            loading = false
+            updateHeader()
+            if (speaking) resumeAt?.let { scrollToSpoken(it) }
+        }
+    }
+
+    /* The chapter row whose heading sits at (or within a line of) the
+       top of the viewport, plus the character on that line. The probe
+       sits slightly below the top edge so a heading just under the
+       header wins instead of the previous chapter's last line. */
+    private fun viewportPlace(): ReaderPlace? {
+        if (!::list.isInitialized || loadedChapters.isEmpty()) return null
+        val first = listLm.findFirstVisibleItemPosition()
+        if (first !in loadedChapters.indices) return null
+        val holder = list.findViewHolderForAdapterPosition(first) as? ChapterHolder
+            ?: return ReaderPlace(first, 0)
+        val tv = holder.text
+        val layout = tv.layout ?: return ReaderPlace(first, 0)
+        val bias = (fontSp * 2f * resources.displayMetrics.scaledDensity).toInt()
+        val yInText = (bias - holder.itemView.top - tv.top - tv.totalPaddingTop).coerceAtLeast(0)
+        val line = layout.getLineForVertical(yInText)
+        return ReaderPlace(first, layout.getLineStart(line))
+    }
+
+    /* True when every loaded row fits on screen — a page that short
+       produces no further scroll events, so append has to keep going
+       on its own. */
+    private fun pageTooShort(): Boolean {
+        if (!::list.isInitialized || loadedChapters.isEmpty()) return false
+        val first = listLm.findFirstCompletelyVisibleItemPosition()
+        val last = listLm.findLastCompletelyVisibleItemPosition()
+        return first == 0 && last == loadedChapters.lastIndex
+    }
+
+    /* Sit `place` a small gap under the header, or ~20% down when
+       `fifth` (the same framing TTS uses). Negative row offsets are
+       how a line deep in a long chapter stays in view. */
+    private fun scrollPlaceIntoView(
+        place: ReaderPlace,
+        fifth: Boolean,
+        smooth: Boolean,
+        attempt: Int = 0,
+        then: (() -> Unit)? = null,
+    ) {
+        if (!::list.isInitialized || place.row !in loadedChapters.indices) {
+            then?.invoke()
+            return
+        }
+        if (list.height == 0 && attempt < 40) {
+            list.postDelayed(
+                { scrollPlaceIntoView(place, fifth, smooth, attempt + 1, then) },
+                16,
+            )
+            return
+        }
+        val holder = list.findViewHolderForAdapterPosition(place.row) as? ChapterHolder
+        val tv = holder?.text
+        val layout = tv?.layout
+        if (holder == null || tv == null || layout == null || layout.text.length != tv.text.length) {
+            val guess = if (fifth) list.height / 5 else dp(16)
+            listLm.scrollToPositionWithOffset(place.row, guess)
+            if (attempt < 40) {
+                list.postDelayed(
+                    { scrollPlaceIntoView(place, fifth, smooth, attempt + 1, then) },
+                    16,
+                )
+            } else {
+                then?.invoke()
             }
-            /* Re-anchor only once the layout includes the prepended text.
-               Anchoring against a stale layout clamps the scroll near the
-               top, which retriggers prepend — cascading several chapters
-               upward from where the user actually opened. */
-            fun anchor(attempt: Int) {
-                val l = text.layout
-                if ((l == null || l.text.length != text.text.length) && attempt < 20) {
-                    scroll.post { anchor(attempt + 1) }
-                    return
+            return
+        }
+        val line = layout.getLineForOffset(place.off.coerceIn(0, tv.length()))
+        val lineTopInRow = tv.top + layout.getLineTop(line) + tv.totalPaddingTop
+        val lineTarget = if (fifth) list.height / 5 else dp(16)
+        if (smooth) {
+            list.smoothScrollBy(0, holder.itemView.top + lineTopInRow - lineTarget)
+        } else {
+            listLm.scrollToPositionWithOffset(place.row, lineTarget - lineTopInRow)
+        }
+        then?.invoke()
+    }
+
+    private inner class ChapterHolder(row: android.view.View) : RecyclerView.ViewHolder(row) {
+        val sep: TextView = row.findViewById(R.id.chapterSep)
+        val text: TextView = row.findViewById(R.id.chapterText)
+        var swallowTap = false
+
+        fun applyFont(sp: Float) {
+            text.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
+        }
+
+        fun bind(position: Int) {
+            val lc = loadedChapters[position]
+            /* INVISIBLE, not GONE: the first row keeps the same height so
+               showing the mark after a prepend does not push the text down. */
+            sep.visibility =
+                if (position == 0) android.view.View.INVISIBLE else android.view.View.VISIBLE
+            text.setText(lc.body, TextView.BufferType.SPANNABLE)
+            applyFont(fontSp)
+            text.isFocusable = textFocusable
+            text.isFocusableInTouchMode = textFocusable
+            applyHighlightTo(text, position)
+        }
+    }
+
+    private inner class ReaderAdapter : RecyclerView.Adapter<ChapterHolder>() {
+        init {
+            setHasStableIds(true)
+        }
+
+        override fun getItemCount(): Int = loadedChapters.size
+
+        override fun getItemId(position: Int): Long = loadedChapters[position].idx.toLong()
+
+        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): ChapterHolder {
+            val row = layoutInflater.inflate(R.layout.item_reader_chapter, parent, false)
+            val holder = ChapterHolder(row)
+            /* Double tap = start TTS, and ONLY that: the second tap is
+               swallowed so the selectable TextView never runs its own
+               double-tap word-selection. Long-press text selection is
+               untouched. A single tap on the picture still opens it. */
+            val detector = android.view.GestureDetector(
+                this@ReaderActivity,
+                object : android.view.GestureDetector.SimpleOnGestureListener() {
+                    override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                        val pos = holder.bindingAdapterPosition
+                        if (pos == RecyclerView.NO_POSITION) return false
+                        val off = textOffsetAt(holder.text, e) ?: return false
+                        startTtsFrom(ReaderPlace(pos, off))
+                        holder.swallowTap = true
+                        return true
+                    }
+
+                    override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
+                        val pos = holder.bindingAdapterPosition
+                        if (pos == RecyclerView.NO_POSITION) return false
+                        val off = textOffsetAt(holder.text, e) ?: return false
+                        val body = loadedChapters.getOrNull(pos)?.body ?: return false
+                        if (!ChapterImages.imageAt(body, off)) return false
+                        openChapterPictureAt(pos)
+                        return true
+                    }
+                },
+            )
+            holder.text.setOnTouchListener { _, ev ->
+                detector.onTouchEvent(ev)
+                val consume = holder.swallowTap
+                if (ev.actionMasked == android.view.MotionEvent.ACTION_UP ||
+                    ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL
+                ) {
+                    /* Center the tapped sentence AGAIN once the finger is off
+                       the glass. speakNext already centered it, but that
+                       scroll starts while the double-tap's second touch is
+                       still down — a few pixels of drift past the touch slop
+                       and the list intercepts the gesture and kills the
+                       animation. Re-issuing when the gesture ends leaves no
+                       touch stream to interfere. Skipped while a border
+                       append is pending: resumeAt still names the pre-tap
+                       sentence there, and the append's own speakNext centers
+                       the right one. */
+                    if (holder.swallowTap && speaking && !pendingSpeakContinue) {
+                        resumeAt?.let { scrollToSpoken(it) }
+                    }
+                    holder.swallowTap = false
                 }
-                l?.let {
-                    val line = it.getLineForOffset(anchorOff + shift)
-                    scroll.scrollTo(0, it.getLineTop(line) + withinLine + pad)
-                    /* a fling still in flight targets PRE-shift coordinates;
-                       left alone it yanks the viewport into the inserted
-                       chapters and cascades further prepends — replace its
-                       trajectory with a zero-delta scroll to kill it */
-                    scroll.smoothScrollBy(0, 0)
-                }
-                loading = false
-                updateHeader()
-                /* a smooth scroll in flight when the prepend landed still
-                   animates toward pre-shift coordinates — restart it against
-                   the new layout */
-                if (speaking && resumeCursor >= 0) scrollToSpoken(resumeCursor)
+                consume
             }
-            scroll.post { anchor(0) }
+            return holder
+        }
+
+        override fun onBindViewHolder(holder: ChapterHolder, position: Int) {
+            holder.bind(position)
+        }
+
+        override fun onViewAttachedToWindow(holder: ChapterHolder) {
+            val pos = holder.bindingAdapterPosition
+            if (pos != RecyclerView.NO_POSITION) {
+                holder.sep.visibility =
+                    if (pos == 0) android.view.View.INVISIBLE else android.view.View.VISIBLE
+            }
         }
     }
 }

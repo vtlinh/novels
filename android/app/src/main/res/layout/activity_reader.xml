@@ -65,22 +65,14 @@
             android:layout_height="0dp"
             android:layout_weight="1">
 
-            <ScrollView
-                android:id="@+id/readerScroll"
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/readerList"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:fillViewport="true">
-
-                <TextView
-                    android:id="@+id/readerText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:padding="18dp"
-                    android:textSize="16sp"
-                    android:textColor="@color/fg"
-                    android:lineSpacingMultiplier="1.45"
-                    android:textIsSelectable="true" />
-            </ScrollView>
+                android:paddingTop="0dp"
+                android:paddingBottom="18dp"
+                android:clipToPadding="true"
+                android:overScrollMode="never" />
 
             <!-- transient status (e.g. "shaking") shown over the text -->
             <TextView
