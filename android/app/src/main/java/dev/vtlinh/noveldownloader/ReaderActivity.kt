@@ -3189,7 +3189,13 @@ class ReaderActivity : AppCompatActivity() {
         prependQueued = false
         val p = pos.coerceIn(0, ch.ordered.size - 1)
         lifecycleScope.launch {
-            loadedChapters.clear()
+            /* Collect first, then swap. Clearing or adding rows across a
+               SAF read yields the main thread with getItemCount already
+               changed and no notify — a leftover fling then recycles a
+               holder whose position no longer exists, and RecyclerView
+               throws "Inconsistency detected". Prepend already gathers
+               before it inserts; open and append have to do the same. */
+            val next = ArrayList<LoadedChapter>()
             /* Load the opened chapter AND the batch ahead BEFORE placing. A
                one-chapter page used to be shorter than the target needs: a
                ScrollView clamped to what fits, so a mid-chapter spot could
@@ -3229,9 +3235,11 @@ class ReaderActivity : AppCompatActivity() {
                     )
                     continue
                 }
-                loadedChapters.add(loadedOf(i, b))
+                next.add(loadedOf(i, b))
                 if (i == p) targetBodyLen = b.length
             }
+            loadedChapters.clear()
+            loadedChapters.addAll(next)
             /* the first chapter actually READ, which is not firstWanted when
                one above the target wouldn't open */
             firstIdx = loadedChapters.firstOrNull()?.idx ?: p
@@ -3584,15 +3592,14 @@ class ReaderActivity : AppCompatActivity() {
         loading = true
         lifecycleScope.launch {
             clearTextSelection()
-            val insertAt = loadedChapters.size
+            val newOnes = ArrayList<LoadedChapter>()
             var added = 0
-            var inserted = 0
-            while (added < n && nextIdx < ch.ordered.size) {
-                val idx = nextIdx
+            var scan = nextIdx
+            while (added < n && scan < ch.ordered.size) {
+                val idx = scan
                 val body = readAt(idx)
                 if (body != null) {
-                    loadedChapters.add(loadedOf(idx, body))
-                    inserted++
+                    newOnes.add(loadedOf(idx, body))
                 } else {
                     /* the window runs straight from one chapter into the one
                        after next with nothing to show for it — say so */
@@ -3600,10 +3607,15 @@ class ReaderActivity : AppCompatActivity() {
                         "could not read ${ch.ordered.getOrNull(idx)} — skipped in the reader",
                     )
                 }
-                nextIdx = idx + 1
+                scan = idx + 1
                 added++
             }
-            if (inserted > 0) readerAdapter.notifyItemRangeInserted(insertAt, inserted)
+            nextIdx = scan
+            if (newOnes.isNotEmpty()) {
+                val insertAt = loadedChapters.size
+                loadedChapters.addAll(newOnes)
+                readerAdapter.notifyItemRangeInserted(insertAt, newOnes.size)
+            }
             loading = false
             /* TTS paused at the border waiting for this — resume reading */
             if (pendingSpeakContinue) {
