@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <!-- Between chapters only — the first row hides this. Not part of
+         the chapter body, so a tap / spoken sentence never lands on it. -->
+    <TextView
+        android:id="@+id/chapterSep"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingTop="18dp"
+        android:paddingBottom="8dp"
+        android:text="&#x2042;"
+        android:textSize="16sp"
+        android:textColor="@color/muted"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/chapterText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:textSize="16sp"
+        android:textColor="@color/fg"
+        android:lineSpacingMultiplier="1.45"
+        android:textIsSelectable="true" />
+</LinearLayout>
