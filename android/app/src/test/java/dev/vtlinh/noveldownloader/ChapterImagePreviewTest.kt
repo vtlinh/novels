@@ -12,8 +12,13 @@ class ChapterImagePreviewTest {
 
     @Test
     fun `the reader picture button is on every chapter`() {
-        assertTrue(ChapterImagePreview.shouldShowButton(true))
-        assertTrue(ChapterImagePreview.shouldShowButton(false))
+        assertTrue(ChapterImagePreview.shouldShowReaderButton())
+    }
+
+    @Test
+    fun `the chapter list picture button is only on pictured chapters`() {
+        assertTrue(ChapterImagePreview.shouldShowListButton(true))
+        assertFalse(ChapterImagePreview.shouldShowListButton(false))
     }
 
     @Test

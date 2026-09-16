@@ -33,7 +33,12 @@ object ChapterImagePreview {
     /* The reader toolbar shows the picture button on every chapter.
        A tap opens this chapter's picture, or the closest later
        chapter that has one. */
-    fun shouldShowButton(hasImage: Boolean): Boolean = true
+    fun shouldShowReaderButton(): Boolean = true
+
+    /* Chapter list and the in-reader drawer: only a chapter that
+       actually has a picture. The reader button is the one that
+       is always there. */
+    fun shouldShowListButton(hasImage: Boolean): Boolean = hasImage
 
     fun shouldAutoOpen(
         hasImage: Boolean,

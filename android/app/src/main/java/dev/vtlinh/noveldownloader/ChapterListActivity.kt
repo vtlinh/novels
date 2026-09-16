@@ -751,7 +751,7 @@ class ChapterListActivity : AppCompatActivity() {
                     if (current) android.view.View.VISIBLE else android.view.View.GONE
                 val name = allOrdered.getOrNull(winStart + position)
                 val pic = v.findViewById<ImageView>(R.id.chapterPictureBtn)
-                val hasPic = ChapterImagePreview.shouldShowButton(
+                val hasPic = ChapterImagePreview.shouldShowListButton(
                     name != null && pictured.contains(name),
                 )
                 pic.visibility =

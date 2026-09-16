@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.TypedValue
 import android.widget.ArrayAdapter
+import android.widget.ImageView
 import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.TextView
@@ -103,6 +104,10 @@ class ReaderActivity : AppCompatActivity() {
 
     private var currentChapterIdx = -1
     private var drawerAdapter: ArrayAdapter<String>? = null
+    /* Chapter filenames that have a saved picture — the drawer
+       row button opens that picture. Empty until the listing
+       is read. */
+    private var pictured = emptySet<String>()
 
     /* (chapter index, paragraph within it) a language reload should keep.
        The listen spot when there is one, otherwise the viewport — and the
@@ -318,6 +323,7 @@ class ReaderActivity : AppCompatActivity() {
             chapters = fresh
             drawerAdapter?.clear()
             drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
+            refreshPictured()
             drawerAdapter?.notifyDataSetChanged()
             for (lc in loadedChapters) lc.idx += d
             if (currentChapterIdx >= 0) currentChapterIdx += d
@@ -548,9 +554,10 @@ class ReaderActivity : AppCompatActivity() {
                     )
                 }
             }
+            refreshPictured()
             /* inline chapter list in the right drawer, current one highlighted */
             drawerAdapter = object : ArrayAdapter<String>(
-                this@ReaderActivity, android.R.layout.simple_list_item_1,
+                this@ReaderActivity, R.layout.item_chapter, R.id.chapterLabel,
                 ch.ordered.map { it.removeSuffix(".txt") },
             ) {
                 override fun getView(
@@ -558,13 +565,34 @@ class ReaderActivity : AppCompatActivity() {
                     convertView: android.view.View?,
                     parent: android.view.ViewGroup,
                 ): android.view.View {
-                    val v = super.getView(position, convertView, parent) as TextView
-                    if (position == currentChapterIdx) {
-                        v.setTextColor(getColor(R.color.accent))
-                        v.setTypeface(null, android.graphics.Typeface.BOLD)
-                    } else {
-                        v.setTextColor(getColor(R.color.fg))
-                        v.setTypeface(null, android.graphics.Typeface.NORMAL)
+                    val v = super.getView(position, convertView, parent)
+                    val current = position == currentChapterIdx
+                    v.setBackgroundResource(
+                        if (current) R.drawable.bg_chapter_current else 0,
+                    )
+                    v.findViewById<android.view.View>(R.id.chapterAccent).visibility =
+                        if (current) android.view.View.VISIBLE else android.view.View.INVISIBLE
+                    val label = v.findViewById<TextView>(R.id.chapterLabel)
+                    label.setTextColor(getColor(if (current) R.color.accent else R.color.fg))
+                    label.setTypeface(
+                        null,
+                        if (current) android.graphics.Typeface.BOLD
+                        else android.graphics.Typeface.NORMAL,
+                    )
+                    v.findViewById<android.view.View>(R.id.chapterNow).visibility =
+                        if (current) android.view.View.VISIBLE else android.view.View.GONE
+                    val name = chapters?.ordered?.getOrNull(position)
+                    val pic = v.findViewById<ImageView>(R.id.chapterPictureBtn)
+                    val hasPic = ChapterImagePreview.shouldShowListButton(
+                        name != null && pictured.contains(name),
+                    )
+                    pic.visibility =
+                        if (hasPic) android.view.View.VISIBLE else android.view.View.GONE
+                    pic.setOnClickListener {
+                        if (name == null) return@setOnClickListener
+                        drawer.closeDrawer(GravityCompat.END)
+                        val slug = intent.getStringExtra("slug") ?: return@setOnClickListener
+                        openChapterPictureList(folder, dirName, slug, name)
                     }
                     return v
                 }
@@ -3085,10 +3113,24 @@ class ReaderActivity : AppCompatActivity() {
         loadedChapters.firstOrNull { it.idx == currentChapterIdx }
 
     private fun bindPictureButton() {
-        val show = !asDocument() && ChapterImagePreview.shouldShowButton(
-            currentLoadedChapter()?.hasImage == true,
-        )
+        val show = !asDocument() && ChapterImagePreview.shouldShowReaderButton()
         pictureBtn.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
+    }
+
+    /* Filenames that have a picture on disk. The drawer uses this
+       so only those rows show the picture button. */
+    private suspend fun refreshPictured() {
+        if (asDocument()) {
+            pictured = emptySet()
+            return
+        }
+        val folder = prefs.getString("tree", null) ?: return
+        val dir = intent.getStringExtra("dir") ?: return
+        val slug = intent.getStringExtra("slug") ?: return
+        pictured = withContext(Dispatchers.IO) {
+            ChapterImages.listSaved(this@ReaderActivity, folder, dir, slug)
+                .map { it.chapter }.toSet()
+        }
     }
 
     /* Toolbar button: the picture for this chapter, or the closest
@@ -3678,6 +3720,7 @@ class ReaderActivity : AppCompatActivity() {
                 lastRelistAt = 0L
                 drawerAdapter?.clear()
                 drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
+                refreshPictured()
                 drawerAdapter?.notifyDataSetChanged()
             }
             onDone()
