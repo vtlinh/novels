@@ -520,6 +520,43 @@ class ChapterImagesTest {
         assertEquals(1100, ChapterImages.galleryImageSlot(2000, 120, 2000))
         assertEquals(120, ChapterImages.galleryImageSlot(100, 120))
         assertEquals(1, ChapterImages.galleryImageSlot(0, 0))
+        assertEquals(450, ChapterImages.galleryPlaceholderH(800, 1100))
+        assertEquals(1100, ChapterImages.galleryPlaceholderH(2000, 1100))
+        assertEquals(56, ChapterImages.galleryPlaceholderH(100, 120))
+        assertEquals(1, ChapterImages.galleryPlaceholderH(0, 0))
+        assertEquals(450, ChapterImages.galleryDrawnH(800, 1600, 900, 1100))
+        assertEquals(800, ChapterImages.galleryDrawnH(800, 800, 800, 1100))
+        assertEquals(1100, ChapterImages.galleryDrawnH(800, 400, 800, 1100))
+        assertEquals(1100, ChapterImages.galleryDrawnH(0, 1600, 900, 1100))
+        assertEquals(1, ChapterImages.galleryDrawnH(800, 0, 0, 0))
+    }
+
+    @Test
+    fun `the picture list names the chapter then the picture`() {
+        assertEquals("The oath", ChapterImages.headingTitle("Chapter 21: The oath\nOnce…"))
+        assertEquals("Tiêu Viêm", ChapterImages.headingTitle("Chương 5: Tiêu Viêm"))
+        assertEquals("", ChapterImages.headingTitle("Chapter 21"))
+        assertEquals("", ChapterImages.headingTitle("  \n"))
+        assertEquals("21: The oath", ChapterImages.galleryChapterLine(21, "The oath"))
+        assertEquals("21", ChapterImages.galleryChapterLine(21, "  "))
+        assertEquals("21: Chapter 21", ChapterImages.galleryChapterLine(21, "", "Chapter 21"))
+        assertEquals("21", ChapterImages.galleryChapterLine(21, "", "21"))
+        assertEquals("The oath", ChapterImages.galleryChapterLine(Int.MAX_VALUE, "The oath", "notes"))
+        assertEquals("notes", ChapterImages.galleryChapterLine(Int.MAX_VALUE, "", "notes"))
+        assertEquals(
+            "21: The oath\nA moth at the window",
+            ChapterImages.galleryCaption(21, "The oath", "A moth at the window"),
+        )
+        assertEquals("21: The oath", ChapterImages.galleryCaption(21, "The oath", "  "))
+        assertEquals("A moth at the window", ChapterImages.galleryCaption(0, "", "A moth at the window"))
+        assertEquals(
+            "21: The oath\nA moth at the window",
+            ChapterImages.galleryCaption(21, " The oath ", "  A moth at the window  ", "21"),
+        )
+        assertEquals(
+            "21: Chapter 21\nA moth at the window",
+            ChapterImages.galleryCaption(21, "", "A moth at the window", "Chapter 21"),
+        )
     }
 
     @Test

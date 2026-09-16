@@ -3146,7 +3146,7 @@ class ReaderActivity : AppCompatActivity() {
     ) {
         lifecycleScope.launch {
             val items = withContext(Dispatchers.IO) {
-                ChapterImages.listSaved(this@ReaderActivity, folder, dir, slug)
+                ChapterImages.listSavedForGallery(this@ReaderActivity, folder, dir, slug)
             }
             if (isFinishing || isDestroyed) return@launch
             val start = ChapterImages.startSavedIndex(

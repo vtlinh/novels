@@ -530,7 +530,9 @@ class ChapterListActivity : AppCompatActivity() {
             val edge = ((resources.displayMetrics.widthPixels - dp(12 + 12 + 14 + 14)) / cols)
                 .coerceAtLeast(dp(80))
             val thumbs = withContext(Dispatchers.IO) {
-                val items = ChapterImages.listSaved(this@ChapterListActivity, folder, dirName, slug)
+                val items = ChapterImages.listSavedForGallery(
+                    this@ChapterListActivity, folder, dirName, slug,
+                )
                 items.map { it to ChapterImages.thumb(this@ChapterListActivity, it.uri, edge) }
             }
             if (isFinishing || isDestroyed) return@launch
