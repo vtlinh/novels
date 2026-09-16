@@ -21,6 +21,14 @@ class ChapterImagePreviewTest {
         assertFalse(ChapterImagePreview.shouldShowListButton(false))
     }
 
+    /* THE DEFECT. A focusable picture button ate the row tap, so
+       pictured chapters opened only from the mark. The button
+       stays; it just must not take focus. */
+    @Test
+    fun `a pictured chapter still opens from a tap on the name`() {
+        assertFalse(ChapterImagePreview.listButtonTakesFocus())
+    }
+
     @Test
     fun `opening a pictured chapter shows the dialog once`() {
         assertTrue(ChapterImagePreview.shouldAutoOpen(true, true, false))

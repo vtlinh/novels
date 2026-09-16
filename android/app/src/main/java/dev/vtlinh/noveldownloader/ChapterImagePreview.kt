@@ -40,6 +40,12 @@ object ChapterImagePreview {
        is always there. */
     fun shouldShowListButton(hasImage: Boolean): Boolean = hasImage
 
+    /* THE DEFECT. ListView drops OnItemClick when a child is
+       focusable, so a pictured row could only be opened from
+       the picture button. The button stays clickable; it must
+       not take focus. */
+    fun listButtonTakesFocus(): Boolean = false
+
     fun shouldAutoOpen(
         hasImage: Boolean,
         navigating: Boolean,
