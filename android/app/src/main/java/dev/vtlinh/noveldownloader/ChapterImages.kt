@@ -1155,10 +1155,74 @@ object ChapterImages {
         val label: String,
         val uri: Uri,
         val alt: String = "",
+        val title: String = "",
     )
 
     /* Slack's description after trim. Padding is not a caption. */
     fun altText(alt: String): String = alt.trim()
+
+    /* Title half of a heading line — "Chapter 21: The oath" →
+       "The oath". A bare "Chapter 21" has no title. */
+    fun headingTitle(text: String): String {
+        val line = text.lineSequence().firstOrNull()?.trim().orEmpty()
+        return Extractor.parseHeading(line).second.trim()
+    }
+
+    /* First line of the picture list: "{number}: {title}".
+       An unnumbered chapter uses its stem. A missing title
+       keeps the number so the row still names the chapter. */
+    fun galleryChapterLine(number: Int, title: String, label: String = ""): String {
+        val t = title.trim()
+        val l = label.trim()
+        if (number == Int.MAX_VALUE || number < 1) {
+            return t.ifEmpty { l }
+        }
+        val name = t.ifEmpty { if (l == number.toString()) "" else l }
+        return if (name.isEmpty()) number.toString() else "$number: $name"
+    }
+
+    /* Chapter line, then the picture's own title on the next
+       line. Either half can stand alone. */
+    fun galleryCaption(
+        number: Int,
+        title: String,
+        imageTitle: String,
+        label: String = "",
+    ): String {
+        val head = galleryChapterLine(number, title, label)
+        val body = if (showAlt(imageTitle)) altText(imageTitle) else ""
+        return when {
+            head.isEmpty() -> body
+            body.isEmpty() -> head
+            else -> "$head\n$body"
+        }
+    }
+
+    fun galleryCaption(item: Saved): String =
+        galleryCaption(item.number, item.title, item.alt, Scenes.chapterStem(item.chapter))
+
+    fun withTitles(items: List<Saved>, titles: Map<String, String>): List<Saved> =
+        items.map { item ->
+            val t = titles[item.chapter]?.trim().orEmpty()
+            if (t.isEmpty()) item else item.copy(title = t)
+        }
+
+    /* How tall the picture is once it is fitted to the row.
+       A reserved square left a hole under a wide picture
+       before the title. */
+    fun galleryDrawnH(boxW: Int, imgW: Int, imgH: Int, maxH: Int): Int {
+        if (boxW < 1 || imgW < 1 || imgH < 1) return maxH.coerceAtLeast(1)
+        val h = (boxW.toLong() * imgH / imgW).toInt().coerceAtLeast(1)
+        return minOf(h, maxH.coerceAtLeast(1))
+    }
+
+    /* Empty box before the file is drawn. Wide, like the
+       pictures Slack sends, so the title does not sit under
+       a tall hole. */
+    fun galleryPlaceholderH(boxW: Int, maxH: Int): Int {
+        val wide = (boxW * 9 / 16).coerceAtLeast(1)
+        return minOf(wide, maxH.coerceAtLeast(1))
+    }
 
     /* Empty / whitespace is not a caption — hide it so an older
        row or a disk-adopted png does not draw a blank line. */
@@ -1194,6 +1258,72 @@ object ChapterImages {
         }
         return sortSaved(out)
     }
+
+    /* Same as listSaved, with each row's chapter title from
+       the heading inside the chapter file. The picture list
+       prints that above the picture's own title. */
+    fun listSavedForGallery(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+    ): List<Saved> {
+        val items = listSaved(ctx, folder, dirName, slug)
+        return withTitles(
+            items,
+            headingTitles(ctx, folder, dirName, slug, items.map { it.chapter }),
+        )
+    }
+
+    /* First-line title of each named chapter. One folder
+       listing, then a short read per file — not the whole
+       chapter. */
+    fun headingTitles(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapters: Collection<String>,
+    ): Map<String, String> {
+        if (folder.isEmpty() || dirName.isEmpty() || slug.isEmpty() || chapters.isEmpty()) {
+            return emptyMap()
+        }
+        val treeUri = Uri.parse(folder)
+        val store = DownloadStore(ctx)
+        val order = try { store.getChapterOrder(folder, slug) } catch (e: Exception) { emptyMap() }
+        val ch = try {
+            ChapterListActivity.chapterNames(ctx, treeUri, dirName, order, slug)
+        } catch (e: Exception) { null } ?: return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        for (chapter in chapters) {
+            val ref = ch.translated[chapter] ?: ch.source[chapter] ?: continue
+            val line = firstLineOf(ctx, treeUri, ref) ?: continue
+            val title = headingTitle(line)
+            if (title.isNotEmpty()) out[chapter] = title
+        }
+        return out
+    }
+
+    private fun firstLineOf(ctx: Context, treeUri: Uri, ref: String): String? = try {
+        if (Zips.isGzRef(ref)) {
+            val uri = DocumentsContract.buildDocumentUriUsingTree(
+                treeUri, Zips.gzDocId(ref),
+            )
+            ctx.contentResolver.openInputStream(uri)?.use { ins ->
+                java.util.zip.GZIPInputStream(ins).bufferedReader(Charsets.UTF_8).use {
+                    it.readLine()
+                }
+            }
+        } else {
+            val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, ref)
+            ctx.contentResolver.openInputStream(uri)?.use { ins ->
+                val buf = ByteArray(2048)
+                val n = ins.read(buf)
+                if (n <= 0) null
+                else String(buf, 0, n, Charsets.UTF_8).lineSequence().firstOrNull()
+            }
+        }?.trim()?.ifEmpty { null }
+    } catch (e: Exception) { null }
 
     /* This chapter's picture, or the closest later chapter that has
        one — walk the book's order from here, skip every chapter
@@ -1393,10 +1523,10 @@ object ChapterImages {
         return true
     }
 
-    fun savedOf(chapter: String, uri: Uri, alt: String = ""): Saved {
+    fun savedOf(chapter: String, uri: Uri, alt: String = "", title: String = ""): Saved {
         val number = Scenes.chapterNumber(chapter) ?: Int.MAX_VALUE
         val label = if (number == Int.MAX_VALUE) Scenes.chapterStem(chapter) else number.toString()
-        return Saved(chapter, number, label, uri, altText(alt))
+        return Saved(chapter, number, label, uri, altText(alt), title.trim())
     }
 
     fun sortSaved(items: List<Saved>): List<Saved> =

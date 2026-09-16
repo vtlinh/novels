@@ -530,7 +530,9 @@ class ChapterListActivity : AppCompatActivity() {
             val edge = ((resources.displayMetrics.widthPixels - dp(12 + 12 + 14 + 14)) / cols)
                 .coerceAtLeast(dp(80))
             val thumbs = withContext(Dispatchers.IO) {
-                val items = ChapterImages.listSaved(this@ChapterListActivity, folder, dirName, slug)
+                val items = ChapterImages.listSavedForGallery(
+                    this@ChapterListActivity, folder, dirName, slug,
+                )
                 items.map { it to ChapterImages.thumb(this@ChapterListActivity, it.uri, edge) }
             }
             if (isFinishing || isDestroyed) return@launch
@@ -749,7 +751,7 @@ class ChapterListActivity : AppCompatActivity() {
                     if (current) android.view.View.VISIBLE else android.view.View.GONE
                 val name = allOrdered.getOrNull(winStart + position)
                 val pic = v.findViewById<ImageView>(R.id.chapterPictureBtn)
-                val hasPic = ChapterImagePreview.shouldShowButton(
+                val hasPic = ChapterImagePreview.shouldShowListButton(
                     name != null && pictured.contains(name),
                 )
                 pic.visibility =

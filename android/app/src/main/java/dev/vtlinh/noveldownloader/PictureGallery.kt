@@ -18,7 +18,8 @@ import kotlinx.coroutines.withContext
 
 /* Vertical list of chapter pictures. The reader toolbar opens this
    at the current chapter — or the closest later chapter that has a
-   picture. Each row is the picture with its title under it.
+   picture. Each row is the picture with the chapter number and
+   name, then the picture's own title, under it.
 
    This is a RecyclerView, not a ScrollView. Rows are bound as they
    come on screen; inserting above does not rewrite a pixel scroll
@@ -111,6 +112,7 @@ object PictureGallery {
             dp(120),
             boxW,
         )
+        val phH = ChapterImages.galleryPlaceholderH(boxW, slotH)
         val layout = object : LinearLayoutManager(activity) {
             override fun calculateExtraLayoutSpace(
                 state: RecyclerView.State,
@@ -134,7 +136,7 @@ object PictureGallery {
                 0,
                 1f,
             )
-            adapter = GalleryAdapter(activity, items, edge, dp, slotH)
+            adapter = GalleryAdapter(activity, items, edge, dp, boxW, slotH, phH)
         }
         overlay.addView(bar)
         overlay.addView(list)
@@ -143,7 +145,13 @@ object PictureGallery {
         host.addView(overlay)
         list.post {
             if (!list.isAttachedToWindow) return@post
-            val rowH = slotH + dp(16) + dp(28)
+            val startBmp = items[start].second
+            val imgH = if (startBmp != null) {
+                ChapterImages.galleryDrawnH(boxW, startBmp.width, startBmp.height, slotH)
+            } else {
+                phH
+            }
+            val rowH = imgH + dp(16) + dp(52)
             val offset = KeepVisible.centerOffset(list.height, rowH)
             layout.scrollToPositionWithOffset(start, offset)
         }
@@ -162,7 +170,9 @@ object PictureGallery {
         private val items: List<Pair<ChapterImages.Saved, Bitmap?>>,
         private val edge: Int,
         private val dp: (Int) -> Int,
+        private val boxW: Int,
         private val slotH: Int,
+        private val phH: Int,
     ) : RecyclerView.Adapter<Holder>() {
 
         private val thumbs = object : LinkedHashMap<String, Bitmap>(32, 0.75f, true) {
@@ -183,11 +193,12 @@ object PictureGallery {
                 )
             }
             val img = ImageView(activity).apply {
+                adjustViewBounds = true
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 setBackgroundColor(activity.getColor(R.color.card))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    slotH,
+                    phH,
                 )
             }
             val caption = TextView(activity).apply {
@@ -195,7 +206,7 @@ object PictureGallery {
                 setTextColor(activity.getColor(R.color.fg))
                 gravity = Gravity.CENTER
                 setLineSpacing(0f, 1.25f)
-                setPadding(0, dp(6), 0, 0)
+                setPadding(0, dp(8), 0, 0)
             }
             row.addView(img)
             row.addView(caption)
@@ -204,9 +215,7 @@ object PictureGallery {
 
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val (item, preview) = items[position]
-            val title = if (ChapterImages.showAlt(item.alt)) item.alt.trim()
-                else if (item.label.isNotEmpty()) "Chapter ${item.label}"
-                else item.chapter
+            val title = ChapterImages.galleryCaption(item)
             holder.chapter = item.chapter
             holder.caption.text = title
             holder.img.contentDescription = title
@@ -215,6 +224,7 @@ object PictureGallery {
                 show(holder.img, ready)
                 return
             }
+            size(holder.img, phH)
             holder.img.setImageBitmap(null)
             holder.img.setBackgroundColor(activity.getColor(R.color.card))
             val chapter = item.chapter
@@ -240,8 +250,17 @@ object PictureGallery {
         }
 
         private fun show(img: ImageView, bmp: Bitmap) {
+            val w = if (img.width > 0) img.width else boxW
+            size(img, ChapterImages.galleryDrawnH(w, bmp.width, bmp.height, slotH))
             img.setImageBitmap(bmp)
             img.setBackgroundColor(activity.getColor(R.color.bg))
+        }
+
+        private fun size(img: ImageView, h: Int) {
+            val lp = img.layoutParams
+            if (lp.height == h) return
+            lp.height = h
+            img.layoutParams = lp
         }
     }
 }
