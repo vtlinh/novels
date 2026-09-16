@@ -1233,6 +1233,26 @@ object ChapterImages {
     fun needsAltRefresh(hasImage: Boolean, storedAlt: String): Boolean =
         hasImage && !showAlt(storedAlt)
 
+    /* Chapter filenames whose row already has a picture path.
+       The list mark reads this with the listing — it does not
+       wait for gallery thumbs. */
+    fun picturedChapters(rows: List<ChapterImage>): Set<String> {
+        val out = LinkedHashSet<String>()
+        for (row in rows) {
+            if (row.chapter.isNotEmpty() && row.image.isNotEmpty()) out.add(row.chapter)
+        }
+        return out
+    }
+
+    fun picturedChapters(ctx: Context, folder: String, slug: String): Set<String> {
+        if (folder.isEmpty() || slug.isEmpty()) return emptySet()
+        return try {
+            picturedChapters(DownloadStore(ctx).chapterImages(folder, slug))
+        } catch (e: Exception) {
+            emptySet()
+        }
+    }
+
     /* Chapter rows with a picture path, lowest chapter number first.
        The database is the record — do not walk scenes/ or drop a row
        because a file query failed. */

@@ -645,6 +645,34 @@ class ChapterImagesTest {
         assertTrue(ChapterImages.showAlt(ChapterImages.altText(desc)))
     }
 
+    /* THE DEFECT. The chapter list waited for synopsis-grid thumbs
+       before showing the picture mark. The mark is the image column
+       on the chapter row — the same read as the listing. */
+    @Test
+    fun `picture marks come from the chapter row image column`() {
+        val rows = listOf(
+            ChapterImage("Chapter 1.txt", "scenes/Chapter 1.png"),
+            ChapterImage("Chapter 2.txt", ""),
+            ChapterImage("Chapter 21.txt", "scenes/Chapter 21.png", "A lantern"),
+            ChapterImage("", "orphan.png"),
+        )
+        assertEquals(
+            setOf("Chapter 1.txt", "Chapter 21.txt"),
+            ChapterImages.picturedChapters(rows),
+        )
+        assertEquals(emptySet<String>(), ChapterImages.picturedChapters(emptyList()))
+        assertTrue(
+            ChapterImagePreview.shouldShowListButton(
+                ChapterImages.picturedChapters(rows).contains("Chapter 1.txt"),
+            ),
+        )
+        assertFalse(
+            ChapterImagePreview.shouldShowListButton(
+                ChapterImages.picturedChapters(rows).contains("Chapter 2.txt"),
+            ),
+        )
+    }
+
     @Test
     fun `synopsis grid sorts pictures by chapter number`() {
         val names = listOf("Chapter 400.txt", "Chapter 374.txt", "Chapter 10.txt", "notes.txt")

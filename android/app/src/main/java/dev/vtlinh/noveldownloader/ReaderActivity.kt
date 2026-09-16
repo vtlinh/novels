@@ -104,9 +104,8 @@ class ReaderActivity : AppCompatActivity() {
 
     private var currentChapterIdx = -1
     private var drawerAdapter: ArrayAdapter<String>? = null
-    /* Chapter filenames that have a saved picture — the drawer
-       row button opens that picture. Empty until the listing
-       is read. */
+    /* Chapter filenames that have a picture on the chapter row.
+       Filled with the listing, not a second lookup. */
     private var pictured = emptySet<String>()
 
     /* (chapter index, paragraph within it) a language reload should keep.
@@ -321,9 +320,9 @@ class ReaderActivity : AppCompatActivity() {
                 return@launch
             }
             chapters = fresh
+            pictured = fresh.pictured
             drawerAdapter?.clear()
             drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
-            refreshPictured()
             drawerAdapter?.notifyDataSetChanged()
             for (lc in loadedChapters) lc.idx += d
             if (currentChapterIdx >= 0) currentChapterIdx += d
@@ -554,7 +553,7 @@ class ReaderActivity : AppCompatActivity() {
                     )
                 }
             }
-            refreshPictured()
+            pictured = ch.pictured
             /* inline chapter list in the right drawer, current one highlighted */
             drawerAdapter = object : ArrayAdapter<String>(
                 this@ReaderActivity, R.layout.item_chapter, R.id.chapterLabel,
@@ -3121,22 +3120,6 @@ class ReaderActivity : AppCompatActivity() {
         pictureBtn.visibility = if (show) android.view.View.VISIBLE else android.view.View.GONE
     }
 
-    /* Filenames that have a picture on disk. The drawer uses this
-       so only those rows show the picture button. */
-    private suspend fun refreshPictured() {
-        if (asDocument()) {
-            pictured = emptySet()
-            return
-        }
-        val folder = prefs.getString("tree", null) ?: return
-        val dir = intent.getStringExtra("dir") ?: return
-        val slug = intent.getStringExtra("slug") ?: return
-        pictured = withContext(Dispatchers.IO) {
-            ChapterImages.listSaved(this@ReaderActivity, folder, dir, slug)
-                .map { it.chapter }.toSet()
-        }
-    }
-
     /* Toolbar button: the picture for this chapter, or the closest
        later chapter that has one, in a vertical list. Auto-open
        still only shows the picture that belongs to this chapter. */
@@ -3719,12 +3702,12 @@ class ReaderActivity : AppCompatActivity() {
                 old.ordered.indices.all { fresh.ordered[it] == old.ordered[it] }
             ) {
                 chapters = fresh
+                pictured = fresh.pictured
                 /* adopted: re-arm at once, so a live download is followed
                    batch after batch without waiting out the interval */
                 lastRelistAt = 0L
                 drawerAdapter?.clear()
                 drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
-                refreshPictured()
                 drawerAdapter?.notifyDataSetChanged()
             }
             onDone()

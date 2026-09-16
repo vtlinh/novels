@@ -40,6 +40,7 @@ class ChapterListActivity : AppCompatActivity() {
             val ordered: List<String>,               // chapter filenames in order
             val source: Map<String, String>,         // name -> docId or gz ref
             val translated: Map<String, String>,     // name -> docId or gz ref
+            val pictured: Set<String> = emptySet(),  // filenames with a picture on the row
         )
 
         /* does this docId still resolve? one single-row query — the cheap
@@ -88,6 +89,10 @@ class ChapterListActivity : AppCompatActivity() {
             val cr = context.contentResolver
             val folder = treeUri.toString()
             val store = if (slug != null) DownloadStore(context) else null
+            /* Same chapter rows the listing already keys off. The
+               picture mark is the image column — do not wait for the
+               synopsis-grid thumbs. */
+            val pictured = ChapterImages.picturedChapters(context, folder, slug ?: "")
             if (slug != null && store != null) {
                 val cached = try { store.getChapterList(folder, slug) } catch (e: Exception) { null }
                 if (cached != null) {
@@ -117,7 +122,7 @@ class ChapterListActivity : AppCompatActivity() {
                         Folder.cacheValid(
                             cached.ordered, cached.source, CACHE_PROBES,
                         ) { ref -> refUsable(cr, treeUri, ref) }
-                    if (ok) return Chapters(cached.ordered, cached.source, cached.translated)
+                    if (ok) return Chapters(cached.ordered, cached.source, cached.translated, pictured)
                     try { store.clearChapterList(folder, slug) } catch (e: Exception) {}
                 }
             }
@@ -129,7 +134,7 @@ class ChapterListActivity : AppCompatActivity() {
             val epoch = if (store != null && slug != null) store.chapterListEpoch(folder, slug) else -1L
             val dirs = Saf.children(cr, treeUri, Saf.rootId(treeUri))
             val dir = dirs.firstOrNull { it.isDir && it.name == dirName }
-                ?: return Chapters(emptyList(), emptyMap(), emptyMap())
+                ?: return Chapters(emptyList(), emptyMap(), emptyMap(), pictured)
             /* The rules for what a folder holds live in Folder, which has no
                Android in it — see FolderTest. Three defects in as many
                releases came out of reasoning about them in place, and SAF
@@ -168,7 +173,7 @@ class ChapterListActivity : AppCompatActivity() {
                     )
                 } catch (e: Exception) {}
             }
-            return Chapters(ordered, source, translated)
+            return Chapters(ordered, source, translated, pictured)
         }
     }
 
@@ -515,8 +520,9 @@ class ChapterListActivity : AppCompatActivity() {
     }
 
     /* Pictures under the synopsis, chapter number ascending. Rows come
-       from chapter_image — not a listing of scenes/. A tap expands the
-       picture; it does not open the chapter. */
+       from the chapter image column — not a listing of scenes/. A tap
+       expands the picture; it does not open the chapter. The list
+       marks are already filled from that same column in load(). */
     private fun bindSceneGrid() {
         val grid = findViewById<android.widget.LinearLayout>(R.id.sceneGrid)
         val folder = getSharedPreferences("app", MODE_PRIVATE).getString("tree", null)
@@ -540,8 +546,6 @@ class ChapterListActivity : AppCompatActivity() {
                 items.map { it to ChapterImages.thumb(this@ChapterListActivity, it.uri, edge) }
             }
             if (isFinishing || isDestroyed) return@launch
-            pictured = thumbs.map { it.first.chapter }.toSet()
-            listAdapter?.notifyDataSetChanged()
             grid.removeAllViews()
             if (thumbs.isEmpty()) {
                 grid.visibility = android.view.View.GONE
@@ -670,8 +674,8 @@ class ChapterListActivity : AppCompatActivity() {
        grow toward chapter 1 and steal the jump — see ChapterListFocus. */
     private var settling = false
     private var listAdapter: ArrayAdapter<String>? = null
-    /* Chapter filenames that have a saved picture — the row button
-       opens that picture in a dialog. */
+    /* Chapter filenames that have a picture on the chapter row.
+       Filled with the listing, not after the synopsis-grid thumbs. */
     private var pictured = emptySet<String>()
 
     /* While this novel is downloading, fold newly saved chapters in as they
@@ -899,6 +903,7 @@ class ChapterListActivity : AppCompatActivity() {
                 showContinue(false)
                 return@launch
             }
+            pictured = chapters.pictured
             val ordered = chapters.ordered.let {
                 if (prefs.getBoolean(descKey, false)) it.reversed() else it
             }
