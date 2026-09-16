@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Scroll through chapters more smoothly
+	Keep the reading page from crashing when more chapters load
+1.38.13	Scroll through chapters more smoothly
 1.38.12	Show picture marks as soon as the chapter list opens
 1.38.11	Open a pictured chapter from its name, not only the picture mark
 1.38.10	Only show a picture mark on chapters that have a picture
