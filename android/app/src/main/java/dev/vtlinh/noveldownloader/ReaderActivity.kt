@@ -494,6 +494,24 @@ class ReaderActivity : AppCompatActivity() {
                 extraLayoutSpace[0] = extra
                 extraLayoutSpace[1] = extra
             }
+
+            /* A tap focuses the chapter row. The row is taller than the
+               page, so the default bring-into-view jumps to the chapter
+               start. See ReaderFocus. */
+            override fun requestChildRectangleOnScreen(
+                parent: RecyclerView,
+                child: android.view.View,
+                rect: android.graphics.Rect,
+                immediate: Boolean,
+                focusedChildVisible: Boolean,
+            ): Boolean {
+                if (!ReaderFocus.honorBringIntoView(child.top, child.height, height)) {
+                    return false
+                }
+                return super.requestChildRectangleOnScreen(
+                    parent, child, rect, immediate, focusedChildVisible,
+                )
+            }
         }
         readerAdapter = ReaderAdapter()
         list.layoutManager = listLm
