@@ -16,6 +16,33 @@ class ReaderTextTest {
     private val ch51 = "Chapter 51\nThe next book begins."
     private val bodies = listOf(ch49, ch50, ch51)
 
+    /* THE DEFECT. "No. 12" is a number. The period+space rule treated
+       the abbreviation as a sentence end, so TTS was handed "No."
+       alone and said "no". */
+    @Test
+    fun `No-dot before a number stays one sentence`() {
+        val body = "No. 12 was waiting at the door."
+        val s = ReaderText.nextSentence(body, 0)
+            ?: throw AssertionError("expected a sentence")
+        assertEquals(body, body.substring(s.first, s.second))
+    }
+
+    @Test
+    fun `No-dot mid-sentence before a number stays with its sentence`() {
+        val body = "Room No. 5 is locked."
+        val s = ReaderText.nextSentence(body, 0)
+            ?: throw AssertionError("expected a sentence")
+        assertEquals(body, body.substring(s.first, s.second))
+    }
+
+    @Test
+    fun `a real sentence end before a number still splits`() {
+        val body = "Hello. 12 was waiting at the door."
+        val s = ReaderText.nextSentence(body, 0)
+            ?: throw AssertionError("expected a sentence")
+        assertEquals("Hello.", body.substring(s.first, s.second).trim())
+    }
+
     @Test
     fun `a tap in the middle of a sentence starts at that sentence`() {
         val off = ch50.indexOf("continues")
