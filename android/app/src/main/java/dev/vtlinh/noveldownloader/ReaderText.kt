@@ -28,9 +28,10 @@ object ReaderText {
 
     /* Next sentence at/after `from`: bounded by paragraph breaks, split
        on terminator punctuation followed by a space (so "3.5" stays
-       intact). Leading newlines, spaces, the old ⁂ mark and the picture
-       placeholder are skipped so a tap on one of those still starts on
-       real words. */
+       intact). "No. 12" is a number, not a sentence end — splitting
+       there handed TTS "No." alone, which it read as "no". Leading
+       newlines, spaces, the old ⁂ mark and the picture placeholder are
+       skipped so a tap on one of those still starts on real words. */
     fun nextSentence(body: CharSequence, from: Int): Pair<Int, Int>? {
         var i = from.coerceAtLeast(0)
         while (i < body.length &&
@@ -52,13 +53,30 @@ object ReaderText {
                     k++
                 }
                 if (k >= body.length || body[k] == ' ' || body[k] == '\n') {
-                    j = k
-                    break
+                    if (!(c == '.' && isNumberAbbrev(body, j, k))) {
+                        j = k
+                        break
+                    }
                 }
             }
             j++
         }
         return Pair(i, j.coerceAtMost(body.length))
+    }
+
+    /* The abbreviation "No." followed by a digit. The speech-edit that
+       rewrites it to "number 12" has to see both halves in one sentence. */
+    private fun isNumberAbbrev(body: CharSequence, period: Int, after: Int): Boolean {
+        if (period < 2) return false
+        if (!body[period - 1].equals('o', ignoreCase = true)) return false
+        if (!body[period - 2].equals('n', ignoreCase = true)) return false
+        if (period >= 3) {
+            val prev = body[period - 3]
+            if (prev.isLetterOrDigit() || prev == '_') return false
+        }
+        var i = after
+        while (i < body.length && (body[i] == ' ' || body[i] == '\n')) i++
+        return i < body.length && body[i] in '0'..'9'
     }
 
     /* Start of the sentence containing `off`. A tap in the middle of a

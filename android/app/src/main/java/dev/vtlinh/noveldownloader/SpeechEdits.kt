@@ -77,7 +77,7 @@ object SpeechEdits {
             d("Silence links", "(([\\w-]+://?|www[.])[^\\s()<>]+(?:\\([\\w\\d]+\\)|([^\\p{Punct}\\s]|/)))", ""),
             d("Silence emojis", EMOJI, ""),
             d("Remove ellipsis at start", SpeechText.LEADING_ELLIPSIS, ""),
-            d("", "(?i)\\b(no\\.)(\\s+[0-9])", "number$2"),
+            d("", "(?i)\\bNo\\.\\s*(\\d+)", "number $1"),
             d("", "(?i)\\b((no)\\.)(\\s+[^0-9]|\\s*$)", "$2; $3"),
             d("", "\\bMr\\.\\s", "Mister "),
             d("", "\\bMrs\\.", "Mrs"),
