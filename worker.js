@@ -51,6 +51,7 @@ const SITES = new RegExp(
       "(www\\.)?novellive\\.app",
       "(www\\.)?freewebnovel\\.com",
       "(www\\.)?vivutruyen2\\.net",
+      "(www\\.)?americanliterature\\.com",
     ].join("|") +
     ")/",
   "i",

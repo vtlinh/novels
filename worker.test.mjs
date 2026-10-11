@@ -81,6 +81,7 @@ await check("a host outside the allowlist is refused, token or not", async () =>
     /* the sister host without the 2 is a different site with its own
        catalogue — nothing here has been measured against it */
     "https://vivutruyen.net/x/",
+    "https://americanliterature.com.evil.com/x",
   ]) {
     const r = await call("/?url=" + encodeURIComponent(u) + "&token=" + ENV.FETCH_TOKEN);
     eq(r.status, 403, "status for " + u);
@@ -117,6 +118,8 @@ await check("every allowlisted novel host is reachable", async () => {
     "https://www.freewebnovel.com/x.html",
     "https://vivutruyen2.net/x/",
     "https://www.vivutruyen2.net/x/",
+    "https://americanliterature.com/author/x/book/y",
+    "https://www.americanliterature.com/author/x/book/y",
   ]) {
     const r = await call("/?url=" + encodeURIComponent(u) + "&token=" + ENV.FETCH_TOKEN);
     eq(r.status, 200, "status for " + u);

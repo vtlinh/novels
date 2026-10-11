@@ -59,6 +59,14 @@ interface Site {
        most of the novel would then be invisible. */
     fun isChapterInList(path: String, slug: String): Boolean = isChapterPath(path, slug)
 
+    /* Asked of each link INSIDE the chapter-list container, before the url
+       rules: is this link one of the listing's own entries? A url cannot
+       always tell. americanliterature.com files a "PART I" section heading
+       at a url shaped exactly like a chapter's, and its page has no text, so
+       collected as a chapter it fails to save on every run — but the site
+       marks the entry as a section in the markup itself. */
+    fun inListing(a: Element): Boolean = true
+
     /* the number the SITE prints for this chapter, if its url says. Null is a
        fine answer — the caller falls back to the chapter's position in the
        listing, which is the site's real answer anyway. */
@@ -78,6 +86,14 @@ interface Site {
        them, and a site that declares it never paginates must never show a
        fixture that does. */
     val paginates: Boolean get() = true
+
+    /* Whether this site carries novels still being written. The serial
+       sites all do; americanliterature.com is a library of published books,
+       every one of them finished. The corpus sweep holds this both ways, as
+       it does `paginates`: a site carrying unfinished work must have been
+       captured with some among its pages, and a site that declares it
+       carries none must never read a captured novel as unfinished. */
+    val publishesUnfinished: Boolean get() = true
 
     /* The listing runs NEWEST-FIRST on this site, so reading it in document
        order is reading the novel backwards. Positions name files, so this is

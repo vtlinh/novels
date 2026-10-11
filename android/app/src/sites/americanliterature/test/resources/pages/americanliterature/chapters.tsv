@@ -1,0 +1,43 @@
+# Chapter pages, unedited, from the same Wayback raw replays as manifest.tsv
+# and on the current template only (.chapter-page-wrapper). One per book, 33
+# books, picked from the chapters the archive holds a current capture of:
+# first, middle and last chapters of books from 1 chapter to 181.
+# content_chars is the whitespace-collapsed visible text of the site's own
+# chapter container (article.chapter-content), and heading_number the number
+# its heading prints after "Chapter"/"Ch." (arabic or roman; blank when the
+# heading opens with anything else) — both measured by a separate bs4/lxml
+# script, NOT by Extractor, so the tests cross-check the parser rather than
+# echo it.
+americanliterature	americanliterature/chapters/alexandre-dumas__the-count-of-monte-cristo__chapter-117-the-fifth-of-october.html	https://americanliterature.com/author/alexandre-dumas/book/the-count-of-monte-cristo/chapter-117-the-fifth-of-october	the-count-of-monte-cristo	last	117	27517	1	true
+americanliterature	americanliterature/chapters/algernon-blackwood__the-wendigo__chapter-5.html	https://americanliterature.com/author/algernon-blackwood/book/the-wendigo/chapter-5	the-wendigo	mid	5	9429	1	true
+americanliterature	americanliterature/chapters/ambrose-bierce__fantastic-fables__alarm-and-pride.html	https://americanliterature.com/author/ambrose-bierce/book/fantastic-fables/alarm-and-pride	fantastic-fables	first		716	1	true
+americanliterature	americanliterature/chapters/arthur-machen__the-white-people__the-green-book.html	https://americanliterature.com/author/arthur-machen/book/the-white-people/the-green-book	the-white-people	mid		66165	1	true
+americanliterature	americanliterature/chapters/charlotte-bronte__jane-eyre__chapter-xx.html	https://americanliterature.com/author/charlotte-bronte/book/jane-eyre/chapter-xx	jane-eyre	mid	20	31971	1	true
+americanliterature	americanliterature/chapters/edgar-rice-burroughs__the-land-that-time-forgot__chapter-i.html	https://americanliterature.com/author/edgar-rice-burroughs/book/the-land-that-time-forgot/chapter-i	the-land-that-time-forgot	first	1	18385	1	true
+americanliterature	americanliterature/chapters/edith-wharton__ethan-frome__introduction.html	https://americanliterature.com/author/edith-wharton/book/ethan-frome/introduction	ethan-frome	first		5808	1	true
+americanliterature	americanliterature/chapters/edith-wharton__the-house-of-mirth__book-1-chapter-15.html	https://americanliterature.com/author/edith-wharton/book/the-house-of-mirth/book-1-chapter-15	the-house-of-mirth	mid		27630	1	true
+americanliterature	americanliterature/chapters/f-scott-fitzgerald__the-great-gatsby__chapter-9.html	https://americanliterature.com/author/f-scott-fitzgerald/book/the-great-gatsby/chapter-9	the-great-gatsby	last	9	28100	1	true
+americanliterature	americanliterature/chapters/franz-kafka__the-metamorphosis__chapter-ii.html	https://americanliterature.com/author/franz-kafka/book/the-metamorphosis/chapter-ii	the-metamorphosis	mid	2	39580	1	true
+americanliterature	americanliterature/chapters/fyodor-dostoevsky__the-brothers-karamazov__book-v-pro-and-contra-chapter-4.html	https://americanliterature.com/author/fyodor-dostoevsky/book/the-brothers-karamazov/book-v-pro-and-contra-chapter-4	the-brothers-karamazov	mid	4	27086	1	true
+americanliterature	americanliterature/chapters/gustave-flaubert__madame-bovary__part-i-chapter-three.html	https://americanliterature.com/author/gustave-flaubert/book/madame-bovary/part-i-chapter-three	madame-bovary	mid		11237	1	true
+americanliterature	americanliterature/chapters/herman-melville__moby-dick-or-the-whale__chapter-61-stubb-kills-a-whale.html	https://americanliterature.com/author/herman-melville/book/moby-dick-or-the-whale/chapter-61-stubb-kills-a-whale	moby-dick-or-the-whale	mid	61	11170	1	true
+americanliterature	americanliterature/chapters/hermann-hesse__siddhartha__the-ferryman.html	https://americanliterature.com/author/hermann-hesse/book/siddhartha/the-ferryman	siddhartha	mid		23336	1	true
+americanliterature	americanliterature/chapters/hg-wells__the-war-of-the-worlds__book-i-in-london.html	https://americanliterature.com/author/hg-wells/book/the-war-of-the-worlds/book-i-in-london	the-war-of-the-worlds	mid		22002	1	true
+americanliterature	americanliterature/chapters/homer__the-iliad__book-13-battlefield.html	https://americanliterature.com/author/homer/book/the-iliad/book-13-battlefield	the-iliad	mid		52406	1	true
+americanliterature	americanliterature/chapters/honore-de-balzac__father-goriot__dedication.html	https://americanliterature.com/author/honore-de-balzac/book/father-goriot/dedication	father-goriot	first		159	1	true
+americanliterature	americanliterature/chapters/jack-london__the-call-of-the-wild__chapter-1-into-the-primitive.html	https://americanliterature.com/author/jack-london/book/the-call-of-the-wild/chapter-1-into-the-primitive	the-call-of-the-wild	first	1	9740	1	true
+americanliterature	americanliterature/chapters/jack-london__the-scarlet-plague__chapter-vi.html	https://americanliterature.com/author/jack-london/novella/the-scarlet-plague/chapter-vi	the-scarlet-plague	last	6	13606	1	true
+americanliterature	americanliterature/chapters/james-boswell__the-life-of-samuel-johnson__newcastle-aug-11-1773.html	https://americanliterature.com/author/james-boswell/book/the-life-of-samuel-johnson/newcastle-aug-11-1773	the-life-of-samuel-johnson	mid		156657	1	true
+americanliterature	americanliterature/chapters/kate-chopin__the-awakening__chapter-xxxix.html	https://americanliterature.com/author/kate-chopin/book/the-awakening/chapter-xxxix	the-awakening	last	39	8206	1	true
+americanliterature	americanliterature/chapters/mark-twain__the-adventures-of-huckleberry-finn__chapter-27.html	https://americanliterature.com/author/mark-twain/book/the-adventures-of-huckleberry-finn/chapter-27	the-adventures-of-huckleberry-finn	mid	27	13689	1	true
+americanliterature	americanliterature/chapters/mary-roberts-rinehart__the-circular-staircase__chapter-i.html	https://americanliterature.com/author/mary-roberts-rinehart/book/the-circular-staircase/chapter-i	the-circular-staircase	first	1	13970	1	true
+americanliterature	americanliterature/chapters/nathaniel-hawthorne__the-scarlet-letter__xviii-a-flood-of-sunshine.html	https://americanliterature.com/author/nathaniel-hawthorne/book/the-scarlet-letter/xviii-a-flood-of-sunshine	the-scarlet-letter	mid		12121	1	true
+americanliterature	americanliterature/chapters/oscar-wilde__the-picture-of-dorian-gray__the-preface.html	https://americanliterature.com/author/oscar-wilde/book/the-picture-of-dorian-gray/the-preface	the-picture-of-dorian-gray	first		2122	1	true
+americanliterature	americanliterature/chapters/robert-hugh-benson__lord-of-the-world__book-ii-chapter-v.html	https://americanliterature.com/author/robert-hugh-benson/book/lord-of-the-world/book-ii-chapter-v	lord-of-the-world	mid		27312	1	true
+americanliterature	americanliterature/chapters/robert-w-chambers__the-king-in-yellow__the-repairer-of-reputations.html	https://americanliterature.com/author/robert-w-chambers/book/the-king-in-yellow/the-repairer-of-reputations	the-king-in-yellow	first		68066	1	true
+americanliterature	americanliterature/chapters/sir-arthur-conan-doyle__a-study-in-scarlet__chapter-ii-the-science-of-deduction.html	https://americanliterature.com/author/sir-arthur-conan-doyle/book/a-study-in-scarlet/chapter-ii-the-science-of-deduction	a-study-in-scarlet	mid	2	19877	1	true
+americanliterature	americanliterature/chapters/stephen-leacock__sunshine-sketches-of-a-little-town__ten-the-great-election-in-missinaba-county.html	https://americanliterature.com/author/stephen-leacock/book/sunshine-sketches-of-a-little-town/ten-the-great-election-in-missinaba-county	sunshine-sketches-of-a-little-town	mid		21880	1	true
+americanliterature	americanliterature/chapters/theodore-dreiser__sister-carrie__chapter-v.html	https://americanliterature.com/author/theodore-dreiser/book/sister-carrie/chapter-v	sister-carrie	mid	5	14164	1	true
+americanliterature	americanliterature/chapters/ulysses-s-grant__personal-memoirs-of-us-grant__chapter-v.html	https://americanliterature.com/author/ulysses-s-grant/book/personal-memoirs-of-us-grant/chapter-v	personal-memoirs-of-us-grant	mid	5	13332	1	true
+americanliterature	americanliterature/chapters/virginia-woolf__a-room-of-ones-own__chapter-1.html	https://americanliterature.com/author/virginia-woolf/book/a-room-of-ones-own/chapter-1	a-room-of-ones-own	first	1	20354	1	true
+americanliterature	americanliterature/chapters/wilkie-collins__the-moonstone__chapter-xx.html	https://americanliterature.com/author/wilkie-collins/book/the-moonstone/chapter-xx	the-moonstone	mid	20	27083	1	true
