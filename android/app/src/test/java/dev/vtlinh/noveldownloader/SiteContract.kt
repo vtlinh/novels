@@ -248,13 +248,22 @@ abstract class SiteContract {
 
     /* ---- chapter pages ---- */
 
+    /* Judged against the container's size as measured at capture time, not
+       a fixed floor: a book's dedication is a real chapter of 116
+       characters (americanliterature's Father Goriot), and a floor of 200
+       would have called it empty. */
     @Test
     fun `every captured chapter page yields its prose`() {
         for (r in chapters) {
             val doc = Jsoup.parse(page(r[1]), r[2])
             val el = site.chapterContent(doc)
             assertNotNull("${r[1]}: no chapter container found", el)
-            assertTrue("${r[1]}: chapter container is empty", el!!.text().trim().length > 200)
+            val len = el!!.text().trim().length
+            assertTrue("${r[1]}: chapter container is empty", len > 0)
+            assertTrue(
+                "${r[1]}: chapter container holds $len chars of the ${r[6]} measured",
+                len >= r[6].toInt() / 2,
+            )
         }
     }
 

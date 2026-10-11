@@ -170,6 +170,7 @@ object Listing {
         fun scan(root: org.jsoup.nodes.Element, inList: Boolean): List<Link> {
             val out = ArrayList<Link>()
             for (a in root.select("a[href]")) {
+                if (inList && !site.inListing(a)) continue
                 val href = a.absUrl("href").substringBefore('#')
                 if (href.isEmpty()) continue
                 val path = pathOf(href) ?: continue

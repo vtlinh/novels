@@ -94,8 +94,23 @@ class RealPageTest {
                novelfull is served from both .com and .net */
             assertTrue("100+ novel pages captured for $name, got ${mine.size}", mine.size >= 100)
             assertTrue("$name: some finished", mine.any { it.completed == true })
-            assertTrue("$name: some ongoing", mine.any { it.completed == false })
             assertTrue("$name: some short", mine.any { (it.maxPage ?: 1) <= 3 })
+            /* Ongoing is a site's shape too, and not every site has it: a
+               library of published books has nothing unfinished to capture.
+               Held both ways, like `paginates` below. */
+            val site = Sites.all.first { it.name == name }
+            if (site.publishesUnfinished) {
+                assertTrue("$name: some ongoing", mine.any { it.completed == false })
+            } else {
+                for (f in mine) {
+                    assertEquals(
+                        "${f.file}: the site declares it carries only finished books, " +
+                            "but this fixture was measured as unfinished",
+                        true,
+                        f.completed,
+                    )
+                }
+            }
             /* A corpus owes the site's own shapes, and "long" is not one of
                them everywhere: vivutruyen2 is a short-story catalogue whose
                ~17,900 novels top out around eight chapters on one listing
@@ -104,7 +119,6 @@ class RealPageTest {
                the corpus both ways — a paginating site must have been
                captured with long novels among its pages, and a site claiming
                it never paginates must never show a fixture that does. */
-            val site = Sites.all.first { it.name == name }
             if (site.paginates) {
                 assertTrue("$name: some very long", mine.any { (it.maxPage ?: 1) >= 30 })
             } else {
