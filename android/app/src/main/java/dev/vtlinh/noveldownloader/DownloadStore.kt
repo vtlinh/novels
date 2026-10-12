@@ -51,7 +51,7 @@ data class NovelRec(
     val source: String = "",
     val description: String = "",
     val statusLabel: String = "",
-    /* TTS language pin: null follows the chapter text, "en" / "vi" forces it */
+    /* TTS language pin: null follows the chapter text, one of Voices.LANGS forces it */
     val ttsLang: String? = null,
 )
 

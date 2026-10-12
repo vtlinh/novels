@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
-import java.util.Locale
 
 /* Loads Google TTS when the app comes to the foreground — the same
    lifecycle as the self-updater.
@@ -90,13 +89,12 @@ object TtsWarmup {
                 }
                 return@OnInitListener
             }
-            /* Asking for the two languages we speak is what makes the
+            /* Asking for every language we speak is what makes the
                engine start downloading voice data it has not yet loaded —
                the same kick opening the system TTS settings gives, without
                opening that screen. */
             try {
-                engine?.setLanguage(Locale.US)
-                engine?.setLanguage(Locale("vi", "VN"))
+                for (lang in Voices.LANGS) engine?.setLanguage(Voices.localeFor(lang))
             } catch (e: Exception) {}
             handler.removeCallbacks(poll)
             handler.post(poll)

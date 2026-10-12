@@ -73,7 +73,7 @@ object Schema {
             "disk_bytes INTEGER DEFAULT -1, " +
             "disk_stamp_dir TEXT DEFAULT '', disk_stamp_tr TEXT DEFAULT '', " +
             /* Which language TTS should speak this novel in. Empty follows
-               the chapter text (Voices.detect); "en" / "vi" pins it. A
+               the chapter text (Voices.detect); one of Voices.LANGS pins it. A
                library is mostly one language per site and the odd novel
                is the exception — the same shape as `translate`. */
             "tts_lang TEXT DEFAULT '', " +

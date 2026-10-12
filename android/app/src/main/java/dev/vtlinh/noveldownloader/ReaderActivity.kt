@@ -394,7 +394,7 @@ class ReaderActivity : AppCompatActivity() {
     /* true while playSilentUtterance is the current utterance: its onDone
        must speak the next sentence, not insert another pause. */
     private var awaitingSilence = false
-    private var curTtsLang = ""        // language profile currently applied ("en"/"vi")
+    private var curTtsLang = ""        // language profile currently applied (one of Voices.LANGS)
     /* Per-novel pin from NovelSettings. Null is Auto — judge the chapter. */
     private var novelTtsLang: String? = null
     private var curSentRow = -1
@@ -1049,12 +1049,11 @@ class ReaderActivity : AppCompatActivity() {
                 /* speak as MEDIA/SPEECH so the system routes and ducks this
                    like any other player (and silences it during a call) */
                 try { tts?.setAudioAttributes(ttsAudioAttributes()) } catch (e: Exception) {}
-                /* Kick voice-data load for both profiles we speak, the same
+                /* Kick voice-data load for every profile we speak, the same
                    ask TtsWarmup makes on foreground. applyTtsConfig then
                    picks the one this chapter wants. */
                 try {
-                    tts?.setLanguage(java.util.Locale.US)
-                    tts?.setLanguage(java.util.Locale("vi", "VN"))
+                    for (lang in Voices.LANGS) tts?.setLanguage(Voices.localeFor(lang))
                 } catch (e: Exception) {}
                 curTtsLang = ""   // re-apply the language profile on next speak
                 /* Connected is not ready: voices load after OnInit. Keep the
@@ -1151,13 +1150,6 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /* The locale a language profile speaks in. One definition, because the
-       voice filter, the note that explains an empty filter and the fallback
-       applied when no voice is picked all have to mean the same thing by
-       "vi". */
-    private fun localeFor(lang: String): java.util.Locale =
-        if (lang == "vi") java.util.Locale("vi", "VN") else java.util.Locale.US
-
     /* Is this a voice that renders on Google's servers rather than here?
 
        The engine's own answer first, the name as a backstop — see
@@ -1201,7 +1193,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun noVoiceNote(lang: String): String {
         val name = Voices.nameOf(lang)
         val why = when (
-            try { tts?.isLanguageAvailable(localeFor(lang)) } catch (e: Exception) { null }
+            try { tts?.isLanguageAvailable(Voices.localeFor(lang)) } catch (e: Exception) { null }
         ) {
             android.speech.tts.TextToSpeech.LANG_MISSING_DATA ->
                 "$name voice data isn't installed — Android TTS settings below, " +
@@ -1246,7 +1238,7 @@ class ReaderActivity : AppCompatActivity() {
         if (v != null) {
             t.voice = v
         } else {
-            t.language = localeFor(lang)
+            t.language = Voices.localeFor(lang)
         }
     }
 
@@ -2619,7 +2611,7 @@ class ReaderActivity : AppCompatActivity() {
            The language is named once in the header, not on every row. */
         var lang = profileLang()
         val heading = TextView(ctx).apply {
-            text = "TTS — " + if (lang == "vi") "Tiếng Việt" else "English"
+            text = "TTS — " + Voices.ownNameOf(lang)
             textSize = 15f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(getColor(R.color.fg))
@@ -2627,21 +2619,15 @@ class ReaderActivity : AppCompatActivity() {
         }
         root.addView(heading)
         fun retitle() {
-            heading.text = "TTS — " + if (lang == "vi") "Tiếng Việt" else "English"
+            heading.text = "TTS — " + Voices.ownNameOf(lang)
         }
         val langSpinner = if (asDocument()) null else android.widget.Spinner(ctx).also { spin ->
             root.addView(label("Language"))
             spin.adapter = android.widget.ArrayAdapter(
                 ctx, android.R.layout.simple_spinner_dropdown_item,
-                listOf("Auto (from the text)", "English", "Vietnamese"),
+                Voices.PICKER,
             )
-            spin.setSelection(
-                when (novelTtsLang) {
-                    "en" -> 1
-                    "vi" -> 2
-                    else -> 0
-                },
-            )
+            spin.setSelection(Voices.pickerPosition(novelTtsLang))
             root.addView(spin)
         }
 
@@ -2682,13 +2668,7 @@ class ReaderActivity : AppCompatActivity() {
                     ) {
                         if (!langPicked) return
                         langPicked = false
-                        persistTtsLang(
-                            when (pos) {
-                                1 -> "en"
-                                2 -> "vi"
-                                else -> null
-                            },
-                        )
+                        persistTtsLang(Voices.pickerLang(pos))
                         curTtsLang = ""
                         lang = profileLang()
                         retitle()
