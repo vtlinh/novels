@@ -48,6 +48,9 @@ object Americanliterature : Site {
        under whatever that burst crossed; a 429 even so doubles it (Pace). */
     override val requestGapMs = 1_500L
 
+    /* The front page is short stories and poems; the books are here. */
+    override val startPath = "/books/"
+
     private val urlRe = Regex("^https://(www\\.)?americanliterature\\.com(/|$)", RegexOption.IGNORE_CASE)
 
     override fun matches(url: String) = urlRe.containsMatchIn(url.trim())

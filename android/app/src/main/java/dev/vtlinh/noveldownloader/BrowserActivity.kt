@@ -159,12 +159,13 @@ class BrowserActivity : AppCompatActivity() {
         val urlEdit = findViewById<EditText>(R.id.browseUrl)
         val downloadBtn = findViewById<Button>(R.id.browseDownload)
 
-        /* always open at the domain level: the front page of the site the
+        /* always open at the site level: the start page of the site the
            saved URL belongs to, or the default site */
         val saved = prefs.getString("url", "") ?: ""
         val start = try {
             val u = java.net.URI(saved)
-            if (Sites.forUrl(saved) != null && u.host != null) "${u.scheme}://${u.host}/"
+            val site = Sites.forUrl(saved)
+            if (site != null && u.host != null) "${u.scheme}://${u.host}${site.startPath}"
             else "https://truyenfull.today/"
         } catch (e: Exception) { "https://truyenfull.today/" }
 
@@ -364,7 +365,8 @@ class BrowserActivity : AppCompatActivity() {
             }
         }
         list.setOnItemClickListener { _, _, pos, _ ->
-            web.loadUrl("https://${history[pos]}/")
+            val host = history[pos]
+            web.loadUrl("https://$host" + (Sites.forUrl("https://$host/")?.startPath ?: "/"))
         }
         findViewById<EditText>(R.id.browseUrl).setText("")
         findViewById<Button>(R.id.browseDownload).isEnabled = false
