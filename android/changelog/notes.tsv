@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Wait for a running chapter check before downloading the same novel
 	Keep checking a novel on its own site, so it isn't re-downloaded from another
 	Keep the reading page from crashing when more chapters load
 	Don't count the translation and picture folders as chapters

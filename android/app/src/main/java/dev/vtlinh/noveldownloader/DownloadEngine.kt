@@ -1941,6 +1941,15 @@ class DownloadEngine(
            novel's. `registerNovel` above created the row. */
         try { store.setDirName(folderKey, slug, folderName) } catch (e: Exception) {}
         val assigned = siteOrdered.mapNotNull { it.filename }.toSet()
+        /* A status check that got past its busy re-ask before this download
+           was queued is renaming and deduping this folder right now. Our plan
+           and folder snapshot would be taken mid-way through its moves. The
+           check never waits on us — it stands aside once we are busy — so
+           this cannot deadlock. */
+        if (NovelCheck.isChecking(slug)) {
+            status("Waiting for the chapter check on this novel to finish…")
+            while (NovelCheck.isChecking(slug) && !stopRequested) kotlinx.coroutines.delay(500)
+        }
         if (listingComplete) renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
         /* Files we can neither place nor prove are copies. Rather than leave
            the novel in a state nobody can explain, fetch every chapter again
