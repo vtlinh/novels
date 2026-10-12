@@ -65,6 +65,7 @@ object Extractor {
         Regex("(?:Ch[ưu]ơ?ng|Chapter)\\s*(\\d+)(?:\\.\\d+)?\\s*[:\\-–]?\\s*(.*)", RegexOption.IGNORE_CASE)
     private val HEADING_ONLY_RE = Regex("^(?:Ch[ưu]ơ?ng|Chapter)\\s*\\d+$", RegexOption.IGNORE_CASE)
     private val HEADING_START_RE = Regex("^(?:Ch[ưu]ơ?ng|Chapter)\\s*\\d+", RegexOption.IGNORE_CASE)
+    private val BARE_NUMERAL_RE = Regex("^(?:\\d+|[IVXLCDM]+)[.:]?$")
     /* a page can separate two headings with spaces rather than a break */
     private val SPACE_RUN_RE = Regex("\\s{2,}")
 
@@ -197,7 +198,13 @@ object Extractor {
         val headingWord = site.headingWord
         val headEl = site.chapterHeading(doc)
         val head = parseHeading(headEl?.text()?.trim() ?: linkText)
-        var title = head.second.ifEmpty { parseHeading(linkText).second }
+        /* The link's text stands in for a title the page does not print —
+           but a bare numeral is not a title. standardebooks lists a chapter
+           whose page prints only "XXIV" as "XXIV", and a third of that
+           site's chapters were saved as "Chapter 24: XXIV". */
+        var title = head.second.ifEmpty {
+            parseHeading(linkText).second.takeUnless { BARE_NUMERAL_RE.matches(it) }.orEmpty()
+        }
         val extracted = extractContent(doc, site)
         var content = extracted.first
         val raw = extracted.second
