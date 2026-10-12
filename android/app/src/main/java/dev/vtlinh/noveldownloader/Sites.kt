@@ -2,6 +2,7 @@ package dev.vtlinh.noveldownloader
 
 import dev.vtlinh.noveldownloader.sites.Americanliterature
 import dev.vtlinh.noveldownloader.sites.Freewebnovel
+import dev.vtlinh.noveldownloader.sites.Gutenberg
 import dev.vtlinh.noveldownloader.sites.Novelfull
 import dev.vtlinh.noveldownloader.sites.Readnovel
 import dev.vtlinh.noveldownloader.sites.Standardebooks
@@ -16,7 +17,7 @@ object Sites {
 
     val all: List<Site> = listOf(
         Truyenfull, Truyenfullmoi, Novelfull, Readnovel, Freewebnovel, Vivutruyen2, Americanliterature,
-        Standardebooks,
+        Standardebooks, Gutenberg,
     )
 
     fun forUrl(url: String): Site? = all.firstOrNull { it.matches(url) }
