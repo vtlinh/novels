@@ -1,0 +1,50 @@
+# Reading pages (/ebooks/<book>/text/<file>), rebuilt like the tables of
+# contents in manifest.tsv by the site's own deploy transform at each book's
+# deployed commit, since robots.txt asks AI agents not to fetch them.
+# 36 pages across 31 books: first, middle and last entries; chapters of
+# novels, short stories, a whole play, a whole book of poems in one file, a
+# divider page that is only "Book I", dividers carrying an epigraph or a
+# paragraph, a dedication with no heading, and headings carrying a note
+# marker.
+# content_chars is the whitespace-collapsed visible text of the page's
+# <main>, and heading_number the arabic or roman number its heading prints
+# first (after "Chapter", if that is printed; blank when it opens with
+# anything else) — both measured by a separate bs4/lxml script, NOT by
+# Extractor, so the tests cross-check the parser rather than echo it.
+site	file	url	novel	which	heading_number	content_chars	novel_max_page	novel_completed
+standardebooks	standardebooks/chapters/a-a-milne__winnie-the-pooh__chapter-10.html	https://standardebooks.org/ebooks/a-a-milne/winnie-the-pooh/text/chapter-10	a-a-milne_winnie-the-pooh	last	10	10376	1	true
+standardebooks	standardebooks/chapters/a-a-milne__winnie-the-pooh__dedication.html	https://standardebooks.org/ebooks/a-a-milne/winnie-the-pooh/text/dedication	a-a-milne_winnie-the-pooh	first		193	1	true
+standardebooks	standardebooks/chapters/aeschylus__agamemnon__gilbert-murray__agamemnon.html	https://standardebooks.org/ebooks/aeschylus/agamemnon/gilbert-murray/text/agamemnon	aeschylus_agamemnon_gilbert-murray	last		81815	1	true
+standardebooks	standardebooks/chapters/agatha-christie__the-murder-of-roger-ackroyd__chapter-1.html	https://standardebooks.org/ebooks/agatha-christie/the-murder-of-roger-ackroyd/text/chapter-1	agatha-christie_the-murder-of-roger-ackroyd	mid	1	7939	1	true
+standardebooks	standardebooks/chapters/alexander-mackenzie__journals__chapter-2-2.html	https://standardebooks.org/ebooks/alexander-mackenzie/journals/text/chapter-2-2	alexander-mackenzie_journals	mid	2	27871	1	true
+standardebooks	standardebooks/chapters/alexandre-dumas__the-three-musketeers__william-robson__chapter-34.html	https://standardebooks.org/ebooks/alexandre-dumas/the-three-musketeers/william-robson/text/chapter-34	alexandre-dumas_the-three-musketeers_william-robson	mid	34	15920	1	true
+standardebooks	standardebooks/chapters/augustine-of-hippo__the-city-of-god__marcus-dods_george-wilson_j-j-smith__book-4.html	https://standardebooks.org/ebooks/augustine-of-hippo/the-city-of-god/marcus-dods_george-wilson_j-j-smith/text/book-4	augustine-of-hippo_the-city-of-god_marcus-dods_george-wilson_j-j-smith	mid		93757	1	true
+standardebooks	standardebooks/chapters/denis-diderot__the-indiscreet-jewels__r-freeman__dedication.html	https://standardebooks.org/ebooks/denis-diderot/the-indiscreet-jewels/r-freeman/text/dedication	denis-diderot_the-indiscreet-jewels_r-freeman	first		1367	1	true
+standardebooks	standardebooks/chapters/dorothy-l-sayers__lord-peter-views-the-body__the-abominable-history-of-the-man-with-copper-fingers.html	https://standardebooks.org/ebooks/dorothy-l-sayers/lord-peter-views-the-body/text/the-abominable-history-of-the-man-with-copper-fingers	dorothy-l-sayers_lord-peter-views-the-body	first		41141	1	true
+standardebooks	standardebooks/chapters/edgar-allan-poe__short-fiction__ms-found-in-a-bottle.html	https://standardebooks.org/ebooks/edgar-allan-poe/short-fiction/text/ms-found-in-a-bottle	edgar-allan-poe_short-fiction	mid		23162	1	true
+standardebooks	standardebooks/chapters/edgar-rice-burroughs__thuvia-maid-of-mars__chapter-8.html	https://standardebooks.org/ebooks/edgar-rice-burroughs/thuvia-maid-of-mars/text/chapter-8	edgar-rice-burroughs_thuvia-maid-of-mars	mid	8	18130	1	true
+standardebooks	standardebooks/chapters/edgar-saltus__mr-incouls-misadventure__chapter-9.html	https://standardebooks.org/ebooks/edgar-saltus/mr-incouls-misadventure/text/chapter-9	edgar-saltus_mr-incouls-misadventure	mid	9	14711	1	true
+standardebooks	standardebooks/chapters/ernest-bramah__kai-lungs-golden-hours__preface.html	https://standardebooks.org/ebooks/ernest-bramah/kai-lungs-golden-hours/text/preface	ernest-bramah_kai-lungs-golden-hours	first		8097	1	true
+standardebooks	standardebooks/chapters/ford-madox-ford__a-man-could-stand-up__chapter-3-2.html	https://standardebooks.org/ebooks/ford-madox-ford/a-man-could-stand-up/text/chapter-3-2	ford-madox-ford_a-man-could-stand-up	last	2	20812	1	true
+standardebooks	standardebooks/chapters/geronimo__geronimos-story-of-his-life__part-1.html	https://standardebooks.org/ebooks/geronimo/geronimos-story-of-his-life/text/part-1	geronimo_geronimos-story-of-his-life	mid		18	1	true
+standardebooks	standardebooks/chapters/h-beam-piper__short-fiction__a-slave-is-a-slave.html	https://standardebooks.org/ebooks/h-beam-piper/short-fiction/text/a-slave-is-a-slave	h-beam-piper_short-fiction	last		125524	1	true
+standardebooks	standardebooks/chapters/herman-melville__moby-dick__chapter-1.html	https://standardebooks.org/ebooks/herman-melville/moby-dick/text/chapter-1	herman-melville_moby-dick	mid	1	12196	1	true
+standardebooks	standardebooks/chapters/herman-melville__moby-dick__etymology.html	https://standardebooks.org/ebooks/herman-melville/moby-dick/text/etymology	herman-melville_moby-dick	mid		1145	1	true
+standardebooks	standardebooks/chapters/james-mcintyre__poetry__poetry.html	https://standardebooks.org/ebooks/james-mcintyre/poetry/text/poetry	james-mcintyre_poetry	first		286066	1	true
+standardebooks	standardebooks/chapters/jessie-redmon-fauset__there-is-confusion__chapter-36.html	https://standardebooks.org/ebooks/jessie-redmon-fauset/there-is-confusion/text/chapter-36	jessie-redmon-fauset_there-is-confusion	last	36	14039	1	true
+standardebooks	standardebooks/chapters/john-milton__paradise-lost__book-12.html	https://standardebooks.org/ebooks/john-milton/paradise-lost/text/book-12	john-milton_paradise-lost	last		28675	1	true
+standardebooks	standardebooks/chapters/joseph-conrad_ford-madox-ford__romance__dedication.html	https://standardebooks.org/ebooks/joseph-conrad_ford-madox-ford/romance/text/dedication	joseph-conrad_ford-madox-ford_romance	first		19	1	true
+standardebooks	standardebooks/chapters/leo-tolstoy__war-and-peace__louise-maude_aylmer-maude__book-1.html	https://standardebooks.org/ebooks/leo-tolstoy/war-and-peace/louise-maude_aylmer-maude/text/book-1	leo-tolstoy_war-and-peace_louise-maude_aylmer-maude	mid		6	1	true
+standardebooks	standardebooks/chapters/leo-tolstoy__war-and-peace__louise-maude_aylmer-maude__chapter-1-1-1.html	https://standardebooks.org/ebooks/leo-tolstoy/war-and-peace/louise-maude_aylmer-maude/text/chapter-1-1-1	leo-tolstoy_war-and-peace_louise-maude_aylmer-maude	mid	1	11416	1	true
+standardebooks	standardebooks/chapters/leo-tolstoy__war-and-peace__louise-maude_aylmer-maude__chapter-3-2-7.html	https://standardebooks.org/ebooks/leo-tolstoy/war-and-peace/louise-maude_aylmer-maude/text/chapter-3-2-7	leo-tolstoy_war-and-peace_louise-maude_aylmer-maude	mid	7	7080	1	true
+standardebooks	standardebooks/chapters/leo-tolstoy__war-and-peace__louise-maude_aylmer-maude__part-1-1.html	https://standardebooks.org/ebooks/leo-tolstoy/war-and-peace/louise-maude_aylmer-maude/text/part-1-1	leo-tolstoy_war-and-peace_louise-maude_aylmer-maude	mid		11	1	true
+standardebooks	standardebooks/chapters/m-p-shiel__the-purple-cloud__epigraph.html	https://standardebooks.org/ebooks/m-p-shiel/the-purple-cloud/text/epigraph	m-p-shiel_the-purple-cloud	first		63	1	true
+standardebooks	standardebooks/chapters/mark-twain__the-autobiography-of-mark-twain__private-history-of-a-ms-that-came-to-grief.html	https://standardebooks.org/ebooks/mark-twain/the-autobiography-of-mark-twain/text/private-history-of-a-ms-that-came-to-grief	mark-twain_the-autobiography-of-mark-twain	mid		23260	1	true
+standardebooks	standardebooks/chapters/omar-khayyam__the-rubaiyat-of-omar-khayyam__edward-fitzgerald__the-rubaiyat-of-omar-khayyam.html	https://standardebooks.org/ebooks/omar-khayyam/the-rubaiyat-of-omar-khayyam/edward-fitzgerald/text/the-rubaiyat-of-omar-khayyam	omar-khayyam_the-rubaiyat-of-omar-khayyam_edward-fitzgerald	last	1	17562	1	true
+standardebooks	standardebooks/chapters/pedro-carolino_jose-da-fonseca__english-as-she-is-spoke__familiar-dialogues.html	https://standardebooks.org/ebooks/pedro-carolino_jose-da-fonseca/english-as-she-is-spoke/text/familiar-dialogues	pedro-carolino_jose-da-fonseca_english-as-she-is-spoke	mid		14982	1	true
+standardebooks	standardebooks/chapters/rolf-boldrewood__robbery-under-arms__chapter-57.html	https://standardebooks.org/ebooks/rolf-boldrewood/robbery-under-arms/text/chapter-57	rolf-boldrewood_robbery-under-arms	last	57	33132	1	true
+standardebooks	standardebooks/chapters/rudyard-kipling__just-so-stories__the-butterfly-that-stamped.html	https://standardebooks.org/ebooks/rudyard-kipling/just-so-stories/text/the-butterfly-that-stamped	rudyard-kipling_just-so-stories	last		21095	1	true
+standardebooks	standardebooks/chapters/thomas-a-kempis__the-imitation-of-christ__william-benham__book-4.html	https://standardebooks.org/ebooks/thomas-a-kempis/the-imitation-of-christ/william-benham/text/book-4	thomas-a-kempis_the-imitation-of-christ_william-benham	mid		517	1	true
+standardebooks	standardebooks/chapters/thomas-hardy__short-fiction__a-group-of-noble-dames.html	https://standardebooks.org/ebooks/thomas-hardy/short-fiction/text/a-group-of-noble-dames	thomas-hardy_short-fiction	mid		85	1	true
+standardebooks	standardebooks/chapters/walter-scott__ivanhoe__chapter-20.html	https://standardebooks.org/ebooks/walter-scott/ivanhoe/text/chapter-20	walter-scott_ivanhoe	mid	20	14863	1	true
+standardebooks	standardebooks/chapters/william-shakespeare__edward-iii__act-1.html	https://standardebooks.org/ebooks/william-shakespeare/edward-iii/text/act-1	william-shakespeare_edward-iii	mid		15760	1	true

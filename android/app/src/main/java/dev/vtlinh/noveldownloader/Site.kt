@@ -47,6 +47,13 @@ interface Site {
 
     fun listPageUrl(base: String, slug: String, page: Int): String
 
+    /* The page holding the chapter list, when it is not the novel page.
+       Null — every site but one — means the novel page lists its own
+       chapters. standardebooks.org's book page carries the title, author,
+       cover and blurb and no chapters at all; the table of contents is a
+       page of its own. The novel page is still read for everything else. */
+    fun listingUrl(base: String, slug: String): String? = null
+
     /* Strict: used for the WHOLE-DOCUMENT fallback, where a link's position
        vouches for nothing and the "latest chapters" widget looks the same as
        the real list. */

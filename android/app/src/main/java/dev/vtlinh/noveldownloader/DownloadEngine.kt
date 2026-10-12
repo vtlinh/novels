@@ -979,6 +979,20 @@ class DownloadEngine(
        this refusal exists to prevent is what happens instead. */
     class PartialListing : Exception()
 
+    /* Page 1 of the chapter list: the novel page itself, or the page the
+       site keeps its list on instead (Site.listingUrl). Null when that page
+       would not load — which is a listing with a hole in it, never a novel
+       with no chapters. */
+    private fun listingDoc(
+        site: Site,
+        base: String,
+        slug: String,
+        novel: org.jsoup.nodes.Document,
+    ): org.jsoup.nodes.Document? {
+        val url = site.listingUrl(base, slug) ?: return novel
+        return fetch(url).html?.let { Jsoup.parse(it, url) }
+    }
+
     class SiteStatus(
         val total: Int,
         val completed: Boolean,
@@ -1017,6 +1031,10 @@ class DownloadEngine(
            404 or another book used to replace the novel's cover on its way to
            being rejected */
         saveCover(slug, doc)
+        val listDoc = listingDoc(site, base, slug, doc) ?: run {
+            log("! $slug: the chapter list would not load — skipping this novel rather than acting on no list")
+            throw PartialListing()
+        }
         val seen = LinkedHashMap<String, Chapter>()   // discovery (= site) order
         /* Set when a page had no usable chapter-list container and the links
            came from reading the whole document instead. Everything
@@ -1037,7 +1055,7 @@ class DownloadEngine(
             }
             return found.links.size
         }
-        addLinks(doc)
+        addLinks(listDoc)
         /* Where this listing ENDS, recorded so the next check can start there
            instead of paging through the whole thing again — see Resume. The
            page that held the last chapters, and how many chapters came before
@@ -1045,7 +1063,7 @@ class DownloadEngine(
            the right values for a novel that fits on one page. */
         var lastChapterPage = 1
         var chaptersBeforePage = 0
-        var last = site.maxPage(doc, slug)
+        var last = site.maxPage(listDoc, slug)
         /* Held by page number and parsed in page order, exactly as the
            download does it: discovery order is the site's order, and the
            site's order is what names every file. */
@@ -1275,6 +1293,10 @@ class DownloadEngine(
     ): SiteStatus? = withContext(Dispatchers.IO) {
         val site = Sites.forUrl(novelUrl) ?: return@withContext null
         val (base, slug) = site.normalize(novelUrl)
+        /* A list on a page of its own is one page and is read whole; there
+           is no tail to resume from, and the splice below reads the novel
+           page as the list's head. */
+        if (site.listingUrl(base, slug) != null) return@withContext null
         /* The recorded URL has to be the one this site computes for that page
            TODAY. These sites move between hosts and have changed their
            pagination scheme before; either way the recorded point describes a
@@ -1439,6 +1461,12 @@ class DownloadEngine(
             site.title(doc) ?: slug,
             author,
         )
+        val listDoc = listingDoc(site, base, slug, doc)
+        if (listDoc == null) {
+            log("Could not load the chapter list for $base")
+            status("Error: could not load the chapter list")
+            return@withContext
+        }
 
         val seen = LinkedHashMap<String, Chapter>()
         /* see checkStatus */
@@ -1453,13 +1481,13 @@ class DownloadEngine(
             }
             return found.links.size
         }
-        addLinks(doc)
+        addLinks(listDoc)
         /* where the listing ends, for a check that resumes rather than
            re-reading it — see Resume, and checkStatus, which keeps the same
            two counters for the same reason */
         var lastChapterPage = 1
         var chaptersBeforePage = 0
-        var last = site.maxPage(doc, slug)
+        var last = site.maxPage(listDoc, slug)
         /* fetch all remaining listing pages in parallel (Semaphore-capped);
            parse in page order so chapter discovery stays deterministic. A
            later page can raise the page count, so loop until none are left. */
