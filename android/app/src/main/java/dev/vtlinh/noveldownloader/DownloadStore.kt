@@ -822,6 +822,16 @@ class DownloadStore(context: Context) :
         return out
     }
 
+    /* the chapter whose picture is this document, if any */
+    fun chapterWithImage(folder: String, slug: String, image: String): String? {
+        readableDatabase.query(
+            "chapters", arrayOf("filename"),
+            "folder=? AND slug=? AND image=?",
+            arrayOf(folder, slug, image),
+            null, null, null, "1",
+        ).use { c -> return if (c.moveToFirst()) c.getString(0) else null }
+    }
+
     fun chapterImage(folder: String, slug: String, chapter: String): String? {
         readableDatabase.query(
             "chapters", arrayOf("image"),
@@ -1221,6 +1231,14 @@ class DownloadStore(context: Context) :
                 db.execSQL(
                     "UPDATE chapters SET filename=?, uri=? WHERE folder=? AND slug=? AND filename=?",
                     arrayOf(to, uri, folder, slug, from),
+                )
+                /* A waiting picture request is keyed by filename too. Left
+                   behind, the background poll saved this chapter's picture
+                   onto whichever chapter moved into the old name. */
+                db.delete("chapter_image_req", "folder=? AND slug=? AND chapter=?", arrayOf(folder, slug, to))
+                db.execSQL(
+                    "UPDATE chapter_image_req SET chapter=? WHERE folder=? AND slug=? AND chapter=?",
+                    arrayOf(to, folder, slug, from),
                 )
             } else {
                 /* already migrated — just refresh where it lives */

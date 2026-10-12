@@ -32,6 +32,18 @@ object Scenes {
     fun slackImageName(hash: String) = hash + ".png"
     fun imageName(filename: String) = chapterBase(filename) + ".png"
 
+    /* Pictures are named by position, and a renumbered listing moves the
+       chapter row without renaming its png — so the name this position
+       gives can still be the picture of the chapter that moved away.
+       Writing there deletes it first; step to a numbered name instead. */
+    fun freeImageName(filename: String, heldByOther: (String) -> Boolean): String {
+        val base = chapterBase(filename)
+        var name = "$base.png"
+        var n = 2
+        while (heldByOther(name)) name = "$base (${n++}).png"
+        return name
+    }
+
     /* "Chapter 12.png" / "Chapter 12.txt" → "Chapter 12". Auto-generate
        reads the number so every-X-from-Y can pick the right files. */
     fun chapterStem(filename: String): String {
