@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Add Standard Ebooks (standardebooks.org) as an English source
 1.42.3	Open americanliterature.com on its Books page
 1.42.2	Keep the study links (FAQ, Flashcards, Quiz…) out of americanliterature.com chapters
 1.42.1	Download americanliterature.com books more slowly so the site stops refusing chapters
