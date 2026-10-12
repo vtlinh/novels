@@ -2030,7 +2030,10 @@ class DownloadEngine(
                     }
                     continue
                 }
-                if (f.length() > 0) { existing.add(n); rows.add(n to f.uri.toString()) }
+                /* translated/ and scenes/ report a size too (4096 on the
+                   external-storage provider) and became chapter rows, which
+                   pushed the local count past a missing chapter. */
+                if (f.length() > 0 && !f.isDirectory) { existing.add(n); rows.add(n to f.uri.toString()) }
             }
             store.addAll(folderKey, slug, rows)
         }
