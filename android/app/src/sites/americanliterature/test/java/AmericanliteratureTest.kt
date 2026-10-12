@@ -213,6 +213,25 @@ class AmericanliteratureTest : SiteContract() {
         }
     }
 
+    /* Ten of the captured chapters are hard-wrapped at about sixty columns
+       with raw newlines inside each <p>. A paragraph is one saved line —
+       the reader, read-aloud and translation all break on the newline. */
+    @Test
+    fun `every paragraph is saved as one line, however the page wraps it`() {
+        var wrapped = 0
+        for (r in chapters) {
+            val doc = Jsoup.parse(page(r[1]), r[2])
+            val lines = Extractor.parseChapter(doc, "", 1, site).lines().toSet()
+            val paras = site.chapterContent(doc)!!.select("p")
+                .filter { it.closest("pre") == null && it.select("br, p, pre").size == 1 }
+                .map { it.text().trim() }
+                .filter { it.isNotEmpty() }
+            for (p in paras) assertTrue("${r[1]}: paragraph split across lines: ${p.take(80)}", p in lines)
+            if (doc.select("article.chapter-content p").any { it.wholeText().trim().contains('\n') }) wrapped++
+        }
+        assertTrue("no captured chapter is hard-wrapped", wrapped > 0)
+    }
+
     /* The study-link sweep matches by shape, not by class, so it must be
        shown to take nothing else: on every captured chapter — none of which
        carries the study row — the prose comes out exactly as without it. */
