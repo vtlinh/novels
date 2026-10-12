@@ -1502,6 +1502,9 @@ class ReaderActivity : AppCompatActivity() {
         /* retire any in-flight sentence or silence so its report cannot
            advance us after this new start (a skip mid-pause, a replay) */
         speechGen++
+        /* ...and a border load's promise to continue the OLD speech: left
+           set, its arrival flushed the sentence this start began */
+        pendingSpeakContinue = false
         val body = loadedChapters.getOrNull(place.row)?.body ?: return
         speakAt = ReaderPlace(place.row, ReaderText.sentStartOf(body, place.off))
         speaking = true
