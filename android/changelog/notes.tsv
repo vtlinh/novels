@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Download a chapter again when its file is gone
 	Don't throw away a finished chapter when the site still marks it as a preview
 1.42.7	List Project Gutenberg once on the browser start screen
 1.42.6	Read Russian books aloud, in a Russian voice

@@ -1984,7 +1984,7 @@ class DownloadEngine(
                 DocumentFile.fromSingleUri(context, Uri.parse(sampleUri))?.exists() == true
             } catch (e: Exception) { false }
             if (ok) {
-                existing.addAll(cached.keys)
+                existing.addAll(Renumber.locatedNames(cached))
                 usedCache = true
             } else {
                 /* Only the locations are wrong. Which chapter each file IS is

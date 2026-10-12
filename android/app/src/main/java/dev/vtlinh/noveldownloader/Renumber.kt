@@ -497,6 +497,12 @@ object Renumber {
         }
     }
 
+    /* Index rows that point at a document. A blank URI is a row with no file
+       behind it: clearUris leaves one for every chapter the re-listing did
+       not find, and picture/Slack/fingerprint bookkeeping inserts them too. */
+    fun locatedNames(cached: Map<String, String>): Set<String> =
+        cached.filterValues { it.isNotEmpty() }.keys
+
     /* One entry in the site's listing: the page it came from, and the name
        its POSITION gives it. `want` is null for an entry with no usable name. */
     data class Slot(val url: String, val want: String?)

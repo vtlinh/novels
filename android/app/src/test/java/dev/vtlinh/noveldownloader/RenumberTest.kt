@@ -254,4 +254,16 @@ class RenumberTest {
     fun `numbered entries keep the site's own numbers`() {
         assertEquals(listOf(7, 9, 12), Renumber.headingNumbers(listOf(7, 9, 12)))
     }
+
+    /* After a folder move the re-listing leaves a deleted chapter's row with
+       a blank URI. Counted as on disk, that chapter was never fetched again. */
+    @Test
+    fun `a row with no location is not a file on disk`() {
+        assertEquals(
+            setOf("Chapter 1.txt"),
+            Renumber.locatedNames(
+                mapOf("Chapter 1.txt" to "content://doc/1", "Chapter 2.txt" to ""),
+            ),
+        )
+    }
 }
