@@ -4,7 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Add americanliterature.com books as an English source
+1.41.1	Add americanliterature.com books as an English source
 1.38.15	Don't jump the page when you tap the text
 1.38.14	Read No. 12 as number 12, not no 12
 1.38.13	Scroll through chapters more smoothly
