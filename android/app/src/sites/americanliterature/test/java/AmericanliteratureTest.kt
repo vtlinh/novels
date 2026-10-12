@@ -159,6 +159,28 @@ class AmericanliteratureTest : SiteContract() {
         }
     }
 
+    /* The engine passes the table-of-contents entry along as the title for
+       a page that prints none — and a quarter of the entries are only
+       "Chapter XX". Saved as the title, that made "Chapter 7: Chapter XX". */
+    @Test
+    fun `a contents entry that only restates the number is not saved as the title`() {
+        val entries = HashMap<String, String>()
+        for (r in novels) {
+            val (_, slug) = site.normalize(r[3])
+            for (l in Listing.collect(listingDoc(r), site, slug).links) entries[l.url.trimEnd('/')] = l.text
+        }
+        var roman = 0
+        for (r in chapters) {
+            val link = entries[r[2].trimEnd('/')] ?: continue
+            val first = Extractor.parseChapter(Jsoup.parse(page(r[1]), r[2]), link, 7, site)
+                .lineSequence().first()
+            val title = first.removePrefix("Chapter 7").removePrefix(": ")
+            assertFalse("${r[1]}: heading is \"$first\"", Regex("^(?i)(chapter|ch\\.)\\s*[0-9ivxlcdm]+\\b").containsMatchIn(title))
+            if (Regex("(?i)^chapter\\s+[ivxlcdm]+$").matches(link)) roman++
+        }
+        assertTrue("no captured chapter is listed as \"Chapter <roman>\"", roman > 0)
+    }
+
     /* A heading that does not open with a chapter number — "Dedication",
        "Book 1 Chapter 15", "Book 13: Battlefield" — is the chapter's whole
        name, and is saved whole: nothing in it may be read as a number and

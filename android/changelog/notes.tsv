@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Name americanliterature.com chapters like "Chapter 20" instead of "Chapter 20: Chapter XX"
 	Don't repeat the chapter heading at the top of some Project Gutenberg chapters
 	Keep americanliterature.com paragraphs whole instead of one short line each
 	Don't cut off the sentence you tapped while more chapters load
