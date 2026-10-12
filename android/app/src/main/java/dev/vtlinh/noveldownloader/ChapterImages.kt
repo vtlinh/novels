@@ -1725,13 +1725,17 @@ object ChapterImages {
     ) {
         val dir = scenesDir(ctx, folder, dirName, create = true)
             ?: throw IOException("Could not create scenes/.")
-        val name = Scenes.imageName(chapter)
+        val store = DownloadStore(ctx)
+        val name = Scenes.freeImageName(chapter) { n ->
+            val f = dir.findFile(n) ?: return@freeImageName false
+            val id = try { DocumentsContract.getDocumentId(f.uri) } catch (e: Exception) { n }
+            store.chapterWithImage(folder, slug, id).let { it != null && it != chapter }
+        }
         val docId = writeBytes(ctx, dir, name, "image/png", bytes)
         if (docId == null) {
             report("${describe(dirName, chapter)} — could not save the picture (${sizeLabel(bytes.size)})")
             throw IOException("Could not save the image.")
         }
-        val store = DownloadStore(ctx)
         store.setChapterImage(folder, slug, chapter, docId, alt)
         report("${describe(dirName, chapter)} — saved (${sizeLabel(bytes.size)})")
         try { store.forgetDiskBytes(folder, slug) } catch (e: Exception) {}

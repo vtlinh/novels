@@ -173,7 +173,22 @@ object Americanliterature : Site {
             }
         }
         dropStudyLinks(el)
+        unwrap(el)
         return el
+    }
+
+    /* Many books are the old Gutenberg text pasted in, hard-wrapped at about
+       sixty columns with a raw newline inside each <p> — and the extractor
+       keeps every text newline as a paragraph break, so Monte Cristo was
+       saved one short line per paragraph. Verse is set in <pre>, where the
+       breaks are the poem's own; everything else is reflowed. */
+    private val wrapRe = Regex("[\\r\\n\\t ]+")
+
+    private fun unwrap(el: Element) {
+        for (e in el.getAllElements()) {
+            if (e.closest("pre") != null) continue
+            for (t in e.textNodes()) t.text(wrapRe.replace(t.wholeText, " "))
+        }
     }
 
     /* Since October the site also prints the chapter's study links inside

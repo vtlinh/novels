@@ -1941,6 +1941,15 @@ class DownloadEngine(
            novel's. `registerNovel` above created the row. */
         try { store.setDirName(folderKey, slug, folderName) } catch (e: Exception) {}
         val assigned = siteOrdered.mapNotNull { it.filename }.toSet()
+        /* A status check that got past its busy re-ask before this download
+           was queued is renaming and deduping this folder right now. Our plan
+           and folder snapshot would be taken mid-way through its moves. The
+           check never waits on us — it stands aside once we are busy — so
+           this cannot deadlock. */
+        if (NovelCheck.isChecking(slug)) {
+            status("Waiting for the chapter check on this novel to finish…")
+            while (NovelCheck.isChecking(slug) && !stopRequested) kotlinx.coroutines.delay(500)
+        }
         if (listingComplete) renameToListingOrder(treeUri, dir, store, folderKey, slug, siteOrdered)
         /* Files we can neither place nor prove are copies. Rather than leave
            the novel in a state nobody can explain, fetch every chapter again
@@ -1984,7 +1993,7 @@ class DownloadEngine(
                 DocumentFile.fromSingleUri(context, Uri.parse(sampleUri))?.exists() == true
             } catch (e: Exception) { false }
             if (ok) {
-                existing.addAll(cached.keys)
+                existing.addAll(Renumber.locatedNames(cached))
                 usedCache = true
             } else {
                 /* Only the locations are wrong. Which chapter each file IS is
@@ -2030,7 +2039,10 @@ class DownloadEngine(
                     }
                     continue
                 }
-                if (f.length() > 0) { existing.add(n); rows.add(n to f.uri.toString()) }
+                /* translated/ and scenes/ report a size too (4096 on the
+                   external-storage provider) and became chapter rows, which
+                   pushed the local count past a missing chapter. */
+                if (f.length() > 0 && !f.isDirectory) { existing.add(n); rows.add(n to f.uri.toString()) }
             }
             store.addAll(folderKey, slug, rows)
         }
@@ -2184,7 +2196,7 @@ class DownloadEngine(
                                 /* held: an earlier chapter this run is a teaser */
                             } else {
                                 val parsed = Jsoup.parse(res.html, ch.url)
-                                if (Listing.pageIsPreview(parsed, site, ch.text)) {
+                                if (Listing.pageIsPreview(parsed, site)) {
                                     previewHits.add(ch.pos)
                                     pageCut.updateAndGet { minOf(it, ch.pos) }
                                     log(

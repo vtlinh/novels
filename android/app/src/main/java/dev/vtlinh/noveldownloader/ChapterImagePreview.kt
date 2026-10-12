@@ -184,8 +184,18 @@ object ChapterImagePreview {
         dialog.setContentView(dim)
         dialog.setCancelable(true)
         dialog.setCanceledOnTouchOutside(true)
+        /* `shown` outlives the activity. Left showing through a rotation,
+           its window is torn down without a dismiss, and the next close()
+           threw "not attached to window manager". */
+        val owner = object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onDestroy(o: androidx.lifecycle.LifecycleOwner) {
+                if (dialog.isShowing) dialog.dismiss()
+            }
+        }
+        activity.lifecycle.addObserver(owner)
         dialog.setOnDismissListener {
             handler.removeCallbacks(fade)
+            activity.lifecycle.removeObserver(owner)
             if (shown === dialog) shown = null
         }
         dialog.window?.setLayout(

@@ -126,9 +126,13 @@ object Listing {
 
     /* A fetched chapter page that is still a teaser. Heading and short
        notice lines only — the prose is not scanned for the word "preview",
-       which is ordinary English. */
-    fun pageIsPreview(d: org.jsoup.nodes.Document, site: Site, linkText: String): Boolean {
-        if (markedPreview(linkText)) return true
+       which is ordinary English.
+
+       The listing's own badge is deliberately not an input: it is why a
+       listing-preview is fetched as a probe at all, and a true here discards
+       the file already saved under that name. Only the page can say whether
+       the full text is up yet. */
+    fun pageIsPreview(d: org.jsoup.nodes.Document, site: Site): Boolean {
         val headEl = site.chapterHeading(d)
         val heading = headEl?.text()?.trim().orEmpty()
         if (markedPreview(heading)) return true
@@ -492,6 +496,12 @@ object Renumber {
             if (n != null) { last = n; n } else last ?: (i + 1)
         }
     }
+
+    /* Index rows that point at a document. A blank URI is a row with no file
+       behind it: clearUris leaves one for every chapter the re-listing did
+       not find, and picture/Slack/fingerprint bookkeeping inserts them too. */
+    fun locatedNames(cached: Map<String, String>): Set<String> =
+        cached.filterValues { it.isNotEmpty() }.keys
 
     /* One entry in the site's listing: the page it came from, and the name
        its POSITION gives it. `want` is null for an entry with no usable name. */

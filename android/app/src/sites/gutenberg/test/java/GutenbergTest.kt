@@ -108,6 +108,28 @@ class GutenbergTest : SiteContract() {
         assertTrue("only $total chapters", total > 3000)
     }
 
+    /* Every h1-h3 heads a section, and a section's own heads are its saved
+       heading — so none may be copied into a section's text. A chapter in
+       a <div> of its own, reached as a sibling of the head before it,
+       used to be cloned whole: Dracula's first chapter was saved as its
+       heading, then "CHAPTER I", then "JONATHAN HARKER'S JOURNAL". */
+    @Test
+    fun `no chapter repeats its heading in its text`() {
+        val bad = ArrayList<String>()
+        var total = 0
+        for (r in novels) {
+            val page = listingDoc(r)
+            val (_, slug) = site.normalize(r[3])
+            for (l in Listing.collect(page, site, slug).links) {
+                val heads = Jsoup.parse(site.section(page, l.url)!!, l.url).select("h1, h2, h3")
+                if (heads.isNotEmpty()) bad.add("${l.url} [${l.text}]: ${heads.first()!!.text()}")
+                total++
+            }
+        }
+        assertTrue("$total sections", total > 3000)
+        assertTrue("${bad.size} sections:\n" + bad.take(20).joinToString("\n"), bad.isEmpty())
+    }
+
     /* The section the engine cuts out and parses is the same chapter as
        the one read in place from the whole page. */
     @Test

@@ -1502,6 +1502,9 @@ class ReaderActivity : AppCompatActivity() {
         /* retire any in-flight sentence or silence so its report cannot
            advance us after this new start (a skip mid-pause, a replay) */
         speechGen++
+        /* ...and a border load's promise to continue the OLD speech: left
+           set, its arrival flushed the sentence this start began */
+        pendingSpeakContinue = false
         val body = loadedChapters.getOrNull(place.row)?.body ?: return
         speakAt = ReaderPlace(place.row, ReaderText.sentStartOf(body, place.off))
         speaking = true
@@ -2231,12 +2234,22 @@ class ReaderActivity : AppCompatActivity() {
             val outcome = withContext(Dispatchers.IO) {
                 ChapterImages.request(this@ReaderActivity, folder, dir, slug, chapter)
             }
-            if (outcome.getOrNull() == true && !asDocument()) {
-                val pos = currentChapterIdx
-                if (pos >= 0) openAt(pos, autoPicture = true)
-            }
+            if (outcome.getOrNull() == true && !asDocument()) showArrivedPicture()
             bindImageAction(gen, card)
         }
+    }
+
+    /* A requested picture can land minutes later, while the reader is
+       mid-chapter or reading aloud. Reopening at the chapter top stopped
+       the speech and lost the place: reload at the current spot, and
+       while speaking leave the page alone. */
+    private fun showArrivedPicture() {
+        if (speaking) {
+            bindPictureButton()
+            return
+        }
+        val pos = currentPosition() ?: return
+        openAt(pos.first, pos.second, autoPicture = true)
     }
 
     private fun pollChapterImage(gen: TextView, card: android.view.View) {
@@ -2252,10 +2265,7 @@ class ReaderActivity : AppCompatActivity() {
             val outcome = withContext(Dispatchers.IO) {
                 ChapterImages.poll(this@ReaderActivity, folder, dir, slug, chapter)
             }
-            if (outcome.getOrNull() == true && !asDocument()) {
-                val pos = currentChapterIdx
-                if (pos >= 0) openAt(pos, autoPicture = true)
-            }
+            if (outcome.getOrNull() == true && !asDocument()) showArrivedPicture()
             bindImageAction(gen, card)
         }
     }
@@ -3187,7 +3197,11 @@ class ReaderActivity : AppCompatActivity() {
         prependQueued = false
         val p = pos.coerceIn(0, ch.ordered.size - 1)
         lifecycleScope.launch {
-            loadedChapters.clear()
+            /* Gathered aside and swapped in with the notify: readAt suspends
+               on IO, and a list changed across that suspension lets a layout
+               pass see a row count the adapter was never told about —
+               RecyclerView throws "Inconsistency detected". */
+            val next = ArrayList<LoadedChapter>()
             /* Load the opened chapter AND the batch ahead BEFORE placing. A
                one-chapter page used to be shorter than the target needs: a
                ScrollView clamped to what fits, so a mid-chapter spot could
@@ -3227,9 +3241,11 @@ class ReaderActivity : AppCompatActivity() {
                     )
                     continue
                 }
-                loadedChapters.add(loadedOf(i, b))
+                next.add(loadedOf(i, b))
                 if (i == p) targetBodyLen = b.length
             }
+            loadedChapters.clear()
+            loadedChapters.addAll(next)
             /* the first chapter actually READ, which is not firstWanted when
                one above the target wouldn't open */
             firstIdx = loadedChapters.firstOrNull()?.idx ?: p
@@ -3241,7 +3257,7 @@ class ReaderActivity : AppCompatActivity() {
             titleBar.text = loadedChapters.firstOrNull { it.idx == p }?.heading ?: ""
             saveLastChapter(p)
 
-            val row = rowOf(p).coerceAtLeast(0)
+            val row = ReaderPlace.landingRow(loadedChapters.map { it.idx }, p)
             val targetOff =
                 if (targetPara > 0 && targetBodyLen > 0) {
                     val body = loadedChapters.getOrNull(row)?.body
@@ -3582,15 +3598,14 @@ class ReaderActivity : AppCompatActivity() {
         loading = true
         lifecycleScope.launch {
             clearTextSelection()
-            val insertAt = loadedChapters.size
+            /* gathered aside for the same reason as openAt's window */
+            val newOnes = ArrayList<LoadedChapter>()
             var added = 0
-            var inserted = 0
             while (added < n && nextIdx < ch.ordered.size) {
                 val idx = nextIdx
                 val body = readAt(idx)
                 if (body != null) {
-                    loadedChapters.add(loadedOf(idx, body))
-                    inserted++
+                    newOnes.add(loadedOf(idx, body))
                 } else {
                     /* the window runs straight from one chapter into the one
                        after next with nothing to show for it — say so */
@@ -3601,7 +3616,11 @@ class ReaderActivity : AppCompatActivity() {
                 nextIdx = idx + 1
                 added++
             }
-            if (inserted > 0) readerAdapter.notifyItemRangeInserted(insertAt, inserted)
+            if (newOnes.isNotEmpty()) {
+                val insertAt = loadedChapters.size
+                loadedChapters.addAll(newOnes)
+                readerAdapter.notifyItemRangeInserted(insertAt, newOnes.size)
+            }
             loading = false
             /* TTS paused at the border waiting for this — resume reading */
             if (pendingSpeakContinue) {

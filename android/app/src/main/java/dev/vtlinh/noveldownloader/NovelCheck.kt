@@ -64,16 +64,21 @@ object NovelCheck {
     /* The hosts to try for a novel whose recorded URL doesn't answer. These
        sites move between domains, and a novel whose recorded host stops
        serving it was otherwise never checked again — on this sweep or any
-       future one — with nothing said about why. */
-    private fun candidates(rec: NovelRec): List<String> =
-        (
-            rec.url.ifEmpty { null }?.let { listOf(it) }.orEmpty() +
-                listOf(
-                    "https://truyenfull.today/${rec.slug}/",
-                    "https://novelfull.com/${rec.slug}.html",
-                    "https://truyenfull.live/${rec.slug}/",
-                )
-            ).distinct()
+       future one — with nothing said about why.
+
+       Only the recorded site's own hosts. Another site carrying the same book
+       under the same slug passes the title check, and recording its URL
+       re-downloads the whole novel from it next run: its chapter paths differ,
+       so every file reads as holding the wrong page and is replaced. */
+    internal fun candidates(url: String, slug: String): List<String> {
+        val site = Sites.forUrl(url)
+        val guesses = listOf(
+            "https://truyenfull.today/$slug/",
+            "https://novelfull.com/$slug.html",
+            "https://truyenfull.live/$slug/",
+        ).filter { url.isEmpty() || Sites.forUrl(it) === site }
+        return (url.ifEmpty { null }?.let { listOf(it) }.orEmpty() + guesses).distinct()
+    }
 
     /* Check one novel and record what came back. Null means no host answered
        for it (or the listing had a hole in it and the check refused to act).
@@ -130,7 +135,7 @@ object NovelCheck {
                avoid but is always the correct answer. */
             if (res != null) return save(store, folder, rec, display, rec.url, res, local, true)
         }
-        for (u in candidates(rec)) {
+        for (u in candidates(rec.url, rec.slug)) {
             val res = try {
                 engine.checkStatus(
                     u, folder,
