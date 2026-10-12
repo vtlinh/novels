@@ -24,6 +24,8 @@ class VoicesTest {
         assertTrue("the three-letter code is the same language", Voices.matches("vie", "vi"))
         assertTrue(Voices.matches("en", "en"))
         assertTrue(Voices.matches("eng", "en"))
+        assertTrue(Voices.matches("ru", "ru"))
+        assertTrue(Voices.matches("rus", "ru"))
     }
 
     /* However the engine cases it. */
@@ -34,19 +36,24 @@ class VoicesTest {
     }
 
     @Test
-    fun `the two languages do not answer for each other`() {
+    fun `the languages do not answer for each other`() {
         assertFalse(Voices.matches("en", "vi"))
         assertFalse(Voices.matches("eng", "vi"))
         assertFalse(Voices.matches("vi", "en"))
         assertFalse(Voices.matches("vie", "en"))
+        assertFalse(Voices.matches("ru", "en"))
+        assertFalse(Voices.matches("rus", "vi"))
+        assertFalse(Voices.matches("en", "ru"))
+        assertFalse(Voices.matches("vi", "ru"))
     }
 
     /* A voice reporting no locale belongs to no profile — offering it under
-       one would be a guess, and the reader has two languages to keep apart. */
+       one would be a guess, and the reader has languages to keep apart. */
     @Test
     fun `a voice with no language belongs to nothing`() {
         assertFalse(Voices.matches("", "vi"))
         assertFalse(Voices.matches("", "en"))
+        assertFalse(Voices.matches("", "ru"))
     }
 
     /* Nothing else is one of ours, however plausible it looks. */
@@ -54,6 +61,7 @@ class VoicesTest {
     fun `another language is not a near miss`() {
         assertFalse(Voices.matches("es", "en"))
         assertFalse(Voices.matches("cmn", "vi"))
+        assertFalse("Ukrainian is not Russian", Voices.matches("uk", "ru"))
         assertFalse("a prefix is not a match", Voices.matches("v", "vi"))
     }
 
@@ -62,6 +70,23 @@ class VoicesTest {
     fun `each profile has a name to go and find`() {
         assertTrue(Voices.nameOf("vi") == "Vietnamese")
         assertTrue(Voices.nameOf("en") == "English")
+        assertTrue(Voices.nameOf("ru") == "Russian")
+    }
+
+    /* The sheet's heading names the language the way its own readers do. */
+    @Test
+    fun `each profile is headed in its own language`() {
+        assertEquals("English", Voices.ownNameOf("en"))
+        assertEquals("Tiếng Việt", Voices.ownNameOf("vi"))
+        assertEquals("Русский", Voices.ownNameOf("ru"))
+    }
+
+    /* The engine is asked for each by its locale — Russian as Russia's. */
+    @Test
+    fun `each profile asks the engine for its own locale`() {
+        assertEquals(java.util.Locale.US, Voices.localeFor("en"))
+        assertEquals(java.util.Locale("vi", "VN"), Voices.localeFor("vi"))
+        assertEquals(java.util.Locale("ru", "RU"), Voices.localeFor("ru"))
     }
 
     /* ---- local voices only ---- */
@@ -165,16 +190,25 @@ class VoicesTest {
 
     /* ---- which language a chapter is in ---- */
 
-    /* Both of these are the real opening of a real captured chapter, lifted
-       out of the corpus under the sites' own test/resources rather than
-       written here — the same reason nothing else in this repo is judged
-       against invented text. */
+    /* The English and Vietnamese ones are the real opening of a real
+       captured chapter, lifted out of the corpus under the sites' own
+       test/resources rather than written here — the same reason nothing else
+       in this repo is judged against invented text. No captured site is
+       Russian, so the Russian one is the opening of a Russian book on
+       Project Gutenberg (ebook 37196), Latin "II" and all. */
     private val vietnameseChapter =
         "Ánh đèn trong đại sảnh biệt thự Lục gia phủ lên mọi vật một màu lạnh " +
             "lẽo, tang tóc. Những vòng hoa trắng xếp thành tường, lặng lẽ che đi " +
             "những ánh mắt dò xét, toan tính. Đội bảo vệ mặc vest đen đứng rải " +
             "rác, tạo thành một rào chắn vô hình, khiến bầu không khí vốn nặng " +
             "nề lại càng thêm nghẹt thở."
+
+    private val russianChapter =
+        "Перед войной 1914 года социалисты всех стран заявили вполне определенно " +
+            "о своем отрицательном отношении к тщательно подготовлявшейся их " +
+            "правительствами империалистической бойне. На своих съездах и " +
+            "конференциях представители социалистических партий, объединенных во " +
+            "II Интернационал, выносили резолюции о войне."
 
     private val englishChapter =
         "Chapter 1: Prince Charming Next Door (1) Translator: Nyoi-Bo Studio " +
@@ -187,6 +221,29 @@ class VoicesTest {
     fun `a chapter is read as the language it is written in`() {
         assertEquals("vi", Voices.detect(vietnameseChapter))
         assertEquals("en", Voices.detect(englishChapter))
+        assertEquals("ru", Voices.detect(russianChapter))
+    }
+
+    /* Russian is told by its alphabet. Measured: no captured page of any
+       site is more than 0.3% Cyrillic, and the least Cyrillic stretch of any
+       Russian book on Gutenberg is 78.7%. These pin the line at half, and
+       both measured ends either side of it. */
+    @Test
+    fun `over half cyrillic is Russian and half is not`() {
+        fun mix(cyrillic: Int, plain: Int) = "ж".repeat(cyrillic) + "a".repeat(plain)
+
+        assertEquals("just over half", "ru", Voices.detect(mix(51, 49)))
+        assertEquals("exactly half is not over it", "en", Voices.detect(mix(50, 50)))
+        assertEquals("the least Cyrillic stretch of a Russian book", "ru", Voices.detect(mix(79, 21)))
+        assertEquals("the most Cyrillic any captured page was", "en", Voices.detect(mix(3, 997)))
+    }
+
+    /* A Russian name quoted in its own script is a borrowed word, and moves
+       nothing — neither to Russian, nor (by counting as an accent) to
+       Vietnamese. */
+    @Test
+    fun `a name in cyrillic does not make an english chapter anything else`() {
+        assertEquals("en", Voices.detect("$englishChapter He signed it Дмитрий, as always."))
     }
 
     /* THE DEFECT, off a real screen. Vietnamese used to mean "holds any
@@ -254,12 +311,13 @@ class VoicesTest {
     /* ---- a novel can pin the language instead of judging ---- */
 
     @Test
-    fun `only the two profiles are a pin`() {
+    fun `only a profile is a pin`() {
         assertEquals("en", Voices.pin("en"))
         assertEquals("vi", Voices.pin("vi"))
+        assertEquals("ru", Voices.pin("ru"))
         assertNull("empty is Auto", Voices.pin(""))
         assertNull(Voices.pin(null))
-        assertNull("a typo is not a third language", Voices.pin("fr"))
+        assertNull("a typo is not another language", Voices.pin("fr"))
         assertNull(Voices.pin("EN"))
     }
 
@@ -269,6 +327,8 @@ class VoicesTest {
         assertEquals("vi", Voices.langFor("vi", englishChapter))
         assertEquals("vi", Voices.langFor("vi", ""))
         assertEquals("en", Voices.langFor("en", null))
+        assertEquals("ru", Voices.langFor("ru", englishChapter))
+        assertEquals("en", Voices.langFor("en", russianChapter))
     }
 
     @Test
@@ -278,5 +338,24 @@ class VoicesTest {
         assertNull("and still says nothing when there is nothing to judge",
             Voices.langFor(null, ""))
         assertNull(Voices.langFor("fr", ""))
+    }
+
+    /* ---- the language pickers ---- */
+
+    /* Both pickers store what Voices says a position means, so a position
+       and its language cannot drift apart — every language round-trips,
+       and Auto is no pin at all. */
+    @Test
+    fun `every picker position stores the language it shows`() {
+        assertEquals(listOf("Auto (from the text)", "English", "Vietnamese", "Russian"), Voices.PICKER)
+        for (lang in Voices.LANGS) {
+            val pos = Voices.pickerPosition(lang)
+            assertEquals(Voices.nameOf(lang), Voices.PICKER[pos])
+            assertEquals(lang, Voices.pickerLang(pos))
+        }
+        assertNull(Voices.pickerLang(0))
+        assertEquals(0, Voices.pickerPosition(null))
+        assertEquals("a leftover is shown as Auto", 0, Voices.pickerPosition("fr"))
+        assertNull(Voices.pickerLang(Voices.PICKER.size))
     }
 }

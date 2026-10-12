@@ -61,7 +61,7 @@ class NovelSettingsActivity : AppCompatActivity() {
             "Settings can turn this on for many novels at once; this switch, when " +
             "on, is only for this novel."
     private val ttsLangHelp =
-        "Which language this novel is read aloud in. Auto uses the chapter's own text. Pick English or Vietnamese if that guess is wrong."
+        "Which language this novel is read aloud in. Auto uses the chapter's own text. Pick English, Vietnamese or Russian if that guess is wrong."
     private val recheckHelp =
         "Looks on the website to see if this novel has any new chapters."
     private val redownloadHelp =
@@ -331,7 +331,7 @@ class NovelSettingsActivity : AppCompatActivity() {
         }
     }
 
-    /* Auto / English / Vietnamese. Auto is empty in the store, which is
+    /* Auto, then each language Voices speaks. Auto is empty in the store, which is
        also what an upgrade writes — so an existing novel shows Auto and
        keeps being judged from the chapter until someone picks. */
     private fun bindTtsLang(folder: String, state: State) {
@@ -339,17 +339,11 @@ class NovelSettingsActivity : AppCompatActivity() {
         spinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            listOf("Auto (from the text)", "English", "Vietnamese"),
+            Voices.PICKER,
         )
         spinner.onItemSelectedListener = null
         var current = state.rec?.ttsLang
-        spinner.setSelection(
-            when (current) {
-                "en" -> 1
-                "vi" -> 2
-                else -> 0
-            },
-        )
+        spinner.setSelection(Voices.pickerPosition(current))
         spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
                 parent: android.widget.AdapterView<*>?,
@@ -357,11 +351,7 @@ class NovelSettingsActivity : AppCompatActivity() {
                 pos: Int,
                 id: Long,
             ) {
-                val lang = when (pos) {
-                    1 -> "en"
-                    2 -> "vi"
-                    else -> null
-                }
+                val lang = Voices.pickerLang(pos)
                 if (lang == current) return
                 current = lang
                 persist { store.setTtsLang(folder, slug, lang) }

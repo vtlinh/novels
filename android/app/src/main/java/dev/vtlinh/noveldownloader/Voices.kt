@@ -1,9 +1,11 @@
 package dev.vtlinh.noveldownloader
 
+import java.util.Locale
+
 /* Which of the engine's voices belong to a language profile — with no Android
    in it, so the matching can be exercised directly.
 
-   The reader speaks two languages, the source's and its translation's, and
+   The reader speaks a few languages — English, Vietnamese and Russian — and
    keeps a voice, rate and pitch for each. Picking the voices to offer means
    asking each of the engine's voices what language it is, and the answer
    comes back in whatever spelling the engine feels like: a Voice's locale is
@@ -14,10 +16,33 @@ package dev.vtlinh.noveldownloader
    English voices with nothing to explain it. */
 object Voices {
 
-    /* Every code a profile answers to, ISO 639-1 and 639-2 alike. Two
-       languages, because detect only ever returns these two. */
-    fun codesFor(lang: String): Set<String> =
-        if (lang == "vi") setOf("vi", "vie") else setOf("en", "eng")
+    /* One row per profile: every code it answers to (ISO 639-1 and 639-2
+       alike), the name a reader sent to install it has to look for, the
+       name it calls itself in the sheet's heading, and the locale the
+       engine is asked for. Every place that names a language reads it from
+       here, so a profile cannot exist in one picker and be missing from
+       another. */
+    private class Profile(
+        val codes: Set<String>,
+        val name: String,
+        val ownName: String,
+        val locale: Locale,
+    )
+
+    private val profiles = linkedMapOf(
+        "en" to Profile(setOf("en", "eng"), "English", "English", Locale.US),
+        "vi" to Profile(setOf("vi", "vie"), "Vietnamese", "Tiếng Việt", Locale("vi", "VN")),
+        "ru" to Profile(setOf("ru", "rus"), "Russian", "Русский", Locale("ru", "RU")),
+    )
+
+    /* In the order the pickers list them, after Auto. */
+    val LANGS: List<String> = profiles.keys.toList()
+
+    /* Anything that is not a profile is spoken as English, the reader's
+       last resort when there is nothing to judge. */
+    private fun profile(lang: String): Profile = profiles[lang] ?: profiles.getValue("en")
+
+    fun codesFor(lang: String): Set<String> = profile(lang).codes
 
     /* `voiceLanguage` is Voice.getLocale().getLanguage() — empty when a voice
        reports no locale at all, which belongs to no profile. */
@@ -25,13 +50,32 @@ object Voices {
         voiceLanguage.isNotEmpty() && voiceLanguage.lowercase() in codesFor(lang)
 
     /* The name to say it by, for a reader who has to go and install it. */
-    fun nameOf(lang: String): String = if (lang == "vi") "Vietnamese" else "English"
+    fun nameOf(lang: String): String = profile(lang).name
+
+    /* The name it goes by on its own heading. */
+    fun ownNameOf(lang: String): String = profile(lang).ownName
+
+    /* The locale a profile speaks in. One definition, because the voice
+       filter, the note that explains an empty filter, the fallback applied
+       when no voice is picked and the warm-up all have to mean the same
+       thing by "vi". */
+    fun localeFor(lang: String): Locale = profile(lang).locale
 
     /* A stored pin is only a language we have a profile for. Anything else
-       — empty, a typo, a leftover — is "no pin", not a third language the
+       — empty, a typo, a leftover — is "no pin", not another language the
        rest of the reader has no voice, rate or pitch for. */
     fun pin(raw: String?): String? =
-        raw?.takeIf { it == "en" || it == "vi" }
+        raw?.takeIf { it in profiles }
+
+    /* The language pickers in the reader's sheet and the novel's settings:
+       Auto first, which is no pin, then every profile. Shared so the two
+       cannot list the languages in different orders and store the wrong
+       one for a position. */
+    val PICKER: List<String> = listOf("Auto (from the text)") + LANGS.map { nameOf(it) }
+
+    fun pickerPosition(pin: String?): Int = LANGS.indexOf(pin(pin)) + 1
+
+    fun pickerLang(position: Int): String? = LANGS.getOrNull(position - 1)
 
     /* Which language a novel should be spoken in: the pin when there is
        one, otherwise the chapter. Null when there is still nothing to
@@ -89,6 +133,16 @@ object Voices {
        voice that cannot pronounce it, which is the louder failure. */
     private const val ENGLISH_PCT = 90
 
+    /* Above this share of Cyrillic letters a chapter is Russian. Russian is
+       told apart by its alphabet, not by accents, so it is asked first and
+       the English/Vietnamese line above is then drawn over the remaining
+       letters. Measured: none of the captured sites is Russian, and over all
+       1,618 of their pages the Cyrillic share is at most 0.3% (a name quoted
+       in its own script). Gutenberg's Russian books run 95–100%, and the
+       least Cyrillic 8,000-character stretch of any of them — a history
+       quoting its Latin sources — is 78.7%. Half sits a long way from both. */
+    private const val RUSSIAN_PCT = 50
+
     /* And below this there is not enough text to be asking. About two
        sentences; a chapter is thousands of letters. */
     private const val ENOUGH = 100
@@ -120,12 +174,16 @@ object Voices {
     fun detect(sample: String): String? {
         var letters = 0
         var plain = 0
+        var cyrillic = 0
         for (c in sample) {
             if (!c.isLetter()) continue
             letters++
             if (c.code < 128) plain++
+            else if (c in '\u0400'..'\u04FF') cyrillic++
         }
         if (letters < ENOUGH) return null
-        return if (plain * 100 > ENGLISH_PCT * letters) "en" else "vi"
+        if (cyrillic * 100 > RUSSIAN_PCT * letters) return "ru"
+        val rest = letters - cyrillic
+        return if (plain * 100 > ENGLISH_PCT * rest) "en" else "vi"
     }
 }
