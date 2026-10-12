@@ -206,4 +206,46 @@ class AmericanliteratureTest : SiteContract() {
             }
         }
     }
+
+    /* The study-link sweep matches by shape, not by class, so it must be
+       shown to take nothing else: on every captured chapter — none of which
+       carries the study row — the prose comes out exactly as without it. */
+    @Test
+    fun `the study-link sweep takes no prose from any captured chapter`() {
+        for (r in chapters) {
+            val doc = Jsoup.parse(page(r[1]), r[2])
+            val article = doc.selectFirst("article.chapter-content")!!
+            val prose = article.select("p").filter { it.parents().none { p -> p.tagName() == "p" } }.map { it.text() }
+            val kept = site.chapterContent(doc)!!.select("p")
+                .filter { it.parents().none { p -> p.tagName() == "p" } }.map { it.text() }
+            assertEquals("${r[1]}: paragraphs", prose, kept)
+        }
+    }
+
+    /* The phone saved Moby-Dick's "ETYMOLOGY" opening with the study row
+       ("❓ FAQ", "🃏 Flashcards", "📚 Vocabulary", "✏ Quiz", "📄 Summary")
+       above the prose. No capture holds that page as the site serves it now,
+       so the row is the site's OWN badge markup — lifted from the table of
+       contents of the captured Moby-Dick page, labels and links as served —
+       set where the phone showed it, after the chapter navigation. */
+    @Test
+    fun `the chapter's study row is never saved as prose`() {
+        val book = Jsoup.parse(
+            page("americanliterature/herman-melville__moby-dick-or-the-whale.html"),
+            "https://americanliterature.com/author/herman-melville/book/moby-dick-or-the-whale",
+        )
+        val row = book.selectFirst("#chapter-toc-list .toc-enrichment-badges")!!
+        val labels = row.select("a").map { it.text() }
+        assertTrue(labels.toString(), labels.any { it.contains("Flashcards") })
+        val r = chapters.first { it[1].contains("moby-dick") }
+        val doc = Jsoup.parse(page(r[1]), r[2])
+        val article = doc.selectFirst("article.chapter-content")!!
+        val before = article.selectFirst("p")!!.text()
+        article.select("> hr").last()!!.after(row.outerHtml())
+        val body = Extractor.parseChapter(doc, "", 1, site).substringAfter('\n')
+        for (j in listOf("FAQ", "Flashcards", "Vocab", "Quiz", "Summary")) {
+            assertFalse("kept \"$j\":\n${body.take(300)}", body.contains(j, ignoreCase = true))
+        }
+        assertTrue(body.take(300), body.startsWith(before.take(40)))
+    }
 }
