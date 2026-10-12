@@ -169,7 +169,44 @@ object Americanliterature : Site {
                 c.tagName() == "div" && navRe.matches(c.text()) -> c.remove()
             }
         }
+        dropStudyLinks(el)
         return el
+    }
+
+    /* Since October the site also prints the chapter's study links inside
+       the article — "❓ FAQ", "🃏 Flashcards", "📚 Vocabulary", "✏ Quiz",
+       "📄 Summary" — and they were saved as the chapter's opening lines. No
+       capture holds that markup (the archive's latest predates it and the
+       live site refuses this sandbox), so it is matched on what it must be
+       rather than on a class name: a link to a study page that reads as
+       nothing but a study label, or a wrapper that reads as nothing but
+       those labels, and whatever held them left with no words of its own.
+       Nothing inside a <p> — a word of prose is still prose, even when it
+       is "Summary" or links to one. */
+    private val studyHref = Regex("(/(flashcards|vocabulary|vocab|quiz|summary)/?|#faq)$", RegexOption.IGNORE_CASE)
+    private val studyText = Regex(
+        "^(?:[^\\p{L}\\p{N}]*(?:faq|flashcards|fc|vocab(?:ulary)?|voc|quiz|summary|sum)(?![\\p{L}\\p{N}]))+[^\\p{L}\\p{N}]*$",
+        RegexOption.IGNORE_CASE,
+    )
+    private val wordRe = Regex("[\\p{L}\\p{N}]")
+
+    private fun dropStudyLinks(el: Element) {
+        val links = el.select("a[href]").filter {
+            studyHref.containsMatchIn(it.attr("href").substringBefore('?')) && studyText.matches(it.text())
+        }
+        val wrappers = el.select("div, nav, ul, ol, li, section, aside, span").filter {
+            studyText.matches(it.text())
+        }
+        for (s in links + wrappers) {
+            if (s.closest("p") != null || s.parent() == null) continue
+            var up = s.parent()
+            s.remove()
+            while (up != null && up !== el && up.parent() != null && !wordRe.containsMatchIn(up.text())) {
+                val next = up.parent()
+                up.remove()
+                up = next
+            }
+        }
     }
 
     /* The chapter's name is the first <span> of the article's h1 — the h1
