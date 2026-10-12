@@ -111,6 +111,7 @@ class DownloadEngine(
        flight burning its end-of-run retries inside the same refusal. */
     private fun fetch(url: String): FetchResult {
         val site = Sites.forUrl(url)
+        if (site != null && site.chaptersShareAPage && '#' in url) return fetchSection(site, url)
         var attempt = 0
         while (true) {
             if (site != null && !Pace.await(site) { stopRequested }) return FetchResult(null, 0)
@@ -120,6 +121,38 @@ class DownloadEngine(
             if (wait > 0) log("The site asked to slow down — waiting ${(wait + 999) / 1000}s")
             attempt++
         }
+    }
+
+    /* The one page a chaptersShareAPage site's chapters are all cut from,
+       parsed once and held until another such page replaces it. A book there
+       runs to megabytes; fetched and parsed per chapter it would be hundreds
+       of downloads        of the same file and twenty whole-book documents in
+       memory at once. jsoup documents are not safe to share between
+       threads, so the cuts take the lock one at a time; the listing reads
+       the same document, but before any chapter is fetched. `section` must
+       copy what it returns and leave the page as it found it.
+       Held softly: a parsed book can run to tens of megabytes, and once
+       the run is over nothing needs it — the worst a collected page costs
+       is fetching the book once more. */
+    private val heldLock = Any()
+    private var heldUrl: String? = null
+    private var heldPage: java.lang.ref.SoftReference<org.jsoup.nodes.Document>? = null
+    private var heldStatus = 0
+
+    private fun heldPage(url: String): org.jsoup.nodes.Document? = synchronized(heldLock) {
+        if (heldUrl == url) heldPage?.get()?.let { return it }
+        val res = fetch(url)
+        heldStatus = res.status
+        val doc = res.html?.let { Jsoup.parse(it, url) } ?: return null
+        heldUrl = url
+        heldPage = java.lang.ref.SoftReference(doc)
+        doc
+    }
+
+    private fun fetchSection(site: Site, url: String): FetchResult = synchronized(heldLock) {
+        val page = heldPage(url.substringBefore('#')) ?: return FetchResult(null, heldStatus)
+        val html = site.section(page, url) ?: return FetchResult(null, 404)
+        FetchResult(html, 200)
     }
 
     private fun fetchOnce(url: String): FetchResult = try {
@@ -990,6 +1023,7 @@ class DownloadEngine(
         novel: org.jsoup.nodes.Document,
     ): org.jsoup.nodes.Document? {
         val url = site.listingUrl(base, slug) ?: return novel
+        if (site.chaptersShareAPage) return heldPage(url)
         return fetch(url).html?.let { Jsoup.parse(it, url) }
     }
 

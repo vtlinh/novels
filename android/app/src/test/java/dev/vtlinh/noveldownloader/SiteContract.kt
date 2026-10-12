@@ -272,6 +272,8 @@ abstract class SiteContract {
         for (r in novels) {
             val t = site.title(Jsoup.parse(page(r[1]), r[3])) ?: continue
             val (_, slug) = site.normalize(r[3])
+            /* gutenberg's slug is a catalogue number: it names no words */
+            if (slug.none { it.isLetter() }) continue
             val tk = t.lowercase().filter { it.isLetterOrDigit() }.length
             val sk = slug.lowercase().filter { it.isLetterOrDigit() }.length.coerceAtLeast(1)
             assertTrue(

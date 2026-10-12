@@ -48,10 +48,11 @@ interface Site {
     fun listPageUrl(base: String, slug: String, page: Int): String
 
     /* The page holding the chapter list, when it is not the novel page.
-       Null — every site but one — means the novel page lists its own
-       chapters. standardebooks.org's book page carries the title, author,
-       cover and blurb and no chapters at all; the table of contents is a
-       page of its own. The novel page is still read for everything else. */
+       Null — most sites — means the novel page lists its own chapters.
+       standardebooks.org's book page carries the title, author, cover and
+       blurb and no chapters at all; the table of contents is a page of its
+       own. gutenberg.org's chapters are in the book's read-online page.
+       The novel page is still read for everything else. */
     fun listingUrl(base: String, slug: String): String? = null
 
     /* Strict: used for the WHOLE-DOCUMENT fallback, where a link's position
@@ -73,6 +74,24 @@ interface Site {
        collected as a chapter it fails to save on every run — but the site
        marks the entry as a section in the markup itself. */
     fun inListing(a: Element): Boolean = true
+
+    /* The chapter list, read by the site itself, for a site whose chapters
+       are not links at all. Null — every site but one — means read the
+       links in `listScope`. gutenberg.org serves a whole book as one page and
+       marks its chapters only by their headings; each entry's url is that
+       page plus a fragment naming the section (see chaptersShareAPage). */
+    fun chapterList(doc: Document, slug: String): List<Listing.Link>? = null
+
+    /* The chapters are sections of ONE page, told apart by their urls'
+       fragments. The engine then fetches and parses that page once and asks
+       `section` for each chapter's own HTML, rather than fetching — and
+       parsing, twenty at a time — a whole book for every chapter. */
+    val chaptersShareAPage: Boolean get() = false
+
+    /* The HTML of the section `url`'s fragment names, cut out of `page`;
+       null when the page has no such section. Only asked when
+       chaptersShareAPage. */
+    fun section(page: Document, url: String): String? = null
 
     /* the number the SITE prints for this chapter, if its url says. Null is a
        fine answer — the caller falls back to the chapter's position in the

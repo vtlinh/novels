@@ -167,6 +167,7 @@ object Listing {
     }
 
     fun collect(d: org.jsoup.nodes.Document, site: Site, slug: String): Found {
+        site.chapterList(d, slug)?.let { return Found(it, false) }
         fun scan(root: org.jsoup.nodes.Element, inList: Boolean): List<Link> {
             val out = ArrayList<Link>()
             for (a in root.select("a[href]")) {
