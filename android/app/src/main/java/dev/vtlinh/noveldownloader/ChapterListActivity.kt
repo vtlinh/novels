@@ -227,6 +227,9 @@ class ChapterListActivity : AppCompatActivity() {
     /* Info is a view switch, not a new screen — Back from info returns
        to the chapter list rather than leaving the novel. */
     private fun goBack() {
+        /* onBackPressed is overridden without super, so the gallery's own
+           back callback on the dispatcher never runs here */
+        if (PictureGallery.closeIfOpen()) return
         if (onInfoTab) {
             showInfo(false)
             return
