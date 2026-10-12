@@ -312,6 +312,13 @@ object Gutenberg : Site {
         fun take(n: Node) {
             if (n is Element && (n in leave || skipped(n))) return
             if (n is Comment) return
+            /* A run of heads can end inside the chapter's own <div> ("BOOK
+               ONE" before it, "CHAPTER I" in it); cloned whole, that head
+               was saved again as the text's first line. */
+            if (n is Element && leave.any { isAncestor(n, it) }) {
+                for (c in n.childNodes()) take(c)
+                return
+            }
             out.appendChild(n.clone())
         }
         fun into(container: Node): Boolean {
