@@ -47,4 +47,14 @@ class ScenesTest {
         assertEquals(21, Scenes.chapterNumber("Chapter 21.txt"))
         assertTrue((Scenes.chapterNumber("Chapter 2.png") ?: 0) < (Scenes.chapterNumber("Chapter 10.png") ?: 0))
     }
+
+    /* After an inserted chapter shifted Chapter 5 to 6, its picture is
+       still scenes/Chapter 5.png. The new Chapter 5's picture must not
+       overwrite it. */
+    @Test
+    fun `a picture name another chapter still owns is not reused`() {
+        val owned = setOf("Chapter 5.png", "Chapter 5 (2).png")
+        assertEquals("Chapter 5 (3).png", Scenes.freeImageName("Chapter 5.txt") { it in owned })
+        assertEquals("Chapter 5.png", Scenes.freeImageName("Chapter 5.txt") { false })
+    }
 }

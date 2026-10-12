@@ -2231,12 +2231,22 @@ class ReaderActivity : AppCompatActivity() {
             val outcome = withContext(Dispatchers.IO) {
                 ChapterImages.request(this@ReaderActivity, folder, dir, slug, chapter)
             }
-            if (outcome.getOrNull() == true && !asDocument()) {
-                val pos = currentChapterIdx
-                if (pos >= 0) openAt(pos, autoPicture = true)
-            }
+            if (outcome.getOrNull() == true && !asDocument()) showArrivedPicture()
             bindImageAction(gen, card)
         }
+    }
+
+    /* A requested picture can land minutes later, while the reader is
+       mid-chapter or reading aloud. Reopening at the chapter top stopped
+       the speech and lost the place: reload at the current spot, and
+       while speaking leave the page alone. */
+    private fun showArrivedPicture() {
+        if (speaking) {
+            bindPictureButton()
+            return
+        }
+        val pos = currentPosition() ?: return
+        openAt(pos.first, pos.second, autoPicture = true)
     }
 
     private fun pollChapterImage(gen: TextView, card: android.view.View) {
@@ -2252,10 +2262,7 @@ class ReaderActivity : AppCompatActivity() {
             val outcome = withContext(Dispatchers.IO) {
                 ChapterImages.poll(this@ReaderActivity, folder, dir, slug, chapter)
             }
-            if (outcome.getOrNull() == true && !asDocument()) {
-                val pos = currentChapterIdx
-                if (pos >= 0) openAt(pos, autoPicture = true)
-            }
+            if (outcome.getOrNull() == true && !asDocument()) showArrivedPicture()
             bindImageAction(gen, card)
         }
     }
