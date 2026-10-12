@@ -42,6 +42,12 @@ object Americanliterature : Site {
 
     override val publishesUnfinished = false
 
+    /* Measured on a phone: Moby-Dick at the engine's twenty-at-once saved 62
+       chapters, then every request was answered 429 and stayed refused
+       through all four retry passes. One request every 1.5s is 40 a minute,
+       under whatever that burst crossed; a 429 even so doubles it (Pace). */
+    override val requestGapMs = 1_500L
+
     private val urlRe = Regex("^https://(www\\.)?americanliterature\\.com(/|$)", RegexOption.IGNORE_CASE)
 
     override fun matches(url: String) = urlRe.containsMatchIn(url.trim())
