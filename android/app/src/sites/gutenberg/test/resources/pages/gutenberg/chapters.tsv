@@ -1,0 +1,43 @@
+# Chapters of the captured books. A chapter here is a section of the book's
+# one read-online page, so each row names that page's capture (the listing
+# in manifest.tsv) with the section's url — the page plus "#section-<n>".
+# Every third book, rotating first / middle / last section, measured like
+# manifest.tsv: content_chars is the section's text with its heading, page
+# numbers and the site's boilerplate left out, whitespace collapsed.
+site	file	url	novel	which	heading_number	content_chars	novel_max_page	novel_completed
+gutenberg	gutenberg/html/11.html	https://www.gutenberg.org/cache/epub/11/pg11-images.html#section-2	11	first	1	11281	1	true
+gutenberg	gutenberg/html/76.html	https://www.gutenberg.org/cache/epub/76/pg76-images.html#section-26	76	mid	22	10790	1	true
+gutenberg	gutenberg/html/345.html	https://www.gutenberg.org/cache/epub/345/pg345-images.html#section-30	345	last		3086	1	true
+gutenberg	gutenberg/html/1184.html	https://www.gutenberg.org/cache/epub/1184/pg1184-images.html#section-2	1184	first	1	17222	1	true
+gutenberg	gutenberg/html/1524.html	https://www.gutenberg.org/cache/epub/1524/pg1524-images.html#section-12	1524	mid		4443	1	true
+gutenberg	gutenberg/html/2600.html	https://www.gutenberg.org/cache/epub/2600/pg2600-images.html#section-366	2600	last	12	4863	1	true
+gutenberg	gutenberg/html/3391.html	https://www.gutenberg.org/cache/epub/3391/pg3391-images.html#section-1	3391	first		1495	1	true
+gutenberg	gutenberg/html/5286.html	https://www.gutenberg.org/cache/epub/5286/pg5286-images.html#section-3	5286	mid		7871	1	true
+gutenberg	gutenberg/html/7256.html	https://www.gutenberg.org/cache/epub/7256/pg7256-images.html#section-1	7256	last		11122	1	true
+gutenberg	gutenberg/html/10677.html	https://www.gutenberg.org/cache/epub/10677/pg10677-images.html#section-2	10677	first		10578	1	true
+gutenberg	gutenberg/html/12745.html	https://www.gutenberg.org/cache/epub/12745/pg12745-images.html#section-15	12745	mid		21050	1	true
+gutenberg	gutenberg/html/15147.html	https://www.gutenberg.org/cache/epub/15147/pg15147-images.html#section-24	15147	last		253	1	true
+gutenberg	gutenberg/html/16129.html	https://www.gutenberg.org/cache/epub/16129/pg16129-images.html#section-2	16129	first	1	38641	1	true
+gutenberg	gutenberg/html/18681.html	https://www.gutenberg.org/cache/epub/18681/pg18681-images.html#section-8	18681	mid		14664	1	true
+gutenberg	gutenberg/html/22032.html	https://www.gutenberg.org/cache/epub/22032/pg22032-images.html#section-21	22032	last		303	1	true
+gutenberg	gutenberg/html/24266.html	https://www.gutenberg.org/cache/epub/24266/pg24266-images.html#section-2	24266	first		129	1	true
+gutenberg	gutenberg/html/29702.html	https://www.gutenberg.org/cache/epub/29702/pg29702-images.html#section-2	29702	mid		51694	1	true
+gutenberg	gutenberg/html/34071.html	https://www.gutenberg.org/cache/epub/34071/pg34071-images.html#section-26	34071	last	12	16600	1	true
+gutenberg	gutenberg/html/42527.html	https://www.gutenberg.org/cache/epub/42527/pg42527-images.html#section-2	42527	first		161	1	true
+gutenberg	gutenberg/html/47306.html	https://www.gutenberg.org/cache/epub/47306/pg47306-images.html#section-9	47306	mid	7	26137	1	true
+gutenberg	gutenberg/html/50592.html	https://www.gutenberg.org/cache/epub/50592/pg50592-images.html#section-117	50592	last		328	1	true
+gutenberg	gutenberg/html/52633.html	https://www.gutenberg.org/cache/epub/52633/pg52633-images.html#section-3	52633	first		737	1	true
+gutenberg	gutenberg/html/55104.html	https://www.gutenberg.org/cache/epub/55104/pg55104-images.html#section-4	55104	mid		3320	1	true
+gutenberg	gutenberg/html/56585.html	https://www.gutenberg.org/cache/epub/56585/pg56585-images.html#section-36	56585	last		3393	1	true
+gutenberg	gutenberg/html/58184.html	https://www.gutenberg.org/cache/epub/58184/pg58184-images.html#section-4	58184	first		29373	1	true
+gutenberg	gutenberg/html/60655.html	https://www.gutenberg.org/cache/epub/60655/pg60655-images.html#section-1	60655	mid		20098	1	true
+gutenberg	gutenberg/html/62490.html	https://www.gutenberg.org/cache/epub/62490/pg62490-images.html#section-53	62490	last		223	1	true
+gutenberg	gutenberg/html/63164.html	https://www.gutenberg.org/cache/epub/63164/pg63164-images.html#section-1	63164	first	1	13738	1	true
+gutenberg	gutenberg/html/64317.html	https://www.gutenberg.org/cache/epub/64317/pg64317-images.html#section-6	64317	mid	5	23333	1	true
+gutenberg	gutenberg/html/67038.html	https://www.gutenberg.org/cache/epub/67038/pg67038-images.html#section-16	67038	last	15	9033	1	true
+gutenberg	gutenberg/html/68760.html	https://www.gutenberg.org/cache/epub/68760/pg68760-images.html#section-2	68760	first		1750	1	true
+gutenberg	gutenberg/html/74213.html	https://www.gutenberg.org/cache/epub/74213/pg74213-images.html#section-11	74213	mid		21312	1	true
+gutenberg	gutenberg/html/75082.html	https://www.gutenberg.org/cache/epub/75082/pg75082-images.html#section-30	75082	last		12219	1	true
+gutenberg	gutenberg/html/76213.html	https://www.gutenberg.org/cache/epub/76213/pg76213-images.html#section-0	76213	first		4046	1	true
+gutenberg	gutenberg/html/77139.html	https://www.gutenberg.org/cache/epub/77139/pg77139-images.html#section-5	77139	mid		5497	1	true
+gutenberg	gutenberg/html/77230.html	https://www.gutenberg.org/cache/epub/77230/pg77230-images.html#section-34	77230	last		440	1	true
