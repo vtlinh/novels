@@ -2184,7 +2184,7 @@ class DownloadEngine(
                                 /* held: an earlier chapter this run is a teaser */
                             } else {
                                 val parsed = Jsoup.parse(res.html, ch.url)
-                                if (Listing.pageIsPreview(parsed, site, ch.text)) {
+                                if (Listing.pageIsPreview(parsed, site)) {
                                     previewHits.add(ch.pos)
                                     pageCut.updateAndGet { minOf(it, ch.pos) }
                                     log(

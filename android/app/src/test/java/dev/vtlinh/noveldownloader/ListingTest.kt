@@ -409,7 +409,7 @@ class ListingTest {
             </div>
         """.trimIndent()
         val doc = org.jsoup.Jsoup.parse(html, "https://novelfull.com/book/chapter-12-end.html")
-        assertTrue(Listing.pageIsPreview(doc, dev.vtlinh.noveldownloader.sites.Novelfull, "Chapter 12 End"))
+        assertTrue(Listing.pageIsPreview(doc, dev.vtlinh.noveldownloader.sites.Novelfull))
     }
 
     @Test
@@ -422,6 +422,6 @@ class ListingTest {
             </div>
         """.trimIndent()
         val doc = org.jsoup.Jsoup.parse(html, "https://novelfull.com/book/chapter-12-the-preview.html")
-        assertFalse(Listing.pageIsPreview(doc, dev.vtlinh.noveldownloader.sites.Novelfull, "Chapter 12 The Preview"))
+        assertFalse(Listing.pageIsPreview(doc, dev.vtlinh.noveldownloader.sites.Novelfull))
     }
 }

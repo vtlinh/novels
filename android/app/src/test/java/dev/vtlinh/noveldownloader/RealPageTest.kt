@@ -388,7 +388,7 @@ class RealChapterTest {
         for (c in chapters) {
             assertFalse(
                 "${c.file}: page read as a preview",
-                Listing.pageIsPreview(Jsoup.parse(read(c.file), c.url), c.site, ""),
+                Listing.pageIsPreview(Jsoup.parse(read(c.file), c.url), c.site),
             )
         }
     }
