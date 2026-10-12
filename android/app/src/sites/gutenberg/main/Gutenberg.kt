@@ -45,7 +45,7 @@ object Gutenberg : Site {
        only where the collector would look if that page were something else. */
     override val listScope = "body"
 
-    override val hosts = listOf("www.gutenberg.org", "gutenberg.org")
+    override val hosts = listOf("www.gutenberg.org")
 
     override val paginates = false
 

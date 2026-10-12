@@ -96,6 +96,18 @@ abstract class SiteContract {
         }
     }
 
+    /* Each declared host is a row on the start screen, and www.x and x are
+       one site to the reader: declaring both listed gutenberg.org twice. The
+       bare host still works without being declared — `matches` claims it. */
+    @Test
+    fun `it declares each host once, not with and without www`() {
+        val bare = site.hosts.map { it.removePrefix("www.") }
+        assertEquals(
+            "${site.name}: declares the same host with and without www",
+            bare.distinct(), bare,
+        )
+    }
+
     /* Letters and digits only — the key the app matches a novel's records
        by (Ownership.normKey). standardebooks' slug is a path of two or
        three segments, and a slug cannot hold the "/" between them. */

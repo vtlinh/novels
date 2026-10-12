@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Read Russian books aloud, in a Russian voice
+	List Project Gutenberg once on the browser start screen
+1.42.6	Read Russian books aloud, in a Russian voice
 1.42.5	Add Project Gutenberg (gutenberg.org) as a source, opening on its categories
 1.42.4	Add Standard Ebooks (standardebooks.org) as an English source
 1.42.3	Open americanliterature.com on its Books page
