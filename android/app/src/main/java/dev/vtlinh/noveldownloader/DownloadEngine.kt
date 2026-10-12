@@ -103,16 +103,33 @@ class DownloadEngine(
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    class FetchResult(val html: String?, val status: Int)
+    class FetchResult(val html: String?, val status: Int, val retryAfter: String? = null)
 
-    private fun fetch(url: String): FetchResult = try {
+    /* Through the site's Pace gate. A refusal the gate answers with a pause
+       is waited out and the same page asked again, twice at most — so a
+       site that wants a breather gets one, instead of every chapter in
+       flight burning its end-of-run retries inside the same refusal. */
+    private fun fetch(url: String): FetchResult {
+        val site = Sites.forUrl(url)
+        var attempt = 0
+        while (true) {
+            if (site != null && !Pace.await(site) { stopRequested }) return FetchResult(null, 0)
+            val res = fetchOnce(url)
+            if (site == null || (res.status != 429 && res.status != 503) || attempt >= 2) return res
+            val wait = Pace.throttled(site, res.retryAfter) ?: return res
+            if (wait > 0) log("The site asked to slow down — waiting ${(wait + 999) / 1000}s")
+            attempt++
+        }
+    }
+
+    private fun fetchOnce(url: String): FetchResult = try {
         client.newCall(
             Request.Builder().url(url)
                 .header("User-Agent", UA)
                 .header("Accept-Language", "vi,en;q=0.8")
                 .build(),
         ).execute().use { r ->
-            FetchResult(if (r.isSuccessful) r.body?.string() else null, r.code)
+            FetchResult(if (r.isSuccessful) r.body?.string() else null, r.code, r.header("Retry-After"))
         }
     } catch (e: Exception) {
         FetchResult(null, 0)   // 0 = network error

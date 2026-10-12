@@ -95,6 +95,11 @@ interface Site {
        carries none must never read a captured novel as unfinished. */
     val publishesUnfinished: Boolean get() = true
 
+    /* The shortest time between two requests to this site, across the whole
+       app (see Pace). The serial sites take twenty chapters at once; a site
+       that answers a burst with "too many requests" names its pace here. */
+    val requestGapMs: Long get() = 0L
+
     /* The listing runs NEWEST-FIRST on this site, so reading it in document
        order is reading the novel backwards. Positions name files, so this is
        not cosmetic: chapter 1 would be saved as the last file. Listing.collect
