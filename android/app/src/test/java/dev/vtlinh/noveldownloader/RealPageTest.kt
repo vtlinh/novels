@@ -49,6 +49,7 @@ class RealPageTest {
         val completed: Boolean?,
         val chapters: Int,
         val maxPage: Int?,
+        val listing: String?,     // the chapter list's own page, where the site has one
     ) {
         val slug: String get() = site.normalize(url).second
         override fun toString() = file
@@ -75,11 +76,19 @@ class RealPageTest {
                     completed = c[5].ifEmpty { null }?.toBoolean(),
                     chapters = c[6].toInt(),
                     maxPage = c[7].ifEmpty { null }?.toInt(),
+                    listing = c.getOrNull(8)?.ifEmpty { null },
                 )
             }.toList()
     }
 
     private fun doc(f: Fixture) = Jsoup.parse(read(f.file), f.url)
+
+    /* Where the chapter list is read from — see Site.listingUrl. */
+    private fun listDoc(f: Fixture): org.jsoup.nodes.Document {
+        val file = f.listing ?: return doc(f)
+        val (base, slug) = f.site.normalize(f.url)
+        return Jsoup.parse(read(file), f.site.listingUrl(base, slug) ?: f.url)
+    }
 
     /* Every site in the registry, not a list written out here: a site added
        without its corpus would otherwise be held to nothing, and the corpus
@@ -141,7 +150,7 @@ class RealPageTest {
     @Test
     fun `every real page is read from the site's own chapter list`() {
         for (f in fixtures) {
-            val found = Listing.collect(doc(f), f.site, f.slug)
+            val found = Listing.collect(listDoc(f), f.site, f.slug)
             assertFalse(
                 "${f.file}: fell back to the whole document — that is the widget, not the listing",
                 found.fellBack,
@@ -162,7 +171,7 @@ class RealPageTest {
     fun `a page with no chapter list is recognised as a fallback, not read as one`() {
         var fired = 0
         for (f in fixtures.filter { it.kind == "novel" }) {
-            val d = doc(f)
+            val d = listDoc(f)
             (d.selectFirst(f.site.listScope) ?: continue).remove()
             val found = Listing.collect(d, f.site, f.slug)
             if (found.links.isEmpty()) continue   // nothing left to mistake for a listing
@@ -185,7 +194,7 @@ class RealPageTest {
     @Test
     fun `the collector finds the chapters the page actually holds`() {
         for (f in fixtures) {
-            val found = Listing.collect(doc(f), f.site, f.slug)
+            val found = Listing.collect(listDoc(f), f.site, f.slug)
             assertEquals(
                 "${f.file}: chapter count disagrees with what the page holds",
                 f.chapters,
@@ -199,7 +208,7 @@ class RealPageTest {
     @Test
     fun `the novel's own url and its page links are never collected as chapters`() {
         for (f in fixtures) {
-            val links = Listing.collect(doc(f), f.site, f.slug).links.map { it.url }
+            val links = Listing.collect(listDoc(f), f.site, f.slug).links.map { it.url }
             /* by PATH: these pages carry absolute links to the site's other
                host, so comparing whole URLs would pass without proving
                anything */
@@ -224,7 +233,7 @@ class RealPageTest {
     @Test
     fun `page one lists chapters in ascending site order`() {
         for (f in fixtures.filter { it.kind == "novel" && it.site.name == "truyenfull" }) {
-            val nums = Listing.collect(doc(f), f.site, f.slug).links
+            val nums = Listing.collect(listDoc(f), f.site, f.slug).links
                 .mapNotNull { f.site.chapterNumFromUrl(it.url) }
             assertTrue("${f.file}: no numbered chapters", nums.size > 5)
             assertEquals("${f.file}: page 1 does not start at chapter 1", 1, nums.first())
@@ -249,7 +258,7 @@ class RealPageTest {
             assertEquals(
                 "${f.file}: page count disagrees with the pagination on the page",
                 f.maxPage,
-                f.site.maxPage(doc(f), f.slug),
+                f.site.maxPage(listDoc(f), f.slug),
             )
         }
     }
@@ -286,7 +295,7 @@ class RealPageTest {
         val last = fixtures.filter { it.file.contains("last") }
         assertTrue("no last-page fixtures captured", last.isNotEmpty())
         for (f in last) {
-            val found = Listing.collect(doc(f), f.site, f.slug)
+            val found = Listing.collect(listDoc(f), f.site, f.slug)
             assertFalse("${f.file}: read as a fallback", found.fellBack)
             assertTrue("${f.file}: a real last page still holds chapters", found.links.isNotEmpty())
         }
@@ -297,7 +306,7 @@ class RealPageTest {
     @Test
     fun `captured listing chapters are not marked as previews`() {
         for (f in fixtures) {
-            val found = Listing.collect(doc(f), f.site, f.slug)
+            val found = Listing.collect(listDoc(f), f.site, f.slug)
             val marked = found.links.filter { it.preview }
             assertTrue(
                 "${f.file}: ${marked.size} listing link(s) read as previews: " +

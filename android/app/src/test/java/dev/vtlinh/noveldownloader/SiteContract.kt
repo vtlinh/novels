@@ -39,6 +39,16 @@ abstract class SiteContract {
     protected val novels by lazy { rows("manifest.tsv").filter { it[4] == "novel" } }
     protected val chapters by lazy { rows("chapters.tsv") }
 
+    /* The page a novel's chapter list is read from: the novel page itself,
+       or — for a site that keeps the list on a page of its own
+       (Site.listingUrl) — that page's capture, named in the manifest's
+       ninth column. */
+    protected fun listingDoc(r: List<String>): org.jsoup.nodes.Document {
+        val file = r.getOrNull(8)?.ifEmpty { null } ?: return Jsoup.parse(page(r[1]), r[3])
+        val (base, slug) = site.normalize(r[3])
+        return Jsoup.parse(page(file), site.listingUrl(base, slug) ?: r[3])
+    }
+
     /* ---- the contract ---- */
 
     @Test
@@ -86,6 +96,12 @@ abstract class SiteContract {
         }
     }
 
+    /* Letters and digits only — the key the app matches a novel's records
+       by (Ownership.normKey). standardebooks' slug is a path of two or
+       three segments, and a slug cannot hold the "/" between them. */
+    private fun mentions(url: String, slug: String) =
+        Ownership.normKey(url).contains(Ownership.normKey(slug))
+
     /* normalize is how every later step addresses the novel — a base to page
        through and a slug that names its folder for life. */
     @Test
@@ -93,7 +109,7 @@ abstract class SiteContract {
         for (r in novels) {
             val (base, slug) = site.normalize(r[3])
             assertTrue("${r[3]}: empty slug", slug.isNotEmpty())
-            assertTrue("${r[3]}: base does not contain the slug", base.contains(slug))
+            assertTrue("${r[3]}: base does not contain the slug", mentions(base, slug))
             assertTrue("${r[3]}: base is not a url", base.startsWith("https://"))
             /* idempotent: normalizing the base must give the same answer, or a
                second run addresses the novel differently from the first */
@@ -107,7 +123,7 @@ abstract class SiteContract {
             val (base, slug) = site.normalize(r[3])
             val p2 = site.listPageUrl(base, slug, 2)
             val p3 = site.listPageUrl(base, slug, 3)
-            assertTrue("${r[3]}: page 2 url does not mention the novel", p2.contains(slug))
+            assertTrue("${r[3]}: page 2 url does not mention the novel", mentions(p2, slug))
             assertTrue("${r[3]}: page 2 and 3 are the same url", p2 != p3)
         }
     }
@@ -125,7 +141,7 @@ abstract class SiteContract {
     fun `the chapter count in the listing container matches what was measured`() {
         for (r in novels) {
             val (_, slug) = site.normalize(r[3])
-            val found = Listing.collect(Jsoup.parse(page(r[1]), r[3]), site, slug)
+            val found = Listing.collect(listingDoc(r), site, slug)
             assertFalse("${r[1]}: fell back to the whole document", found.fellBack)
             assertEquals(
                 "${r[1]}: chapters in container",
@@ -143,7 +159,27 @@ abstract class SiteContract {
             assertEquals(
                 "${r[1]}: max page",
                 expected,
-                site.maxPage(Jsoup.parse(page(r[1]), r[3]), slug),
+                site.maxPage(listingDoc(r), slug),
+            )
+        }
+    }
+
+    /* The engine fetches the list from wherever the site says it is, so a
+       site that names a separate page owes a capture of it for every novel,
+       and one that does not must not have the column filled in — that
+       capture would be judged in place of the page the engine really
+       reads. */
+    @Test
+    fun `the chapter list is captured from the page the engine reads it from`() {
+        for (r in novels) {
+            val (base, slug) = site.normalize(r[3])
+            val separate = site.listingUrl(base, slug) != null
+            val captured = !r.getOrNull(8).isNullOrEmpty()
+            assertEquals(
+                "${r[1]}: " + if (separate) "the chapter list's own page was not captured"
+                else "a listing capture is named, but the novel page is the list",
+                separate,
+                captured,
             )
         }
     }
