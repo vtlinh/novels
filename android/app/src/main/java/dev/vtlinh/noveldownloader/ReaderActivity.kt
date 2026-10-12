@@ -3254,7 +3254,7 @@ class ReaderActivity : AppCompatActivity() {
             titleBar.text = loadedChapters.firstOrNull { it.idx == p }?.heading ?: ""
             saveLastChapter(p)
 
-            val row = rowOf(p).coerceAtLeast(0)
+            val row = ReaderPlace.landingRow(loadedChapters.map { it.idx }, p)
             val targetOff =
                 if (targetPara > 0 && targetBodyLen > 0) {
                     val body = loadedChapters.getOrNull(row)?.body
