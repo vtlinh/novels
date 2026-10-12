@@ -100,6 +100,11 @@ interface Site {
        that answers a burst with "too many requests" names its pace here. */
     val requestGapMs: Long get() = 0L
 
+    /* Where the browser's start screen opens this site. The front page, for
+       a site that is all novels; a site that also carries other things
+       opens on the part the app can download. */
+    val startPath: String get() = "/"
+
     /* The listing runs NEWEST-FIRST on this site, so reading it in document
        order is reading the novel backwards. Positions name files, so this is
        not cosmetic: chapter 1 would be saved as the last file. Listing.collect

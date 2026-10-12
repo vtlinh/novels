@@ -21,6 +21,12 @@ class AmericanliteratureTest : SiteContract() {
     }
 
     @Test
+    fun `the browser opens the site on its books`() {
+        assertEquals("/books/", site.startPath)
+        assertTrue(site.matches("https://americanliterature.com${site.startPath}"))
+    }
+
+    @Test
     fun `the host is recognised in both spellings, and only it`() {
         assertTrue(site.matches("https://americanliterature.com/author/hg-wells/book/the-invisible-man"))
         assertTrue(site.matches("https://www.americanliterature.com/author/hg-wells/book/the-invisible-man"))
