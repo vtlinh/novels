@@ -205,6 +205,7 @@ class SettingsActivity : AppCompatActivity() {
                 "the filters below. It keeps going while you are in the app " +
                 "or while it is reading aloud.\n\n" +
                 "Every and Starting from chapter pick which chapters. " +
+                "A finished novel also always gets pictures for its last 5 chapters. " +
                 "Wait minutes between pictures is how long the app waits " +
                 "after asking for one before asking for the next. " +
                 "At least N stars skips novels you have not rated that high. " +

@@ -54,7 +54,8 @@ class NovelSettingsActivity : AppCompatActivity() {
             "That includes a novel you marked as read or one " +
             "with fewer stars than Settings asks for.\n\n" +
             "Every and Starting from chapter pick which ones. For example, every 20 " +
-            "starting from chapter 1 means chapters 1, 21, 41, and so on.\n\n" +
+            "starting from chapter 1 means chapters 1, 21, 41, and so on. " +
+            "Once the novel is finished, its last 5 chapters always get one too.\n\n" +
             "It waits between pictures as set in Settings, and skips a chapter that already " +
             "has one. If the next chapter is not on your phone yet, it waits. " +
             "The novels you read most recently get pictures first. " +

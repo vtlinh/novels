@@ -4,21 +4,21 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Name americanliterature.com chapters like "Chapter 20" instead of "Chapter 20: Chapter XX"
-	Don't repeat the chapter heading at the top of some Project Gutenberg chapters
-	Keep americanliterature.com paragraphs whole instead of one short line each
-	Don't cut off the sentence you tapped while more chapters load
-	Opening a chapter that won't read goes to the next one, not two back
-	Keep your place and keep reading aloud when a requested picture arrives
-	Keep each chapter's picture with it when the site renumbers chapters
-	Back closes the picture gallery on a novel's page
-	Don't crash on a picture tap after turning the phone with a picture open
-	Wait for a running chapter check before downloading the same novel
-	Keep checking a novel on its own site, so it isn't re-downloaded from another
-	Keep the reading page from crashing when more chapters load
-	Don't count the translation and picture folders as chapters
-	Download a chapter again when its file is gone
-	Don't throw away a finished chapter when the site still marks it as a preview
+1.42.8	Name americanliterature.com chapters like "Chapter 20" instead of "Chapter 20: Chapter XX"
+1.42.8	Don't repeat the chapter heading at the top of some Project Gutenberg chapters
+1.42.8	Keep americanliterature.com paragraphs whole instead of one short line each
+1.42.8	Don't cut off the sentence you tapped while more chapters load
+1.42.8	Opening a chapter that won't read goes to the next one, not two back
+1.42.8	Keep your place and keep reading aloud when a requested picture arrives
+1.42.8	Keep each chapter's picture with it when the site renumbers chapters
+1.42.8	Back closes the picture gallery on a novel's page
+1.42.8	Don't crash on a picture tap after turning the phone with a picture open
+1.42.8	Wait for a running chapter check before downloading the same novel
+1.42.8	Keep checking a novel on its own site, so it isn't re-downloaded from another
+1.42.8	Keep the reading page from crashing when more chapters load
+1.42.8	Don't count the translation and picture folders as chapters
+1.42.8	Download a chapter again when its file is gone
+1.42.8	Don't throw away a finished chapter when the site still marks it as a preview
 1.42.7	List Project Gutenberg once on the browser start screen
 1.42.6	Read Russian books aloud, in a Russian voice
 1.42.5	Add Project Gutenberg (gutenberg.org) as a source, opening on its categories

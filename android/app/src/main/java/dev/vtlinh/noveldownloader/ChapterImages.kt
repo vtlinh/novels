@@ -27,7 +27,8 @@ import java.io.IOException
    with a minimum star rating and an unread-only filter. A
    novel's own ⚙ switch, when on, always includes that book and
    uses its Every / Starting from. The app posts chapter N ≥
-   from where (N − from) is a multiple of every, at most one
+   from where (N − from) is a multiple of every — and, once the
+   novel is marked complete, its last 5 chapters too — at most one
    chapter per the wait in Settings, including while it is
    reading aloud in the background. A post does not wait for that png before the next
    one is due. Novels are always tried in last-read order — the
@@ -72,9 +73,38 @@ object ChapterImages {
         val from: Int,
         val every: Int,
         val chapters: List<String> = emptyList(),
+        val last: Int = 0,
     )
 
     data class AutoPick(val slug: String, val chapter: String)
+
+    /* A finished novel always gets pictures for its ending, whatever
+       Every / Starting from say. */
+    const val FINISHED_LAST = 5
+
+    fun lastCount(complete: Boolean): Int = if (complete) FINISHED_LAST else 0
+
+    /* The `count` highest-numbered chapters, lowest of them first. */
+    fun lastChapters(chapters: List<String>, count: Int): List<String> {
+        if (count < 1) return emptyList()
+        val byNum = sortedMapOf<Int, String>()
+        for (chapter in chapters) {
+            val n = Scenes.chapterNumber(chapter) ?: continue
+            if (n !in byNum) byNum[n] = chapter
+        }
+        return byNum.values.toList().takeLast(count)
+    }
+
+    /* Every chapter auto-generate wants a picture for: the cadence,
+       plus the last `last` chapters. */
+    fun dueChapters(chapters: List<String>, from: Int, every: Int, last: Int = 0): List<String> {
+        val tail = lastChapters(chapters, last).toSet()
+        return chapters.filter { ch ->
+            if (ch in tail) return@filter true
+            val n = Scenes.chapterNumber(ch) ?: return@filter false
+            due(n, from, every)
+        }
+    }
 
     /* Newest lastRead first. Never-read (0) falls to the end.
        Equal times keep a stable slug order. */
@@ -88,15 +118,18 @@ object ChapterImages {
     /* First due chapter that is actually on disk, walking from, from+every,
        from+2*every. A hole — Starting from 21 when only 1–20 are
        downloaded, or chapter 1 missing while 21 is present — waits
-       rather than jumping ahead. skip is "already has a picture /
-       already posted / already tried". */
+       rather than jumping ahead. Then the last `last` chapters. A hole
+       does not hold those back: they are only asked for a finished
+       novel with every chapter on disk, where a hole is a number the
+       site skipped, not a chapter still on its way. skip is "already
+       has a picture / already posted / already tried". */
     fun nextDueName(
         chapters: List<String>,
         from: Int,
         every: Int,
+        last: Int = 0,
         skip: (chapter: String) -> Boolean,
     ): String? {
-        if (every < 1 || from < 1) return null
         val byNum = LinkedHashMap<Int, String>()
         var maxN = 0
         for (chapter in chapters) {
@@ -104,12 +137,16 @@ object ChapterImages {
             if (n !in byNum) byNum[n] = chapter
             if (n > maxN) maxN = n
         }
-        if (maxN < from) return null
-        var n = from
-        while (n <= maxN) {
-            val chapter = byNum[n] ?: return null
+        if (every >= 1 && from >= 1) {
+            var n = from
+            while (n <= maxN) {
+                val chapter = byNum[n] ?: break
+                if (!skip(chapter)) return chapter
+                n += every
+            }
+        }
+        for (chapter in lastChapters(chapters, last)) {
             if (!skip(chapter)) return chapter
-            n += every
         }
         return null
     }
@@ -122,7 +159,7 @@ object ChapterImages {
         skip: (slug: String, chapter: String) -> Boolean,
     ): AutoPick? {
         for (novel in byLastRead(novels, { it.lastRead }, { it.slug })) {
-            val chapter = nextDueName(novel.chapters, novel.from, novel.every) { ch ->
+            val chapter = nextDueName(novel.chapters, novel.from, novel.every, novel.last) { ch ->
                 skip(novel.slug, ch)
             } ?: continue
             return AutoPick(novel.slug, chapter)
@@ -528,10 +565,10 @@ object ChapterImages {
         work.launch {
             slackPoster(app)?.let { slack ->
                 val dueCh = if (autoOn) {
-                    chapters.filter { ch ->
-                        val n = Scenes.chapterNumber(ch) ?: return@filter false
-                        due(n, from, every)
-                    }
+                    val complete = try {
+                        DownloadStore(app).novel(folder, slug)?.complete == true
+                    } catch (e: Exception) { false }
+                    dueChapters(chapters, from, every, lastCount(complete))
                 } else {
                     emptyList()
                 }
@@ -595,10 +632,7 @@ object ChapterImages {
             val chapters = loadChapters(app, novel.folder, novel.dirName, novel.slug)
             if (chapters.isEmpty()) continue
             slack?.let {
-                val dueCh = chapters.filter { ch ->
-                    val n = Scenes.chapterNumber(ch) ?: return@filter false
-                    due(n, novel.from, novel.every)
-                }
+                val dueCh = dueChapters(chapters, novel.from, novel.every, novel.last)
                 val blankAlt = chapters.filter { ch ->
                     linkedImage(app, novel.folder, novel.slug, ch) != null &&
                         needsAltRefresh(true, linkedAlt(app, novel.folder, novel.slug, ch))
@@ -610,7 +644,7 @@ object ChapterImages {
             }
             if (autoTakeOne(
                     app, novel.folder, novel.dirName, novel.slug,
-                    chapters, novel.every, novel.from,
+                    chapters, novel.every, novel.from, novel.last,
                 )
             ) {
                 return true
@@ -626,6 +660,7 @@ object ChapterImages {
         val lastRead: Long,
         val from: Int,
         val every: Int,
+        val last: Int,
     )
 
     private fun loadAutoNovels(app: Context): List<AutoTarget> {
@@ -658,7 +693,10 @@ object ChapterImages {
                 gEvery, gFrom,
             )
             out.add(
-                AutoTarget(folder, dir, rec.slug, rec.lastRead, cadence.from, cadence.every),
+                AutoTarget(
+                    folder, dir, rec.slug, rec.lastRead, cadence.from, cadence.every,
+                    lastCount(rec.complete),
+                ),
             )
         }
         return byLastRead(out, { it.lastRead }, { it.slug })
@@ -690,8 +728,9 @@ object ChapterImages {
         chapters: List<String>,
         every: Int,
         from: Int,
+        last: Int,
     ): Boolean {
-        val chapter = nextDueName(chapters, from, every) { ch ->
+        val chapter = nextDueName(chapters, from, every, last) { ch ->
             if (hasLocalImage(app, folder, dirName, ch, slug)) return@nextDueName true
             if (alreadyRequested(app, folder, dirName, slug, ch)) {
                 markAutoTried(app, slug, ch)
