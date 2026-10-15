@@ -237,6 +237,78 @@ class ChapterImagesTest {
     }
 
     @Test
+    fun `a finished novel always gets its last 5 chapters`() {
+        assertEquals(0, ChapterImages.lastCount(false))
+        assertEquals(5, ChapterImages.lastCount(true))
+        val chapters = (1..48).map { "Chapter $it.txt" } + "notes.txt"
+        assertEquals(
+            (44..48).map { "Chapter $it.txt" },
+            ChapterImages.lastChapters(chapters.shuffled(java.util.Random(7)), 5),
+        )
+        assertEquals(emptyList<String>(), ChapterImages.lastChapters(chapters, 0))
+        assertEquals(
+            listOf("Chapter 1.txt", "Chapter 2.txt"),
+            ChapterImages.lastChapters(listOf("Chapter 2.txt", "Chapter 1.txt"), 5),
+        )
+        assertEquals(
+            listOf("Chapter 1.txt", "Chapter 21.txt", "Chapter 41.txt"),
+            ChapterImages.dueChapters(chapters, 1, 20),
+        )
+        assertEquals(
+            listOf("Chapter 1.txt", "Chapter 21.txt", "Chapter 41.txt") +
+                (44..48).map { "Chapter $it.txt" },
+            ChapterImages.dueChapters(chapters, 1, 20, 5),
+        )
+        val done = setOf("Chapter 1.txt", "Chapter 21.txt", "Chapter 41.txt")
+        assertEquals(null, ChapterImages.nextDueName(chapters, 1, 20) { it in done })
+        assertEquals(
+            "Chapter 44.txt",
+            ChapterImages.nextDueName(chapters, 1, 20, 5) { it in done },
+        )
+        assertEquals(
+            "Chapter 1.txt",
+            ChapterImages.nextDueName(chapters, 1, 20, 5) { false },
+        )
+        assertEquals(
+            "Chapter 46.txt",
+            ChapterImages.nextDueName(chapters, 1, 20, 5) {
+                it in done || it == "Chapter 44.txt" || it == "Chapter 45.txt"
+            },
+        )
+        assertEquals(
+            null,
+            ChapterImages.nextDueName(chapters, 1, 20, 5) {
+                it in done || ChapterImages.lastChapters(chapters, 5).contains(it)
+            },
+        )
+        assertEquals(
+            "Chapter 44.txt",
+            ChapterImages.nextDueName(chapters, 100, 20, 5) { false },
+        )
+        val novel = ChapterImages.AutoNovel(
+            slug = "finished", lastRead = 9, from = 1, every = 20,
+            chapters = chapters, last = 5,
+        )
+        assertEquals(
+            ChapterImages.AutoPick("finished", "Chapter 48.txt"),
+            ChapterImages.nextAuto(listOf(novel)) { _, ch -> ch != "Chapter 48.txt" },
+        )
+    }
+
+    @Test
+    fun `a gap in a finished novel's numbering does not hold back its ending`() {
+        val chapters = (1..30).filter { it != 21 }.map { "Chapter $it.txt" }
+        assertEquals(
+            null,
+            ChapterImages.nextDueName(chapters, 1, 20) { it == "Chapter 1.txt" },
+        )
+        assertEquals(
+            "Chapter 26.txt",
+            ChapterImages.nextDueName(chapters, 1, 20, 5) { it == "Chapter 1.txt" },
+        )
+    }
+
+    @Test
     fun `waiting downloads use the same last-read order`() {
         data class Wait(val slug: String, val chapter: String, val lastRead: Long)
         val waits = listOf(
