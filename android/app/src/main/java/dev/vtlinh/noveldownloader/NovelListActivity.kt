@@ -733,11 +733,7 @@ class NovelListActivity : AppCompatActivity() {
                     )
                     return@setOnClickListener
                 }
-                startActivity(
-                    Intent(ctx, ChapterListActivity::class.java)
-                        .putExtra("dir", dirName).putExtra("title", row.display)
-                        .putExtra("slug", row.rec.slug),
-                )
+                startActivity(chapterListIntent(row, dirName))
             }
             /* long-press: read / complete / garbage / delete */
             setOnLongClickListener { showMarkSheet(row); true }
@@ -880,6 +876,11 @@ class NovelListActivity : AppCompatActivity() {
         return line
     }
 
+    private fun chapterListIntent(row: Row, dirName: String): Intent =
+        Intent(this, ChapterListActivity::class.java)
+            .putExtra("dir", dirName).putExtra("title", row.display)
+            .putExtra("slug", row.rec.slug)
+
     /* long-press menu: read / complete / garbage / delete */
     private fun showMarkSheet(row: Row) {
         val slug = row.rec.slug
@@ -889,11 +890,22 @@ class NovelListActivity : AppCompatActivity() {
             setPadding(dp(20), dp(16), dp(20), dp(24))
             setBackgroundColor(getColor(R.color.card))
         }
+        /* the title opens the novel's description */
         root.addView(
             TextView(this).apply {
                 text = row.display; textSize = 15f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setTextColor(getColor(R.color.fg)); setPadding(0, 0, 0, dp(8))
+                setTextColor(getColor(R.color.fg)); setPadding(0, dp(4), 0, dp(12))
+                isClickable = true; isFocusable = true
+                setOnClickListener {
+                    sheet.dismiss()
+                    val folder = folderKey ?: return@setOnClickListener
+                    val dirName = store.dirNameOrGuess(folder, slug, row.rec.title)
+                    startActivity(
+                        chapterListIntent(row, dirName)
+                            .putExtra(ChapterListActivity.EXTRA_SHOW_INFO, true),
+                    )
+                }
             },
         )
         fun item(label: String, color: Int = getColor(R.color.fg), onTap: () -> Unit) =

@@ -36,6 +36,10 @@ class ChapterListActivity : AppCompatActivity() {
         private const val STATE_ON_INFO_TAB = "onInfoTab"
         private const val STATE_TAB_SLUG = "tabSlug"
 
+        /* open on the novel's info (cover, stars, description) instead of
+           its chapters — the Library long-press title asks for this */
+        const val EXTRA_SHOW_INFO = "showInfo"
+
         class Chapters(
             val ordered: List<String>,               // chapter filenames in order
             val source: Map<String, String>,         // name -> docId or gz ref
@@ -218,6 +222,11 @@ class ChapterListActivity : AppCompatActivity() {
            chapter — not a restore of the last info/chapters view. */
         if (savedInstanceState == null && !intent.getStringExtra("current").isNullOrEmpty()) {
             onInfoTab = false
+        }
+        if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SHOW_INFO, false) &&
+            !slugForSettings.isNullOrEmpty()
+        ) {
+            onInfoTab = true
         }
         infoBtn.setOnClickListener { showInfo(!onInfoTab) }
         showInfo(onInfoTab)
@@ -634,6 +643,11 @@ class ChapterListActivity : AppCompatActivity() {
         setIntent(newIntent)
         if (!newIntent.getStringExtra("current").isNullOrEmpty()) {
             showInfo(false)
+        }
+        if (newIntent.getBooleanExtra(EXTRA_SHOW_INFO, false) &&
+            !newIntent.getStringExtra("slug").isNullOrEmpty()
+        ) {
+            showInfo(true)
         }
         if (changed) {
             /* a different novel: forget the old list rather than briefly
