@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	The Slack bot token in Settings is shown as you type it instead of hidden behind dots
 1.42.11	Library order and Recently Read change only when you start reading aloud, not when you just open a novel
 1.42.11	Library's Shorts tab is now Read: novels you mark as read move there, every other novel stays in Novels
 1.42.10	Long-press a novel in the Library and tap its title to see its description
