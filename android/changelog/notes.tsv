@@ -4,8 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Long-press a novel in the Library and tap its title to see its description
-	Mark a novel complete yourself when the website never says it's finished
+1.42.10	Long-press a novel in the Library and tap its title to see its description
+1.42.10	Mark a novel complete yourself when the website never says it's finished
 1.42.8	Name americanliterature.com chapters like "Chapter 20" instead of "Chapter 20: Chapter XX"
 1.42.8	Don't repeat the chapter heading at the top of some Project Gutenberg chapters
 1.42.8	Keep americanliterature.com paragraphs whole instead of one short line each

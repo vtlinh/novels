@@ -117,7 +117,7 @@
             </LinearLayout>
 
             <LinearLayout
-                android:id="@+id/tabShorts"
+                android:id="@+id/tabRead"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
@@ -125,21 +125,21 @@
                 android:background="?attr/selectableItemBackground"
                 android:clickable="true"
                 android:focusable="true"
-                android:contentDescription="Shorts">
+                android:contentDescription="Read">
 
                 <View
-                    android:id="@+id/tabShortsIndicator"
+                    android:id="@+id/tabReadIndicator"
                     android:layout_width="match_parent"
                     android:layout_height="2dp"
                     android:background="@android:color/transparent" />
 
                 <TextView
-                    android:id="@+id/tabShortsLabel"
+                    android:id="@+id/tabReadLabel"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
                     android:gravity="center"
-                    android:text="Shorts"
+                    android:text="Read"
                     android:textSize="14sp"
                     android:textColor="@color/muted" />
             </LinearLayout>
