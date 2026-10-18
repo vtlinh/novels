@@ -32,7 +32,7 @@ import java.io.IOException
    chapter per the wait in Settings, including while it is
    reading aloud in the background. A post does not wait for that png before the next
    one is due. Novels are always tried in last-read order — the
-   book opened most recently in the reader goes first. The next
+   book most recently read aloud goes first. The next
    due chapter that is not on disk yet is skipped until it arrives
    — later due chapters are not pulled forward. A chapter already
    posted is not posted again. */

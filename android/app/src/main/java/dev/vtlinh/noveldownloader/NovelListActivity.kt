@@ -656,7 +656,7 @@ class NovelListActivity : AppCompatActivity() {
                 return@launch
             }
             status.text = finalStatus ?: "${shown.size} novel(s)"
-            /* the 3 most recently opened novels get their own section on
+            /* the 3 novels most recently read aloud get their own section on
                top of the Novels tab — a read mark moves the novel to the
                Read tab instead of pinning it here */
             val recent = LibrarySort.recentlyRead(
