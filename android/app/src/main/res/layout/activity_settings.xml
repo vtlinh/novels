@@ -277,7 +277,7 @@
                 android:textSize="14sp"
                 android:textColor="@color/fg"
                 android:textColorHint="@color/muted"
-                android:inputType="textPassword"
+                android:inputType="textVisiblePassword"
                 android:importantForAutofill="no" />
 
             <EditText
