@@ -412,7 +412,9 @@ class ChapterListActivity : AppCompatActivity() {
         /* Host we fetched from, not the publisher `source` chip. A folder
            scan has no URL, so nothing to show until Check status finds it. */
         val website = rec?.url?.let { Sites.website(it) }.orEmpty()
-        val status = rec?.statusLabel.orEmpty().ifEmpty {
+        /* the user's mark outranks the site's own wording, which would
+           otherwise still say ongoing */
+        val status = if (rec?.markedComplete == true) "Completed" else rec?.statusLabel.orEmpty().ifEmpty {
             when {
                 rec == null -> ""
                 rec.complete -> "Completed"
