@@ -34,7 +34,8 @@ data class NovelRec(
     val author: String,  // "" when unknown
     val started: Long,   // when its download was first started (0 = unknown/legacy)
     val total: Int,      // site chapter count from the last status check (-1 = never checked)
-    val complete: Boolean,
+    /* the site has finished it AND every chapter was on disk at the last check */
+    val siteComplete: Boolean,
     val diskCount: Int,  // chapters counted on disk at scan time (for unindexed novels)
     val lastDl: Long,    // when it last downloaded (0 = unknown/legacy)
     val lastRead: Long,  // when it was last opened in the reader (0 = never)
@@ -53,7 +54,13 @@ data class NovelRec(
     val statusLabel: String = "",
     /* TTS language pin: null follows the chapter text, one of Voices.LANGS forces it */
     val ttsLang: String? = null,
-)
+    /* the user marked it complete — see DownloadStore.setMarkedComplete */
+    val markedComplete: Boolean = false,
+) {
+    /* What every caller means by "complete": a hand mark counts exactly
+       like the site's. */
+    val complete: Boolean get() = siteComplete || markedComplete
+}
 
 /* a cached, fully-resolved chapter listing (DownloadStore.chlist): filenames
    in reading order plus each name's source/translated ref, so opening a big
@@ -555,7 +562,7 @@ class DownloadStore(context: Context) :
                 "last_dl", "last_read", "auto_dl", "translate",
                 "resume_page", "resume_url", "resume_before",
                 "alt_names", "genres", "source", "description", "status_label",
-                "tts_lang",
+                "tts_lang", "marked_complete",
             ),
             "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
@@ -582,6 +589,7 @@ class DownloadStore(context: Context) :
                         description = c.getString(18) ?: "",
                         statusLabel = c.getString(19) ?: "",
                         ttsLang = Voices.pin(c.getString(20)),
+                        markedComplete = c.getInt(21) != 0,
                     ),
                 )
             }
@@ -629,6 +637,21 @@ class DownloadStore(context: Context) :
        particular novel overrides it. */
     fun translateFor(folder: String, slug: String, appWide: Boolean): Boolean =
         try { novel(folder, slug)?.translate } catch (e: Exception) { null } ?: appWide
+
+    /* The user's own "complete". Inserts the row if the novel is only known
+       from its chapter index — an UPDATE alone would silently drop the mark.
+       Clearing it hands the answer back to the site. */
+    fun setMarkedComplete(folder: String, slug: String, title: String, on: Boolean) {
+        val db = writableDatabase
+        db.execSQL(
+            "INSERT OR IGNORE INTO novels(folder,slug,url,title,started,total,complete) VALUES(?,?,'',?,0,-1,0)",
+            arrayOf(folder, slug, title),
+        )
+        db.execSQL(
+            "UPDATE novels SET marked_complete=? WHERE folder=? AND slug=?",
+            arrayOf(if (on) 1 else 0, folder, slug),
+        )
+    }
 
     /* null / empty puts the novel back on chapter-text detection */
     fun setTtsLang(folder: String, slug: String, lang: String?) {

@@ -733,26 +733,26 @@ class NovelListActivity : AppCompatActivity() {
                     )
                     return@setOnClickListener
                 }
-                startActivity(
-                    Intent(ctx, ChapterListActivity::class.java)
-                        .putExtra("dir", dirName).putExtra("title", row.display)
-                        .putExtra("slug", row.rec.slug),
-                )
+                startActivity(chapterListIntent(row, dirName))
             }
-            /* long-press: finished / garbage / delete */
+            /* long-press: read / complete / garbage / delete */
             setOnLongClickListener { showMarkSheet(row); true }
         }
-        /* "complete" is the SITE saying the story is finished — it says
-           nothing about how much of it is here. Only call a novel done when
-           both are true, or a finished novel missing chapters shows a
-           Complete tag, hides its counts, and offers no way to fetch the
-           rest. */
+        /* "complete" is the story being finished (the site said so, or the
+           user marked it) — it says nothing about how much of it is here.
+           Only call a novel done when both are true, or a finished novel
+           missing chapters shows a Complete tag, hides its counts, and offers
+           no way to fetch the rest. */
         val haveAll = row.rec.total > 0 && row.local >= row.rec.total
         /* MORE files than the site lists — something is off, and the fix is
            a download: it re-fetches the novel and clears whatever is surplus.
            Counting that as settled hides the only button that can fix it. */
         val surplus = row.rec.total > 0 && row.local > row.rec.total
-        val done = row.rec.complete && haveAll && !surplus
+        /* A hand mark on a novel no check has counted yet is taken at its
+           word — there is no site total to measure it against, and without
+           this the mark changed nothing on screen. */
+        val markedUncounted = row.rec.markedComplete && row.rec.total <= 0 && row.local > 0
+        val done = (row.rec.complete && haveAll && !surplus) || markedUncounted
         /* checked, still-ongoing novel with every site chapter on disk:
            nothing to download until the site adds more */
         val upToDate = !row.rec.complete && haveAll && !surplus
@@ -876,7 +876,12 @@ class NovelListActivity : AppCompatActivity() {
         return line
     }
 
-    /* long-press menu: read / garbage / delete */
+    private fun chapterListIntent(row: Row, dirName: String): Intent =
+        Intent(this, ChapterListActivity::class.java)
+            .putExtra("dir", dirName).putExtra("title", row.display)
+            .putExtra("slug", row.rec.slug)
+
+    /* long-press menu: read / complete / garbage / delete */
     private fun showMarkSheet(row: Row) {
         val slug = row.rec.slug
         val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
@@ -885,11 +890,22 @@ class NovelListActivity : AppCompatActivity() {
             setPadding(dp(20), dp(16), dp(20), dp(24))
             setBackgroundColor(getColor(R.color.card))
         }
+        /* the title opens the novel's description */
         root.addView(
             TextView(this).apply {
                 text = row.display; textSize = 15f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setTextColor(getColor(R.color.fg)); setPadding(0, 0, 0, dp(8))
+                setTextColor(getColor(R.color.fg)); setPadding(0, dp(4), 0, dp(12))
+                isClickable = true; isFocusable = true
+                setOnClickListener {
+                    sheet.dismiss()
+                    val folder = folderKey ?: return@setOnClickListener
+                    val dirName = store.dirNameOrGuess(folder, slug, row.rec.title)
+                    startActivity(
+                        chapterListIntent(row, dirName)
+                            .putExtra(ChapterListActivity.EXTRA_SHOW_INFO, true),
+                    )
+                }
             },
         )
         fun item(label: String, color: Int = getColor(R.color.fg), onTap: () -> Unit) =
@@ -904,10 +920,31 @@ class NovelListActivity : AppCompatActivity() {
         item(if (isRead(slug)) "Mark as unread" else "Mark as read") {
             setRead(slug, !isRead(slug)); render()
         }
+        /* Only a hand mark can be taken back — a novel the site calls
+           finished stays complete. */
+        val rec = row.rec
+        if (!rec.complete || (rec.markedComplete && !rec.siteComplete)) {
+            val on = !rec.complete
+            item(if (on) "Mark as complete" else "Mark as not complete") {
+                setMarkedComplete(rec, row.display, on)
+            }
+        }
         item("Mark as garbage…") { confirmGarbage(row) }
         item("Delete…", getColor(R.color.err)) { confirmDelete(row) }
         sheet.setContentView(root)
         sheet.show()
+    }
+
+    private fun setMarkedComplete(rec: NovelRec, title: String, on: Boolean) {
+        val folder = folderKey ?: return
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                try {
+                    store.setMarkedComplete(folder, rec.slug, rec.title.ifEmpty { title }, on)
+                } catch (e: Exception) {}
+            }
+            render()
+        }
     }
 
     /* garbage: confirm, then remember the slug, delete the novel's folder and

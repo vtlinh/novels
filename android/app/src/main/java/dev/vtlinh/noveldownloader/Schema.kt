@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 27
+    const val VERSION = 28
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -77,6 +77,10 @@ object Schema {
                library is mostly one language per site and the odd novel
                is the exception — the same shape as `translate`. */
             "tts_lang TEXT DEFAULT '', " +
+            /* The user's own "this story is finished". Its own column
+               because `complete` is the site's answer and every status
+               check rewrites it. */
+            "marked_complete INTEGER DEFAULT 0, " +
             "PRIMARY KEY(folder, slug))"
     /* which novel a folder NAME belongs to, so a second novel that
        sanitises onto the same name is sent elsewhere instead of writing
@@ -348,6 +352,11 @@ object Schema {
                     "), slack_thread) " +
                     "WHERE image = ''",
             )
+        }
+        /* Manual "complete" mark. 0 is "as before": the site decides.
+           Nothing to seed — a mark is a choice, and there is no choice here. */
+        if (oldVersion < 28) {
+            db.soft("ALTER TABLE novels ADD COLUMN marked_complete INTEGER DEFAULT 0")
         }
     }
 }

@@ -593,6 +593,34 @@ class SchemaTest {
         }
     }
 
+    /* The hand "complete" mark arrives unset, and the site's own flag rides
+       through untouched: an upgrade must neither mark an ongoing novel
+       finished nor un-finish one the site already called done. */
+    @Test
+    fun `an existing novel upgrades unmarked with its site flag kept`() {
+        for (v in 5..(Schema.VERSION - 1)) {
+            open().use { c ->
+                at(v, c)
+                c.createStatement().use {
+                    it.execute(
+                        "INSERT INTO novels(folder,slug,url,title,started,total,complete) " +
+                            "VALUES('f','than-y','https://site/than-y/','Thần Y',1,120,1)",
+                    )
+                }
+                Schema.upgrade(Jdbc(c), v)
+                c.createStatement().use { s ->
+                    s.executeQuery(
+                        "SELECT complete, marked_complete FROM novels WHERE slug='than-y'",
+                    ).use { r ->
+                        assertTrue("upgrading from v$v lost the novel", r.next())
+                        assertEquals("upgrading from v$v: site flag", 1, r.getInt(1))
+                        assertEquals("upgrading from v$v: no hand mark", 0, r.getInt(2))
+                    }
+                }
+            }
+        }
+    }
+
     /* Anything older than v4 is rebuilt rather than migrated, and that is a
        deliberate data loss — it is all cache and index. It has to actually
        leave a working current schema behind, though. */

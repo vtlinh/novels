@@ -19,13 +19,21 @@ import kotlinx.coroutines.withContext
 
 /* One novel's own settings, reached from the ⚙ on its chapter list.
 
-   Two switches that outlive the screen — fetch new chapters without asking,
+   A complete mark for a story the site never calls finished, two switches
+   that outlive the screen — fetch new chapters without asking,
    and translate this novel whatever the app-wide switch says — auto-
    generated chapter images for this novel only, a TTS language pin so a
    novel the detector gets wrong is still read in the right voice, and two
    actions on the novel itself: check the site for chapters it has gained,
    and throw the whole thing away and download it again. */
 class NovelSettingsActivity : AppCompatActivity() {
+
+    companion object {
+        private const val MARK_COMPLETE_HELP =
+            "Tick this when the story is finished but the website does not say so. " +
+                "The app then treats it like any finished novel: it stops looking for " +
+                "new chapters. Untick it to undo."
+    }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
     private val store by lazy { DownloadStore(this) }
@@ -44,6 +52,7 @@ class NovelSettingsActivity : AppCompatActivity() {
        already English); bindHelp shows whatever is current. Everyday words
        for what the reader will see — no Slack, API, selector, cadence, or
        formula talk. */
+    private var markCompleteHelp = MARK_COMPLETE_HELP
     private var autoDownloadHelp =
         "Automatically download new chapters of this novel when they come out."
     private var translateHelp =
@@ -79,6 +88,7 @@ class NovelSettingsActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
         findViewById<Button>(R.id.recheckBtn).setOnClickListener { recheck() }
         findViewById<Button>(R.id.redownloadBtn).setOnClickListener { confirmRedownload() }
+        bindHelp(R.id.markCompleteHelp, "Complete") { markCompleteHelp }
         bindHelp(R.id.autoDownloadHelp, "Auto-download new chapters") { autoDownloadHelp }
         bindHelp(R.id.translateHelp, "Translate to English") { translateHelp }
         bindHelp(R.id.autoImageHelp, "Chapter images") { autoImageHelp }
@@ -134,6 +144,7 @@ class NovelSettingsActivity : AppCompatActivity() {
                 return@launch
             }
             if (!keepStatus) status(state.summary)
+            bindMarkComplete(folder, state)
             bindAutoDownload(folder, state)
             bindTranslate(folder, state)
             bindTtsLang(folder, state)
@@ -165,7 +176,13 @@ class NovelSettingsActivity : AppCompatActivity() {
         val translated = ordered.count { ch?.translated?.containsKey(it) == true }
         val summary = buildString {
             if (rec.total > 0) append("$local/${rec.total} chapters") else append("$local chapter(s)")
-            append(if (rec.complete) " — the site has finished this novel" else " — ongoing")
+            append(
+                when {
+                    rec.siteComplete -> " — the site has finished this novel"
+                    rec.markedComplete -> " — you marked this novel complete"
+                    else -> " — ongoing"
+                },
+            )
         }
         return State(
             rec, local, summary, ordered.size, translated, sampleLanguage(folder, ch),
@@ -256,11 +273,38 @@ class NovelSettingsActivity : AppCompatActivity() {
         }
     }
 
-    /* Off and untouchable when the site has finished the novel — there are
-       no chapters left for a status check to find. The BOX still shows what
-       is stored: a novel that finished after auto-download was turned on has
-       not had that answer cleared, and if the site ever marks it ongoing
-       again the same tick still applies. */
+    /* Ticked for any complete novel; untouchable when the site itself says
+       finished, since only the user's own mark can be taken back. Changing
+       it reloads the screen — auto-download and the summary follow it. */
+    private fun bindMarkComplete(folder: String, state: State) {
+        val box = findViewById<CheckBox>(R.id.markCompleteCheck)
+        val rec = state.rec ?: return
+        box.setOnCheckedChangeListener(null)
+        box.isChecked = rec.complete
+        box.isEnabled = !rec.siteComplete
+        box.alpha = if (box.isEnabled) 1f else 0.5f
+        markCompleteHelp = if (rec.siteComplete) {
+            "The website says this novel is finished, so it is always complete."
+        } else {
+            MARK_COMPLETE_HELP
+        }
+        box.setOnCheckedChangeListener { _, checked ->
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    try {
+                        store.setMarkedComplete(folder, rec.slug, rec.title.ifEmpty { title }, checked)
+                    } catch (e: Exception) {}
+                }
+                load()
+            }
+        }
+    }
+
+    /* Off and untouchable when the novel is complete (the site's word or
+       the user's mark) — there are no chapters left for a status check to
+       find. The BOX still shows what is stored: a novel that finished after
+       auto-download was turned on has not had that answer cleared, and if
+       it is ever ongoing again the same tick still applies. */
     private fun bindAutoDownload(folder: String, state: State) {
         val box = findViewById<CheckBox>(R.id.autoDownloadCheck)
         box.setOnCheckedChangeListener(null)
