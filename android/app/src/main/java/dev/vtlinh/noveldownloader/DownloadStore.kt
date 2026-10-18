@@ -38,7 +38,7 @@ data class NovelRec(
     val siteComplete: Boolean,
     val diskCount: Int,  // chapters counted on disk at scan time (for unindexed novels)
     val lastDl: Long,    // when it last downloaded (0 = unknown/legacy)
-    val lastRead: Long,  // when it was last opened in the reader (0 = never)
+    val lastRead: Long,  // when read-aloud was last started (0 = never)
     /* per-novel settings — see NovelSettingsActivity */
     val autoDownload: Boolean = false,
     /* translate this novel: null follows the app-wide switch */
@@ -394,7 +394,7 @@ class DownloadStore(context: Context) :
         return 0
     }
 
-    /* stamp a novel as just-opened in the reader */
+    /* stamp a novel as just-started reading aloud */
     fun setLastRead(folder: String, slug: String, now: Long) {
         writableDatabase.execSQL(
             "UPDATE novels SET last_read=? WHERE folder=? AND slug=?", arrayOf(now, folder, slug),

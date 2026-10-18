@@ -525,10 +525,10 @@ class ReaderActivity : AppCompatActivity() {
         /* no "Loading…" placeholder — the chapter renders almost immediately,
            and a blank background reads cleaner than a flash of loading text */
 
-        /* mark as recently read + load the cover for the media notification */
+        /* load the cover for the media notification. Opening alone does not
+           mark the novel recently read — starting read-aloud does. */
         if (!asDocument()) intent.getStringExtra("slug")?.let { slug ->
             lifecycleScope.launch(Dispatchers.IO) {
-                try { store.setLastRead(folder, slug, System.currentTimeMillis()) } catch (e: Exception) {}
                 val cf = DownloadEngine.coverFile(this@ReaderActivity, slug)
                 if (cf.exists()) {
                     try { coverBitmap = android.graphics.BitmapFactory.decodeFile(cf.path) } catch (e: Exception) {}
@@ -1507,6 +1507,13 @@ class ReaderActivity : AppCompatActivity() {
         pendingSpeakContinue = false
         val body = loadedChapters.getOrNull(place.row)?.body ?: return
         speakAt = ReaderPlace(place.row, ReaderText.sentStartOf(body, place.off))
+        val folder = prefs.getString("tree", null)
+        val slug = intent.getStringExtra("slug")
+        if (!speaking && !asDocument() && folder != null && slug != null) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try { store.setLastRead(folder, slug, System.currentTimeMillis()) } catch (e: Exception) {}
+            }
+        }
         speaking = true
         clearTextSelection()  // remove the start-tap cursor so it can't yank later
         requestAudioFocus()

@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Library's Shorts tab is now Read: novels you mark as read move there, every other novel stays in Novels
+1.42.11	Library order and Recently Read change only when you start reading aloud, not when you just open a novel
+1.42.11	Library's Shorts tab is now Read: novels you mark as read move there, every other novel stays in Novels
 1.42.10	Long-press a novel in the Library and tap its title to see its description
 1.42.10	Mark a novel complete yourself when the website never says it's finished
 1.42.8	Name americanliterature.com chapters like "Chapter 20" instead of "Chapter 20: Chapter XX"
