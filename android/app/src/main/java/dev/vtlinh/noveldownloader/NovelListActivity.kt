@@ -28,10 +28,9 @@ import kotlinx.coroutines.withContext
    in from elsewhere). "Check status" asks each site for its chapter count,
    finished flag, and author; a finished novel with everything on disk shows
    a Complete tag instead of a Download button, and an ongoing novel with
-   every chapter on disk shows an Up to date tag. ALL NOVELS sorts unread
-   first (stars, then most recently updated); novels the user marked as read
-   sit at the bottom. Two tabs split the list: Shorts is every novel
-   with 20 or fewer chapters (site total when known), Novels is the rest.
+   every chapter on disk shows an Up to date tag. Two tabs split the list:
+   Read holds every novel the user marked as read, Novels is the rest. Each
+   sorts by stars, then most recently updated.
 
    Cold start: resume a live reading session when one exists; otherwise open
    the Browser when this list is empty. Console output (formerly the Home
@@ -47,14 +46,14 @@ class NovelListActivity : AppCompatActivity() {
 
         /* which Library tab is showing — kept so returning to this screen
            (and a rotate) lands on the same side */
-        private const val PREF_SHORTS_TAB = "libraryShowShorts"
-        private const val STATE_SHORTS_TAB = "libraryShowShorts"
+        private const val PREF_READ_TAB = "libraryShowRead"
+        private const val STATE_READ_TAB = "libraryShowRead"
     }
 
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
     private val store by lazy { DownloadStore(this) }
     private var folderKey: String? = null
-    private var showingShorts = false
+    private var showingRead = false
 
     /* Novel URL waiting on a download folder being picked (share path). */
     private var pendingShareUrl: String?
@@ -102,12 +101,12 @@ class NovelListActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.statusText).text = "Pick a download folder first."
         }
         findViewById<Button>(R.id.checkBtn).setOnClickListener { checkStatuses() }
-        showingShorts = savedInstanceState?.getBoolean(STATE_SHORTS_TAB)
-            ?: prefs.getBoolean(PREF_SHORTS_TAB, false)
+        showingRead = savedInstanceState?.getBoolean(STATE_READ_TAB)
+            ?: prefs.getBoolean(PREF_READ_TAB, false)
         findViewById<android.view.View>(R.id.tabNovels).setOnClickListener {
             showLibraryTab(false)
         }
-        findViewById<android.view.View>(R.id.tabShorts).setOnClickListener {
+        findViewById<android.view.View>(R.id.tabRead).setOnClickListener {
             showLibraryTab(true)
         }
         paintLibraryTabs()
@@ -162,38 +161,38 @@ class NovelListActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putBoolean(STATE_SHORTS_TAB, showingShorts)
+        outState.putBoolean(STATE_READ_TAB, showingRead)
     }
 
-    private fun showLibraryTab(shorts: Boolean) {
-        if (showingShorts == shorts) return
-        showingShorts = shorts
-        prefs.edit().putBoolean(PREF_SHORTS_TAB, shorts).apply()
+    private fun showLibraryTab(read: Boolean) {
+        if (showingRead == read) return
+        showingRead = read
+        prefs.edit().putBoolean(PREF_READ_TAB, read).apply()
         paintLibraryTabs()
         render()
     }
 
     private fun paintLibraryTabs() {
-        val novels = !showingShorts
+        val novels = !showingRead
         findViewById<android.view.View>(R.id.tabNovels).isSelected = novels
-        findViewById<android.view.View>(R.id.tabShorts).isSelected = showingShorts
+        findViewById<android.view.View>(R.id.tabRead).isSelected = showingRead
         findViewById<android.view.View>(R.id.tabNovelsIndicator).setBackgroundColor(
             if (novels) getColor(R.color.accent) else android.graphics.Color.TRANSPARENT,
         )
-        findViewById<android.view.View>(R.id.tabShortsIndicator).setBackgroundColor(
-            if (showingShorts) getColor(R.color.accent) else android.graphics.Color.TRANSPARENT,
+        findViewById<android.view.View>(R.id.tabReadIndicator).setBackgroundColor(
+            if (showingRead) getColor(R.color.accent) else android.graphics.Color.TRANSPARENT,
         )
         val novelsLabel = findViewById<TextView>(R.id.tabNovelsLabel)
-        val shortsLabel = findViewById<TextView>(R.id.tabShortsLabel)
+        val readLabel = findViewById<TextView>(R.id.tabReadLabel)
         novelsLabel.setTextColor(getColor(if (novels) R.color.accent else R.color.muted))
         novelsLabel.setTypeface(
             null,
             if (novels) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
         )
-        shortsLabel.setTextColor(getColor(if (showingShorts) R.color.accent else R.color.muted))
-        shortsLabel.setTypeface(
+        readLabel.setTextColor(getColor(if (showingRead) R.color.accent else R.color.muted))
+        readLabel.setTypeface(
             null,
-            if (showingShorts) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+            if (showingRead) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
         )
     }
 
@@ -634,7 +633,7 @@ class NovelListActivity : AppCompatActivity() {
             return
         }
         status.text = "Loading…"
-        val wantShorts = showingShorts
+        val wantRead = showingRead
         lifecycleScope.launch {
             val rs = try {
                 withContext(Dispatchers.IO) { rows() }
@@ -644,25 +643,22 @@ class NovelListActivity : AppCompatActivity() {
             }
             /* a slower listing finishing after a tab tap would paint the
                other side's rows under this tab's header */
-            if (showingShorts != wantShorts) return@launch
+            if (showingRead != wantRead) return@launch
             list.removeAllViews()
             if (rs.isEmpty()) {
                 /* explain WHICH source came up empty instead of a blank shrug */
                 status.text = "No novels found. ($sourceInfo)"
                 return@launch
             }
-            val shown = rs.filter {
-                LibrarySort.isShort(it.rec.total, it.local) == showingShorts
-            }
-            val kind = if (showingShorts) "short" else "novel"
+            val shown = rs.filter { isRead(it.rec.slug) == showingRead }
             if (shown.isEmpty()) {
-                status.text = finalStatus ?: if (showingShorts) "No shorts" else "No novels"
+                status.text = finalStatus ?: if (showingRead) "No novels marked as read" else "No novels"
                 return@launch
             }
-            status.text = finalStatus ?: "${shown.size} $kind(s)"
-            /* the 3 most recently opened unread items on THIS tab get
-               their own section on top — a read mark sends the novel
-               to the bottom of the all-list instead of pinning it here */
+            status.text = finalStatus ?: "${shown.size} novel(s)"
+            /* the 3 most recently opened novels get their own section on
+               top of the Novels tab — a read mark moves the novel to the
+               Read tab instead of pinning it here */
             val recent = LibrarySort.recentlyRead(
                 shown,
                 { it.rec.lastRead },
@@ -675,7 +671,7 @@ class NovelListActivity : AppCompatActivity() {
                 for (row in recent) {
                     try { list.addView(buildRow(row)) } catch (e: Exception) {}
                 }
-                list.addView(sectionHeader(if (showingShorts) "ALL SHORTS" else "ALL NOVELS"))
+                list.addView(sectionHeader("ALL NOVELS"))
             }
             for (row in others) {
                 try { list.addView(buildRow(row)) } catch (e: Exception) {}
