@@ -40,6 +40,9 @@ class ReaderActivity : AppCompatActivity() {
     companion object {
         private const val STATE_AUTO_PICTURE = "autoPictureChapter"
         private const val READER_LINE_MULT = 1.45f
+        /* AudioManager's own names for these are @hide */
+        private const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
+        private const val STREAM_MUTE_CHANGED_ACTION = "android.media.STREAM_MUTE_CHANGED_ACTION"
 
         /* the reader instance currently owning TTS. Opening a new reader
            finishes the old one so two chapters never read at once — but
@@ -752,6 +755,22 @@ class ReaderActivity : AppCompatActivity() {
             androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
         )
 
+        /* Media volume turned all the way down (or muted) means stop. Reading
+           on unheard would only carry the listening spot past what was heard. */
+        volumeReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context?, i: android.content.Intent?) {
+                runOnUiThread { if (speaking && mediaVolumeOff()) pauseTts() }
+            }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, volumeReceiver,
+            android.content.IntentFilter().apply {
+                addAction(VOLUME_CHANGED_ACTION)
+                addAction(STREAM_MUTE_CHANGED_ACTION)
+            },
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+
         /* Bluetooth headset / media-button play & pause control the TTS.
 
            What gets a press here is being the media-button SESSION, which
@@ -1328,6 +1347,7 @@ class ReaderActivity : AppCompatActivity() {
     private var mediaSession: android.support.v4.media.session.MediaSessionCompat? = null
     private var ttsToggleReceiver: android.content.BroadcastReceiver? = null
     private var noisyReceiver: android.content.BroadcastReceiver? = null
+    private var volumeReceiver: android.content.BroadcastReceiver? = null
     private var lastNotifHeading = ""
 
     /* the "Chapter N: Title" line the notification shows */
@@ -1476,6 +1496,14 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun startTtsFrom(place: ReaderPlace) {
+        if (mediaVolumeOff()) {
+            pendingPlayUntil = 0L
+            android.widget.Toast.makeText(
+                this, "Volume is off — turn it up to listen", android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            updatePlayBtn()
+            return
+        }
         if (!TtsPlay.canSpeak(ttsReady, hasOfferableVoices())) {
             /* The engine drops its binding while the reader sits paused with
                the screen off, which is precisely when the next thing to
@@ -1993,6 +2021,15 @@ class ReaderActivity : AppCompatActivity() {
         false
     }
 
+    /* USAGE_MEDIA (ttsAudioAttributes) plays on the music stream; a muted
+       stream reports 0 here too. */
+    private fun mediaVolumeOff(): Boolean = try {
+        (getSystemService(AUDIO_SERVICE) as android.media.AudioManager)
+            .getStreamVolume(android.media.AudioManager.STREAM_MUSIC) == 0
+    } catch (e: Exception) {
+        false
+    }
+
     private fun ttsAudioAttributes(): android.media.AudioAttributes =
         android.media.AudioAttributes.Builder()
             .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
@@ -2210,6 +2247,8 @@ class ReaderActivity : AppCompatActivity() {
         ttsToggleReceiver = null
         try { noisyReceiver?.let { unregisterReceiver(it) } } catch (e: Exception) {}
         noisyReceiver = null
+        try { volumeReceiver?.let { unregisterReceiver(it) } } catch (e: Exception) {}
+        volumeReceiver = null
         TtsService.stop(this)
         super.onDestroy()
     }
@@ -3822,6 +3861,19 @@ class ReaderActivity : AppCompatActivity() {
             text.isFocusable = textFocusable
             text.isFocusableInTouchMode = textFocusable
             applyHighlightTo(text, position)
+            text.post { reenableSelection() }
+        }
+
+        /* setText decides whether long-press can select, and says no when
+           the row is out of the window — which is where RecyclerView rebinds
+           it. Nothing re-asks once the row is back, so hold-to-select went
+           dead on every rebound chapter. Toggling enabled asks again. Not
+           while focused: disabling drops focus, and it would land on another
+           row. */
+        private fun reenableSelection() {
+            if (!text.isAttachedToWindow || text.parent?.parent == null || text.isFocused) return
+            text.isEnabled = false
+            text.isEnabled = true
         }
     }
 
