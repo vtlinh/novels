@@ -59,4 +59,19 @@ class ChapterListFocusTest {
         assertFalse(ChapterListFocus.mayGrow(settling = true))
         assertTrue(ChapterListFocus.mayGrow(settling = false))
     }
+
+    @Test
+    fun `a novel never read opens on its details`() {
+        assertTrue(ChapterListFocus.opensOnInfo(null, null))
+        assertTrue(ChapterListFocus.opensOnInfo("", ""))
+        assertFalse(ChapterListFocus.opensOnInfo(null, "Chapter 50.txt"))
+        assertFalse(ChapterListFocus.opensOnInfo("Chapter 80.txt", null))
+    }
+
+    @Test
+    fun `a fresh start does not name chapter 1`() {
+        assertEquals("Start reading", ChapterListFocus.continueLabel(null))
+        assertEquals("Start reading", ChapterListFocus.continueLabel(""))
+        assertEquals("Continue · Chapter 80", ChapterListFocus.continueLabel("Chapter 80"))
+    }
 }

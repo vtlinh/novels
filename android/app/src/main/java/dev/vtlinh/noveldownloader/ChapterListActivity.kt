@@ -223,8 +223,13 @@ class ChapterListActivity : AppCompatActivity() {
         if (savedInstanceState == null && !intent.getStringExtra("current").isNullOrEmpty()) {
             onInfoTab = false
         }
-        if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SHOW_INFO, false) &&
-            !slugForSettings.isNullOrEmpty()
+        if (savedInstanceState == null && !slugForSettings.isNullOrEmpty() && (
+                intent.getBooleanExtra(EXTRA_SHOW_INFO, false) ||
+                    ChapterListFocus.opensOnInfo(
+                        intent.getStringExtra("current"),
+                        ReaderActivity.resumeChapter(this, slugForSettings),
+                    )
+                )
         ) {
             onInfoTab = true
         }
@@ -953,9 +958,9 @@ class ChapterListActivity : AppCompatActivity() {
             val continueBtn = findViewById<android.widget.Button>(R.id.continueBtn)
             val startName = if (newCurrent >= 0) ordered[newCurrent] else chapters.ordered.firstOrNull()
             if (!slug.isNullOrEmpty() && startName != null) {
-                val label = labelOf(startName)
-                continueBtn.text =
-                    if (newCurrent >= 0) "Continue · $label" else "Start reading · $label"
+                continueBtn.text = ChapterListFocus.continueLabel(
+                    if (newCurrent >= 0) labelOf(startName) else null,
+                )
                 continueBtn.setOnClickListener { openChapter(startName) }
                 showContinue(true)
             } else {
