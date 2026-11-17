@@ -302,7 +302,7 @@ class ChapterListActivity : AppCompatActivity() {
         }
     }
 
-    private fun openChapter(name: String) {
+    private fun openChapter(name: String, play: Boolean = false) {
         val dirName = intent.getStringExtra("dir") ?: return
         val title = intent.getStringExtra("title") ?: dirName
         /* REORDER_TO_FRONT: if the reader for this novel is still
@@ -315,6 +315,7 @@ class ChapterListActivity : AppCompatActivity() {
                 .putExtra("title", title)
                 .putExtra("slug", intent.getStringExtra("slug"))
                 .putExtra("start", name)
+                .putExtra(ReaderActivity.EXTRA_PLAY, play)
                 .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
         )
         /* Leave so Back from the reader hits Library, not this screen. */
@@ -342,8 +343,11 @@ class ChapterListActivity : AppCompatActivity() {
                 try { DownloadStore(this@ChapterListActivity).novel(folder, slug) } catch (e: Exception) { null }
             }
             /* Old downloads only have author (if that). Pull the rest when the
-               synopsis is still missing and we know where the novel lives. */
-            if (rec != null && rec.description.isEmpty() && rec.url.isNotEmpty()) {
+               synopsis or the site's rating is still missing and we know
+               where the novel lives. */
+            if (rec != null && (rec.description.isEmpty() || rec.siteRating < 0) &&
+                rec.url.isNotEmpty()
+            ) {
                 val url = rec.url
                 val fetched = withContext(Dispatchers.IO) {
                     try {
@@ -356,6 +360,7 @@ class ChapterListActivity : AppCompatActivity() {
                             source = info.source,
                             description = info.description,
                             statusLabel = info.statusLabel,
+                            siteRating = info.rating,
                         )
                         info
                     } catch (e: Exception) { null }
@@ -473,7 +478,19 @@ class ChapterListActivity : AppCompatActivity() {
             )
         }
         if (website.isNotEmpty()) {
-            chips.addView(chip(website, R.color.fg, R.drawable.bg_chip))
+            val url = rec?.url.orEmpty()
+            chips.addView(
+                chip(website, R.color.fg, R.drawable.bg_chip).apply {
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        startActivity(
+                            Intent(this@ChapterListActivity, BrowserActivity::class.java)
+                                .putExtra(BrowserActivity.EXTRA_URL, url),
+                        )
+                    }
+                },
+            )
         }
         if (source.isNotEmpty()) {
             chips.addView(chip(source, R.color.fg, R.drawable.bg_chip))
@@ -496,13 +513,21 @@ class ChapterListActivity : AppCompatActivity() {
             )
         }
 
-        /* Personal ranking: ten full stars. Tap the current value to clear. */
+        /* Ten full stars: the user's own rating, or the website's until
+           they set one. Tap the current value of your own to clear it. */
+        val siteRating = rec?.siteRating ?: -1.0
         val starsRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
             setPadding(0, dp(10), 0, dp(2))
         }
-        fun paintStars(current: Int) {
+        val ratingNote = TextView(this).apply {
+            textSize = 12f
+            setTextColor(getColor(R.color.muted))
+            gravity = android.view.Gravity.CENTER
+        }
+        fun paintStars(own: Int) {
+            val shown = NovelRating.effective(own, siteRating)
             starsRow.removeAllViews()
             for (i in 1..NovelRating.MAX) {
                 starsRow.addView(
@@ -510,19 +535,28 @@ class ChapterListActivity : AppCompatActivity() {
                         text = "★"
                         textSize = 20f
                         setTextColor(
-                            getColor(if (i <= current) R.color.star else R.color.muted),
+                            getColor(if (i <= shown) R.color.star else R.color.muted),
                         )
                         setPadding(dp(3), dp(4), dp(3), dp(4))
                         setOnClickListener {
-                            val next = NovelRating.toggle(prefs, slug, i)
-                            paintStars(next)
+                            paintStars(NovelRating.toggle(prefs, slug, i))
                         }
                     },
                 )
             }
+            val where = website.ifEmpty { "the website" }
+            val score = "%.1f".format(siteRating)
+            ratingNote.text = when {
+                siteRating <= 0 -> ""
+                own > 0 -> "Your rating. Readers on $where give it $score."
+                else -> "Readers on $where give it $score. Tap a star to rate it yourself."
+            }
+            ratingNote.visibility =
+                if (siteRating > 0) android.view.View.VISIBLE else android.view.View.GONE
         }
         paintStars(NovelRating.get(prefs, slug))
         panel.addView(starsRow)
+        panel.addView(ratingNote)
 
         if (desc.isNotEmpty()) {
             panel.addView(
@@ -961,7 +995,7 @@ class ChapterListActivity : AppCompatActivity() {
                 continueBtn.text = ChapterListFocus.continueLabel(
                     if (newCurrent >= 0) labelOf(startName) else null,
                 )
-                continueBtn.setOnClickListener { openChapter(startName) }
+                continueBtn.setOnClickListener { openChapter(startName, play = true) }
                 showContinue(true)
             } else {
                 showContinue(false)

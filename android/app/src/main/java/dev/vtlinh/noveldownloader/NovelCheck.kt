@@ -180,6 +180,7 @@ object NovelCheck {
                 source = res.info.source,
                 description = res.info.description,
                 statusLabel = res.info.statusLabel,
+                siteRating = res.info.rating,
             )
             /* index the site's chapter order for the reader — skipped when
                already indexed and unchanged */

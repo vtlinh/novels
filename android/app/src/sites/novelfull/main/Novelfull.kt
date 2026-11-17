@@ -112,6 +112,15 @@ object Novelfull : Site {
 
     override fun description(doc: Document) = SiteHelp.descriptionText(doc)
 
+    /* "Rating: <8.7>/<10> from <1234> ratings", one span per number — no
+       microdata on either host */
+    override fun rating(doc: Document): Double? {
+        val line = doc.select("div.small > em").firstOrNull { it.text().startsWith("Rating:") }
+            ?: return null
+        val n = line.select("span").map { it.text() }
+        return SiteHelp.scaledRating(n.getOrNull(0), n.getOrNull(1), n.getOrNull(2))
+    }
+
     override fun chapterContent(doc: Document) =
         SiteHelp.firstOf(doc, listOf("#chapter-content", ".chapter-content", "#chapter-c", ".chapter-c"))
 

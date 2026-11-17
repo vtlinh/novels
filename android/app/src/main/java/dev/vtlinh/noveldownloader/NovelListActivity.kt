@@ -495,7 +495,7 @@ class NovelListActivity : AppCompatActivity() {
                The three latest unread reads are pinned above this
                in render(). */
             LibrarySort.comparator(
-                { NovelRating.get(prefs, it.rec.slug) },
+                { NovelRating.effective(prefs, it.rec) },
                 { it.rec.lastDl },
                 { it.rec.lastRead },
                 { it.rec.started },
@@ -752,7 +752,7 @@ class NovelListActivity : AppCompatActivity() {
         /* checked, still-ongoing novel with every site chapter on disk:
            nothing to download until the site adds more */
         val upToDate = !row.rec.complete && haveAll && !surplus
-        val rating = NovelRating.get(prefs, row.rec.slug)
+        val rating = NovelRating.effective(prefs, row.rec)
         val text = android.text.SpannableStringBuilder().apply {
             append(row.display)
             if (rating > 0) {

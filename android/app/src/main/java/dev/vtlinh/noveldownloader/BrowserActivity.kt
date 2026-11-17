@@ -36,6 +36,10 @@ import java.io.ByteArrayInputStream
 class BrowserActivity : AppCompatActivity() {
 
     companion object {
+        /* A page to open instead of the start screen — the novel page's
+           website chip. */
+        const val EXTRA_URL = "url"
+
         /* well-known ad/tracking networks; requests to them are answered with
            an empty body so the ad never loads */
         private val AD_HOSTS = listOf(
@@ -262,7 +266,12 @@ class BrowserActivity : AppCompatActivity() {
         /* start screen: the last 20 domains we visited, newest first. Tapping
            one opens its front page. With no history yet, load the old default
            start page directly. */
-        if (domainHistory().isEmpty()) web.loadUrl(start) else showRecentPanel()
+        val asked = intent.getStringExtra(EXTRA_URL)?.takeIf { it.startsWith("http") }
+        when {
+            asked != null -> web.loadUrl(asked)
+            domainHistory().isEmpty() -> web.loadUrl(start)
+            else -> showRecentPanel()
+        }
 
         /* focusing the bar selects the whole URL, so typing replaces it
            outright the way a real address bar does */

@@ -165,6 +165,13 @@ interface Site {
     /* Synopsis / description. Plain text, no site chrome. */
     fun description(doc: Document): String? = null
 
+    /* The readers' rating the page prints, scaled to out of 10. Null when
+       it prints none — and when nobody has voted: read-novel.com prints
+       "nan" from 0 ratings and truyenfullmoi "0.0" from an empty count,
+       neither of which is a score. The novel page shows it as the stars
+       until the user rates the novel themselves. */
+    fun rating(doc: Document): Double? = null
+
     /* ---- the chapter page ---- */
 
     /* The element holding the prose. Null lets the caller fall back to the
@@ -234,6 +241,23 @@ internal object SiteHelp {
         }
         return null
     }
+
+    /* value out of `best`, scaled to out of 10 — null for no votes or no score */
+    fun scaledRating(value: String?, best: String?, votes: String?): Double? {
+        val v = value?.trim()?.toDoubleOrNull() ?: return null
+        val b = best?.trim()?.toDoubleOrNull()?.takeIf { it > 0 } ?: return null
+        val n = votes?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+        if (v.isNaN() || v <= 0 || n <= 0) return null
+        return (v / b * 10).coerceIn(0.0, 10.0)
+    }
+
+    /* schema.org AggregateRating microdata, which truyenfull, truyenfullmoi
+       and read-novel.com all print */
+    fun schemaRating(doc: Document): Double? = scaledRating(
+        doc.selectFirst("[itemprop=ratingValue]")?.text(),
+        doc.selectFirst("[itemprop=bestRating]")?.text(),
+        doc.selectFirst("[itemprop=ratingCount]")?.text(),
+    )
 
     /* Synopsis containers these sites use. Prefer <p> breaks when present so
        a multi-paragraph blurb keeps its shape; otherwise collapse whitespace.

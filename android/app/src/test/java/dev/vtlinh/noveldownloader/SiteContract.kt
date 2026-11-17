@@ -240,6 +240,28 @@ abstract class SiteContract {
         }
     }
 
+    /* The novel page shows this as the stars until the user rates the novel,
+       and the Library sorts and the picture filter judge by it — so a rating
+       read where the page printed none, or none read where it printed one,
+       is a wrong star count on screen. Measured into the manifest's tenth
+       column by tools/measure-ratings.py from the raw HTML; every row owes
+       the column, blank where the page has no rating, so a site cannot skip
+       the question by having been captured before it was asked. */
+    @Test
+    fun `the rating matches what was measured`() {
+        for (r in novels) {
+            assertTrue("${r[1]}: rating column not measured", r.size > 9)
+            val measured = r[9].ifEmpty { null }?.toDouble()
+            val read = site.rating(Jsoup.parse(page(r[1]), r[3]))
+            if (measured == null) {
+                assertEquals("${r[1]}: rating read where the page prints none", null, read)
+            } else {
+                assertNotNull("${r[1]}: rating $measured not read", read)
+                assertEquals("${r[1]}: rating", measured, read!!, 0.051)
+            }
+        }
+    }
+
     /* Genres are what the info header lists under "Genre". Null is fine for
        a host that does not print them; an empty string is a bug in the
        scraper (it found the field and then wiped it). */

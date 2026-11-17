@@ -141,6 +141,8 @@ object Readnovel : Site {
                 t.ifEmpty { null }
             }
 
+    override fun rating(doc: Document) = SiteHelp.schemaRating(doc)
+
     override fun chapterContent(doc: Document) =
         SiteHelp.firstOf(doc, listOf(".chapter-content", "#chapter-c", ".chapter-c"))
 

@@ -416,13 +416,16 @@ object ChapterImages {
         if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
     }
 
-    fun autoOnFor(ctx: Context, slug: String): Boolean {
+    /* `siteRating` is the novel's NovelRec.siteRating: the minimum-stars
+       filter judges the stars the novel shows, the site's until the user
+       rates it. */
+    fun autoOnFor(ctx: Context, slug: String, siteRating: Double): Boolean {
         if (slug.isEmpty()) return false
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
         return autoApplies(
             novelOn = autoEnabled(ctx, slug),
             globalOn = globalEnabled(ctx),
-            stars = NovelRating.get(prefs, slug),
+            stars = NovelRating.effective(NovelRating.get(prefs, slug), siteRating),
             minStars = minStars(ctx),
             read = novelRead(prefs, slug),
             unreadOnly = unreadOnly(ctx),
@@ -557,18 +560,16 @@ object ChapterImages {
     ) {
         if (slug.isEmpty() || folder.isEmpty() || dirName.isEmpty()) return
         if (!slackReady(ctx)) return
-        val autoOn = autoOnFor(ctx, slug)
         val cadence = cadenceFor(ctx, slug)
         val every = cadence.every
         val from = cadence.from
         val app = ctx.applicationContext
         work.launch {
+            val rec = try { DownloadStore(app).novel(folder, slug) } catch (e: Exception) { null }
+            val autoOn = autoOnFor(app, slug, rec?.siteRating ?: -1.0)
             slackPoster(app)?.let { slack ->
                 val dueCh = if (autoOn) {
-                    val complete = try {
-                        DownloadStore(app).novel(folder, slug)?.complete == true
-                    } catch (e: Exception) { false }
-                    dueChapters(chapters, from, every, lastCount(complete))
+                    dueChapters(chapters, from, every, lastCount(rec?.complete == true))
                 } else {
                     emptyList()
                 }
@@ -596,7 +597,7 @@ object ChapterImages {
             .getString("tree", "") ?: ""
         if (folder.isEmpty()) return false
         val novels = try { store.novels(folder) } catch (e: Exception) { emptyList() }
-        return novels.any { autoOnFor(ctx, it.slug) }
+        return novels.any { autoOnFor(ctx, it.slug, it.siteRating) }
     }
 
     /* Keeps posting and fetching while this process is alive. The
@@ -680,7 +681,7 @@ object ChapterImages {
             val novelOn = autoEnabled(app, rec.slug)
             if (!autoApplies(
                     novelOn, globalOn,
-                    NovelRating.get(prefs, rec.slug), floor,
+                    NovelRating.effective(prefs, rec), floor,
                     novelRead(prefs, rec.slug), onlyUnread,
                 )
             ) continue

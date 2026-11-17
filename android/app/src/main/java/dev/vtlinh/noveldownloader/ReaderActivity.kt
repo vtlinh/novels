@@ -39,10 +39,18 @@ class ReaderActivity : AppCompatActivity() {
 
     companion object {
         private const val STATE_AUTO_PICTURE = "autoPictureChapter"
+        /* a play request not yet taken when the reader was recreated —
+           onNewIntent for another novel rebuilds before landing */
+        private const val STATE_PLAY = "playPending"
         private const val READER_LINE_MULT = 1.45f
         /* AudioManager's own names for these are @hide */
         private const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
         private const val STREAM_MUTE_CHANGED_ACTION = "android.media.STREAM_MUTE_CHANGED_ACTION"
+
+        /* Start reading aloud once the opened chapter has landed — the novel
+           page's Start / Continue button. Taken off the intent when read, so
+           a recreate does not start speaking again. */
+        const val EXTRA_PLAY = "play"
 
         /* the reader instance currently owning TTS. Opening a new reader
            finishes the old one so two chapters never read at once — but
@@ -210,6 +218,12 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun sameChapter(a: String, b: String): Boolean = ChapterName.same(a, b)
+
+    private fun takePlayRequest(): Boolean {
+        val play = intent.getBooleanExtra(EXTRA_PLAY, false)
+        intent.removeExtra(EXTRA_PLAY)
+        return play
+    }
 
     /* The chapter list is read once and never reloaded, so two things can make
        the name at an index no longer the chapter it was. A rename pass moves
@@ -675,8 +689,13 @@ class ReaderActivity : AppCompatActivity() {
                     ).show()
                 }
             }
+            /* After a process death the system hands back the launch intent,
+               extra and all; only a request still pending when state was
+               saved counts then. */
+            val play = takePlayRequest() && !spotLost &&
+                (savedInstanceState == null || savedInstanceState.getBoolean(STATE_PLAY))
             val t = restoreTargetFor(startIdx)
-            goTo(startIdx, t.first, t.second)
+            goTo(startIdx, t.first, t.second, play = play)
         }
 
         /* Chapter loading is border-driven: openAt builds the initial window,
@@ -972,7 +991,7 @@ class ReaderActivity : AppCompatActivity() {
                the same toast. */
             spotLost = false
             val t = restoreTargetFor(idx)
-            goTo(idx, t.first, t.second)
+            goTo(idx, t.first, t.second, play = takePlayRequest())
         } else {
             recreate()
         }
@@ -2230,6 +2249,7 @@ class ReaderActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         lastAutoPictureChapter?.let { outState.putString(STATE_AUTO_PICTURE, it) }
+        outState.putBoolean(STATE_PLAY, intent.getBooleanExtra(EXTRA_PLAY, false))
     }
 
     override fun onDestroy() {
@@ -3132,6 +3152,7 @@ class ReaderActivity : AppCompatActivity() {
         anchor: String? = null,
         saveTts: Boolean = false,
         autoPicture: Boolean = false,
+        play: Boolean = false,
     ): Boolean {
         if (loading) return false
         val row = rowOf(pos)
@@ -3157,6 +3178,7 @@ class ReaderActivity : AppCompatActivity() {
             bindPictureButton()
             if (autoPicture) maybeAutoShowPicture()
             list.post { loadReady = true }
+            if (play && resumeAt != null) playButtonAction()
         }
         return true
     }
@@ -3184,6 +3206,7 @@ class ReaderActivity : AppCompatActivity() {
         anchor: String? = null,
         saveTts: Boolean = false,
         autoPicture: Boolean = currentChapterIdx != pos,
+        play: Boolean = false,
     ) {
         /* picking the chapter TTS is already reading → keep reading (nothing new
            to load); just bring the spoken line back into view */
@@ -3195,12 +3218,15 @@ class ReaderActivity : AppCompatActivity() {
                 return
             }
         }
+        /* Play goes through the paused resume point, so the landing is
+           what Play reads — even when it has to wait for a voice. */
+        val save = saveTts || play
         gotoJob?.cancel()
         gotoJob = lifecycleScope.launch {
             var waited = 0
             while (loading && waited < 120) { kotlinx.coroutines.delay(50); waited++ }
-            if (!jumpToLoaded(pos, targetPara, anchor, saveTts, autoPicture)) {
-                openAt(pos, targetPara, anchor, saveTts, autoPicture)
+            if (!jumpToLoaded(pos, targetPara, anchor, save, autoPicture, play)) {
+                openAt(pos, targetPara, anchor, save, autoPicture, play)
             }
         }
     }
@@ -3225,6 +3251,7 @@ class ReaderActivity : AppCompatActivity() {
         anchor: String? = null,
         saveTts: Boolean = false,
         autoPicture: Boolean = false,
+        play: Boolean = false,
     ) {
         /* Both early returns disarm the Play flag. It is set right before the
            call at the Play button, and nothing else ever cleared it — so a
@@ -3336,6 +3363,7 @@ class ReaderActivity : AppCompatActivity() {
                         startTtsFrom(target)
                     } else if (saveTts && !spotLost && targetBodyLen > 0) {
                         markPausedSkip(target)
+                        if (play) playButtonAction()
                     }
                 }
             }

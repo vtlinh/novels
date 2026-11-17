@@ -72,6 +72,8 @@ object Truyenfull : Site {
 
     override fun description(doc: Document) = SiteHelp.descriptionText(doc)
 
+    override fun rating(doc: Document) = SiteHelp.schemaRating(doc)
+
     override fun chapterContent(doc: Document) =
         SiteHelp.firstOf(doc, listOf("#chapter-c", ".chapter-c", "div[itemprop=articleBody]", ".box-chap"))
 
