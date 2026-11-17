@@ -1821,6 +1821,7 @@ class DownloadEngine(
             description = site.description(doc),
             statusLabel = site.statusLabel(doc)
                 ?: if (site.isCompleted(doc)) "Completed" else null,
+            siteRating = site.rating(doc) ?: 0.0,
         )
         saveCover(slug, doc)
         /* Index the site's chapter order for the reader — but only from a

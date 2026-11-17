@@ -30,4 +30,25 @@ class NovelRatingTest {
         assertEquals("10★", NovelRating.bar(99))
         assertEquals("0★", NovelRating.bar(-1))
     }
+
+    @Test
+    fun `the site's rating stands in until the user rates the novel`() {
+        assertEquals(9, NovelRating.effective(0, 8.7))
+        assertEquals(6, NovelRating.effective(0, 6.0))
+        assertEquals(4, NovelRating.effective(4, 8.7))
+        assertEquals(10, NovelRating.effective(0, 10.0))
+    }
+
+    @Test
+    fun `no site rating and no own rating is no stars`() {
+        assertEquals(0, NovelRating.effective(0, -1.0))
+        assertEquals(0, NovelRating.effective(0, 0.0))
+        assertEquals(7, NovelRating.effective(7, -1.0))
+    }
+
+    @Test
+    fun `a low site rating is still one star, not none`() {
+        assertEquals(1, NovelRating.effective(0, 0.3))
+        assertEquals(1, NovelRating.effective(0, 1.0))
+    }
 }

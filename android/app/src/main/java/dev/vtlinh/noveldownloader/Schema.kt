@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 28
+    const val VERSION = 29
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -81,6 +81,10 @@ object Schema {
                because `complete` is the site's answer and every status
                check rewrites it. */
             "marked_complete INTEGER DEFAULT 0, " +
+            /* The site's readers' rating, out of 10: the stars until the
+               user rates it. -1 = the page has not been read since this
+               column arrived, 0 = it was and prints none. */
+            "site_rating REAL DEFAULT -1, " +
             "PRIMARY KEY(folder, slug))"
     /* which novel a folder NAME belongs to, so a second novel that
        sanitises onto the same name is sent elsewhere instead of writing
@@ -357,6 +361,12 @@ object Schema {
            Nothing to seed — a mark is a choice, and there is no choice here. */
         if (oldVersion < 28) {
             db.soft("ALTER TABLE novels ADD COLUMN marked_complete INTEGER DEFAULT 0")
+        }
+        /* Site rating. -1 is "not read yet": the next status check, download
+           or novel-page visit reads it. Nothing to seed — a rating is a
+           measurement of a page, and there is no page here to measure. */
+        if (oldVersion < 29) {
+            db.soft("ALTER TABLE novels ADD COLUMN site_rating REAL DEFAULT -1")
         }
     }
 }

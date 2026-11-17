@@ -56,6 +56,8 @@ data class NovelRec(
     val ttsLang: String? = null,
     /* the user marked it complete — see DownloadStore.setMarkedComplete */
     val markedComplete: Boolean = false,
+    /* the site's readers' rating out of 10: -1 not read yet, 0 none */
+    val siteRating: Double = -1.0,
 ) {
     /* What every caller means by "complete": a hand mark counts exactly
        like the site's. */
@@ -562,7 +564,7 @@ class DownloadStore(context: Context) :
                 "last_dl", "last_read", "auto_dl", "translate",
                 "resume_page", "resume_url", "resume_before",
                 "alt_names", "genres", "source", "description", "status_label",
-                "tts_lang", "marked_complete",
+                "tts_lang", "marked_complete", "site_rating",
             ),
             "folder=?", arrayOf(folder), null, null, null,
         ).use { c ->
@@ -590,6 +592,7 @@ class DownloadStore(context: Context) :
                         statusLabel = c.getString(19) ?: "",
                         ttsLang = Voices.pin(c.getString(20)),
                         markedComplete = c.getInt(21) != 0,
+                        siteRating = c.getDouble(22),
                     ),
                 )
             }
@@ -904,7 +907,8 @@ class DownloadStore(context: Context) :
 
     /* Write every novel-page info field we have. Blank inputs leave the stored
        value alone — a status check that failed to find genres must not wipe
-       ones a previous download already recorded. */
+       ones a previous download already recorded. A null rating leaves it
+       alone too; 0 records that the page was read and prints none. */
     fun setNovelInfo(
         folder: String,
         slug: String,
@@ -914,6 +918,7 @@ class DownloadStore(context: Context) :
         source: String? = null,
         description: String? = null,
         statusLabel: String? = null,
+        siteRating: Double? = null,
     ) {
         val db = writableDatabase
         fun put(col: String, v: String?) {
@@ -930,6 +935,12 @@ class DownloadStore(context: Context) :
         put("source", source)
         put("description", description)
         put("status_label", statusLabel)
+        if (siteRating != null) {
+            db.execSQL(
+                "UPDATE novels SET site_rating=? WHERE folder=? AND slug=?",
+                arrayOf(siteRating.coerceIn(0.0, 10.0), folder, slug),
+            )
+        }
     }
 
     fun updateNovelCheck(folder: String, slug: String, total: Int, complete: Boolean) {

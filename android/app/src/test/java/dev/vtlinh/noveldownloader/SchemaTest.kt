@@ -621,6 +621,31 @@ class SchemaTest {
         }
     }
 
+    /* An existing novel arrives with its site rating unread (-1), not 0:
+       0 says the page was read and prints none, which would stop the novel
+       page from ever fetching the rating it does have. */
+    @Test
+    fun `an existing novel upgrades with its site rating unread`() {
+        for (v in 5..(Schema.VERSION - 1)) {
+            open().use { c ->
+                at(v, c)
+                c.createStatement().use {
+                    it.execute(
+                        "INSERT INTO novels(folder,slug,url,title,started,total,complete) " +
+                            "VALUES('f','than-y','https://site/than-y/','Thần Y',1,120,1)",
+                    )
+                }
+                Schema.upgrade(Jdbc(c), v)
+                c.createStatement().use { s ->
+                    s.executeQuery("SELECT site_rating FROM novels WHERE slug='than-y'").use { r ->
+                        assertTrue("upgrading from v$v lost the novel", r.next())
+                        assertEquals("upgrading from v$v: site rating", -1.0, r.getDouble(1), 0.0)
+                    }
+                }
+            }
+        }
+    }
+
     /* Anything older than v4 is rebuilt rather than migrated, and that is a
        deliberate data loss — it is all cache and index. It has to actually
        leave a working current schema behind, though. */

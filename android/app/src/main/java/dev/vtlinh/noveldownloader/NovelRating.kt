@@ -6,9 +6,11 @@ import okhttp3.Request
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 /* Personal novel ranking: full stars only, 1..MAX. Stored in the same prefs
-   bag as finished marks. Tapping the star already set clears the rating. */
+   bag as finished marks. Tapping the star already set clears the rating,
+   which hands the stars back to the site's rating (see effective). */
 object NovelRating {
 
     const val MAX = 10
@@ -33,6 +35,18 @@ object NovelRating {
         return if (current.coerceIn(0, MAX) == want) 0 else want
     }
 
+    /* The stars a novel shows and is judged by: the user's own once set,
+       until then the site's readers' rating to the nearest whole star.
+       `site` is out of 10; -1 (not read yet) and 0 (none) give 0. */
+    fun effective(own: Int, site: Double): Int = when {
+        own > 0 -> own.coerceIn(1, MAX)
+        site > 0 -> site.roundToInt().coerceIn(1, MAX)
+        else -> 0
+    }
+
+    fun effective(prefs: SharedPreferences, rec: NovelRec): Int =
+        effective(get(prefs, rec.slug), rec.siteRating)
+
     /* Tap star N: set to N, or clear if it was already N. Returns the new value. */
     fun toggle(prefs: SharedPreferences, slug: String, stars: Int): Int {
         val n = next(get(prefs, slug), stars)
@@ -55,6 +69,9 @@ data class NovelPageInfo(
     val source: String? = null,
     val description: String? = null,
     val statusLabel: String? = null,
+    /* the page's readers' rating out of 10; 0 when the page was read and
+       prints none, null when no page was read */
+    val rating: Double? = null,
 ) {
     val isBlank: Boolean
         get() = author.isNullOrBlank() && altNames.isNullOrBlank() &&
@@ -76,6 +93,7 @@ data class NovelPageInfo(
             description = site.description(doc),
             statusLabel = site.statusLabel(doc)
                 ?: if (site.isCompleted(doc)) "Completed" else null,
+            rating = site.rating(doc) ?: 0.0,
         )
 
         /* Fetch the novel page and scrape its info. Null on network / unsupported. */

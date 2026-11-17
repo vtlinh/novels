@@ -208,7 +208,8 @@ class SettingsActivity : AppCompatActivity() {
                 "A finished novel also always gets pictures for its last 5 chapters. " +
                 "Wait minutes between pictures is how long the app waits " +
                 "after asking for one before asking for the next. " +
-                "At least N stars skips novels you have not rated that high. " +
+                "At least N stars skips novels with fewer stars — your own rating, " +
+                "or the website's rating until you rate a novel yourself. " +
                 "Only unread novels skips ones you marked as read.\n\n" +
                 "A novel with Auto-generate images on in its own settings " +
                 "is always included, even if you marked it as read or it has fewer stars.",

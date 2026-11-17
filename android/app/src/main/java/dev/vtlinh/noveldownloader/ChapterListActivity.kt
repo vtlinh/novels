@@ -343,8 +343,11 @@ class ChapterListActivity : AppCompatActivity() {
                 try { DownloadStore(this@ChapterListActivity).novel(folder, slug) } catch (e: Exception) { null }
             }
             /* Old downloads only have author (if that). Pull the rest when the
-               synopsis is still missing and we know where the novel lives. */
-            if (rec != null && rec.description.isEmpty() && rec.url.isNotEmpty()) {
+               synopsis or the site's rating is still missing and we know
+               where the novel lives. */
+            if (rec != null && (rec.description.isEmpty() || rec.siteRating < 0) &&
+                rec.url.isNotEmpty()
+            ) {
                 val url = rec.url
                 val fetched = withContext(Dispatchers.IO) {
                     try {
@@ -357,6 +360,7 @@ class ChapterListActivity : AppCompatActivity() {
                             source = info.source,
                             description = info.description,
                             statusLabel = info.statusLabel,
+                            siteRating = info.rating,
                         )
                         info
                     } catch (e: Exception) { null }
@@ -509,13 +513,21 @@ class ChapterListActivity : AppCompatActivity() {
             )
         }
 
-        /* Personal ranking: ten full stars. Tap the current value to clear. */
+        /* Ten full stars: the user's own rating, or the website's until
+           they set one. Tap the current value of your own to clear it. */
+        val siteRating = rec?.siteRating ?: -1.0
         val starsRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
             setPadding(0, dp(10), 0, dp(2))
         }
-        fun paintStars(current: Int) {
+        val ratingNote = TextView(this).apply {
+            textSize = 12f
+            setTextColor(getColor(R.color.muted))
+            gravity = android.view.Gravity.CENTER
+        }
+        fun paintStars(own: Int) {
+            val shown = NovelRating.effective(own, siteRating)
             starsRow.removeAllViews()
             for (i in 1..NovelRating.MAX) {
                 starsRow.addView(
@@ -523,19 +535,28 @@ class ChapterListActivity : AppCompatActivity() {
                         text = "★"
                         textSize = 20f
                         setTextColor(
-                            getColor(if (i <= current) R.color.star else R.color.muted),
+                            getColor(if (i <= shown) R.color.star else R.color.muted),
                         )
                         setPadding(dp(3), dp(4), dp(3), dp(4))
                         setOnClickListener {
-                            val next = NovelRating.toggle(prefs, slug, i)
-                            paintStars(next)
+                            paintStars(NovelRating.toggle(prefs, slug, i))
                         }
                     },
                 )
             }
+            val where = website.ifEmpty { "the website" }
+            val score = "%.1f".format(siteRating)
+            ratingNote.text = when {
+                siteRating <= 0 -> ""
+                own > 0 -> "Your rating. Readers on $where give it $score."
+                else -> "Readers on $where give it $score. Tap a star to rate it yourself."
+            }
+            ratingNote.visibility =
+                if (siteRating > 0) android.view.View.VISIBLE else android.view.View.GONE
         }
         paintStars(NovelRating.get(prefs, slug))
         panel.addView(starsRow)
+        panel.addView(ratingNote)
 
         if (desc.isNotEmpty()) {
             panel.addView(
