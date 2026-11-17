@@ -106,6 +106,13 @@ object Freewebnovel : Site {
 
     override fun description(doc: Document) = SiteHelp.descriptionText(doc)
 
+    /* "3.0 / 5 ( 2 votes )" — out of five, the only site here that is */
+    override fun rating(doc: Document): Double? {
+        val text = doc.selectFirst("p.vote")?.text() ?: return null
+        val m = Regex("""([\d.]+)\s*/\s*([\d.]+)\s*\(\s*([\d,]+)""").find(text) ?: return null
+        return SiteHelp.scaledRating(m.groupValues[1], m.groupValues[2], m.groupValues[3])
+    }
+
     /* The text in the .right of the .item whose icon class contains `icon`. */
     private fun itemRight(doc: Document, icon: String): String? =
         doc.select(".item").firstOrNull { it.selectFirst("span.$icon") != null }
