@@ -1386,7 +1386,8 @@ object ChapterImages {
 
     /* This chapter's picture, or the closest later chapter that has
        one — walk the book's order from here, skip every chapter
-       with no picture. Do not fall back to an earlier chapter. */
+       with no picture. Past the last picture, the closest earlier
+       one, so the button is never a dead end while any exists. */
     fun startImageChapter(
         ordered: List<String>,
         pictured: Collection<String>,
@@ -1398,16 +1399,19 @@ object ChapterImages {
         val fromIdx = if (at >= 0) {
             at
         } else {
-            val n = Scenes.chapterNumber(from) ?: return null
-            val i = ordered.indexOfFirst {
+            val n = Scenes.chapterNumber(from)
+            val i = if (n == null) -1 else ordered.indexOfFirst {
                 (Scenes.chapterNumber(it) ?: Int.MAX_VALUE) >= n
             }
-            if (i < 0) return null else i
+            if (i < 0) ordered.size else i
         }
         for (i in fromIdx until ordered.size) {
             if (ordered[i] in have) return ordered[i]
         }
-        return null
+        for (i in (fromIdx - 1).coerceAtMost(ordered.size - 1) downTo 0) {
+            if (ordered[i] in have) return ordered[i]
+        }
+        return pictured.last()
     }
 
     fun startImageChapter(pictured: List<String>, from: String): String? =

@@ -3006,7 +3006,8 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* Toolbar button: the picture for this chapter, or the closest
-       later chapter that has one, in a vertical list. Auto-open
+       later chapter that has one (past the last picture, the closest
+       earlier one), in a vertical list. Auto-open
        still only shows the picture that belongs to this chapter. */
     private fun showChapterPicture(auto: Boolean) {
         if (asDocument()) return
@@ -3066,7 +3067,12 @@ class ReaderActivity : AppCompatActivity() {
             val start = ChapterImages.startSavedIndex(
                 items, chapter, chapters?.ordered ?: emptyList(),
             )
-            if (start < 0) return@launch
+            if (start < 0) {
+                android.widget.Toast.makeText(
+                    this@ReaderActivity, "No pictures in this novel yet", android.widget.Toast.LENGTH_SHORT,
+                ).show()
+                return@launch
+            }
             PictureGallery.show(this@ReaderActivity, items.map { it to null }, start)
         }
     }

@@ -18,7 +18,7 @@ import kotlinx.coroutines.withContext
 
 /* Vertical list of chapter pictures. The reader toolbar opens this
    at the current chapter — or the closest later chapter that has a
-   picture. Each row is the picture with the chapter number and
+   picture, else the closest earlier one. Each row is the picture with the chapter number and
    name, then the picture's own title, under it.
 
    This is a RecyclerView, not a ScrollView. Rows are bound as they
