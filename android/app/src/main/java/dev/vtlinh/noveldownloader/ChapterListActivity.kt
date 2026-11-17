@@ -302,7 +302,7 @@ class ChapterListActivity : AppCompatActivity() {
         }
     }
 
-    private fun openChapter(name: String) {
+    private fun openChapter(name: String, play: Boolean = false) {
         val dirName = intent.getStringExtra("dir") ?: return
         val title = intent.getStringExtra("title") ?: dirName
         /* REORDER_TO_FRONT: if the reader for this novel is still
@@ -315,6 +315,7 @@ class ChapterListActivity : AppCompatActivity() {
                 .putExtra("title", title)
                 .putExtra("slug", intent.getStringExtra("slug"))
                 .putExtra("start", name)
+                .putExtra(ReaderActivity.EXTRA_PLAY, play)
                 .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
         )
         /* Leave so Back from the reader hits Library, not this screen. */
@@ -961,7 +962,7 @@ class ChapterListActivity : AppCompatActivity() {
                 continueBtn.text = ChapterListFocus.continueLabel(
                     if (newCurrent >= 0) labelOf(startName) else null,
                 )
-                continueBtn.setOnClickListener { openChapter(startName) }
+                continueBtn.setOnClickListener { openChapter(startName, play = true) }
                 showContinue(true)
             } else {
                 showContinue(false)
