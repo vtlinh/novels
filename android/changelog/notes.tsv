@@ -4,6 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
+	Tap the website on a novel's page to open the novel there; novels show the website's star rating until you rate them yourself
 	Start reading and Continue start reading aloud as soon as the chapter opens
 1.47.2	A novel you haven't started opens on its details page, with a Start reading button
 1.47.1	The picture button opens the picture list again when you've read past the last picture
