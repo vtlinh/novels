@@ -474,7 +474,19 @@ class ChapterListActivity : AppCompatActivity() {
             )
         }
         if (website.isNotEmpty()) {
-            chips.addView(chip(website, R.color.fg, R.drawable.bg_chip))
+            val url = rec?.url.orEmpty()
+            chips.addView(
+                chip(website, R.color.fg, R.drawable.bg_chip).apply {
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        startActivity(
+                            Intent(this@ChapterListActivity, BrowserActivity::class.java)
+                                .putExtra(BrowserActivity.EXTRA_URL, url),
+                        )
+                    }
+                },
+            )
         }
         if (source.isNotEmpty()) {
             chips.addView(chip(source, R.color.fg, R.drawable.bg_chip))
