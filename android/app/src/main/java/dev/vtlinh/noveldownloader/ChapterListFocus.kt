@@ -33,4 +33,15 @@ object ChapterListFocus {
     /* A scroll event that arrives while the posted jump is still pending
        must not grow the window. */
     fun mayGrow(settling: Boolean): Boolean = !settling
+
+    /* A novel nobody has opened in the reader yet lands on its details,
+       not on a list with no current chapter. ≡ from the reader names a
+       chapter and always wants the list. */
+    fun opensOnInfo(fromReader: String?, resume: String?): Boolean =
+        fromReader.isNullOrEmpty() && resume.isNullOrEmpty()
+
+    /* The first chapter is where a fresh start goes anyway, so it is
+       not named. */
+    fun continueLabel(current: String?): String =
+        if (current.isNullOrEmpty()) "Start reading" else "Continue · $current"
 }

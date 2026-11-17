@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	The picture button opens the picture list again when you've read past the last picture
+	A novel you haven't started opens on its details page, with a Start reading button
+1.47.1	The picture button opens the picture list again when you've read past the last picture
 1.44.1	Reading aloud stops when you turn the volume all the way down, and press-and-hold to select text works again
 1.42.13	The Slack bot token in Settings is shown as you type it instead of hidden behind dots
 1.42.11	Library order and Recently Read change only when you start reading aloud, not when you just open a novel
