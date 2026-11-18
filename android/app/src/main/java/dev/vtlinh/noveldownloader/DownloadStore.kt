@@ -39,7 +39,7 @@ data class NovelRec(
     val diskCount: Int,  // chapters counted on disk at scan time (for unindexed novels)
     val lastDl: Long,    // when it last downloaded (0 = unknown/legacy)
     val lastRead: Long,  // when read-aloud was last started (0 = never)
-    /* per-novel settings — see NovelSettingsActivity */
+    /* per-novel settings — see NovelSettingsPanel */
     val autoDownload: Boolean = false,
     /* translate this novel: null follows the app-wide switch */
     val translate: Boolean? = null,
