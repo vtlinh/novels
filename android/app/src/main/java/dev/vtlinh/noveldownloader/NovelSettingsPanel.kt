@@ -1,7 +1,6 @@
 package dev.vtlinh.noveldownloader
 
 import android.net.Uri
-import android.os.Bundle
 import android.provider.DocumentsContract
 import android.view.View
 import android.widget.ArrayAdapter
@@ -17,7 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/* One novel's own settings, reached from the ⚙ on its chapter list.
+/* One novel's own settings: the Novel tab of the settings page
+   (SettingsPage), reached from the ⚙ on its chapter list and from the
+   reader's gear.
 
    A complete mark for a story the site never calls finished, two switches
    that outlive the screen — fetch new chapters without asking,
@@ -26,7 +27,12 @@ import kotlinx.coroutines.withContext
    novel the detector gets wrong is still read in the right voice, and two
    actions on the novel itself: check the site for chapters it has gained,
    and throw the whole thing away and download it again. */
-class NovelSettingsActivity : AppCompatActivity() {
+class NovelSettingsPanel(
+    private val host: AppCompatActivity,
+    private val slug: String,
+    private val dirName: String,
+    private val title: String,
+) {
 
     companion object {
         private const val MARK_COMPLETE_HELP =
@@ -35,13 +41,25 @@ class NovelSettingsActivity : AppCompatActivity() {
                 "new chapters. Untick it to undo."
     }
 
-    private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
-    private val store by lazy { DownloadStore(this) }
+    private val prefs = host.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
+    private val store by lazy { DownloadStore(host) }
+    private val folder: String? = prefs.getString("tree", null)
 
-    private lateinit var slug: String
-    private lateinit var dirName: String
-    private lateinit var title: String
-    private var folder: String? = null
+    val view: View = host.layoutInflater.inflate(R.layout.view_novel_settings, null)
+
+    /* The reader listens here: a language picked on this tab has to reach
+       the voice that is already reading. */
+    var onTtsLang: ((String?) -> Unit)? = null
+
+    /* False inside the reader: re-downloading deletes the chapters it is
+       showing. The chapter list's ⚙ still offers it. */
+    var allowRedownload: Boolean = true
+        set(v) {
+            field = v
+            find<View>(R.id.redownloadRow).visibility = if (v) View.VISIBLE else View.GONE
+        }
+
+    private fun <T : View> find(id: Int): T = view.findViewById(id)
 
     /* what the last load found, so the buttons don't have to ask again */
     private var rec: NovelRec? = null
@@ -78,17 +96,10 @@ class NovelSettingsActivity : AppCompatActivity() {
     private val redownloadHelp =
         "Replaces this novel on your phone with a fresh download from the website. Any translations are lost, and would cost money to make again."
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_novel_settings)
-        slug = intent.getStringExtra("slug") ?: return finish()
-        dirName = intent.getStringExtra("dir") ?: return finish()
-        title = intent.getStringExtra("title") ?: dirName
-        folder = prefs.getString("tree", null)
-        findViewById<TextView>(R.id.novelTitle).text = title
-        findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
-        findViewById<Button>(R.id.recheckBtn).setOnClickListener { recheck() }
-        findViewById<Button>(R.id.redownloadBtn).setOnClickListener { confirmRedownload() }
+    init {
+        find<TextView>(R.id.novelTitle).text = title
+        find<Button>(R.id.recheckBtn).setOnClickListener { recheck() }
+        find<Button>(R.id.redownloadBtn).setOnClickListener { confirmRedownload() }
         bindHelp(R.id.markCompleteHelp, "Complete") { markCompleteHelp }
         bindHelp(R.id.autoDownloadHelp, "Auto-download new chapters") { autoDownloadHelp }
         bindHelp(R.id.translateHelp, "Translate to English") { translateHelp }
@@ -102,8 +113,8 @@ class NovelSettingsActivity : AppCompatActivity() {
     /* Keep `message` in everyday words. What the reader will see, not how
        the machine does it — bindHelp is how a new string reaches the user. */
     private fun bindHelp(id: Int, title: String, message: () -> String) {
-        findViewById<View>(id).setOnClickListener {
-            AlertDialog.Builder(this)
+        find<View>(id).setOnClickListener {
+            AlertDialog.Builder(host)
                 .setTitle(title)
                 .setMessage(message())
                 .setPositiveButton("OK", null)
@@ -111,20 +122,18 @@ class NovelSettingsActivity : AppCompatActivity() {
         }
     }
 
-    /* Reload on every return: a download started from here changes the counts,
-       and so does one started anywhere else while this screen was behind it. */
-    override fun onPause() {
-        super.onPause()
-        try { saveAutoImage() } catch (e: Exception) {}
-    }
-
-    override fun onResume() {
-        super.onResume()
+    /* Reload every time the tab comes into view: a download started from
+       here changes the counts, and so does one started anywhere else. */
+    fun shown() {
         load()
     }
 
+    fun hidden() {
+        try { saveAutoImage() } catch (e: Exception) {}
+    }
+
     private fun status(s: String) {
-        findViewById<TextView>(R.id.statusText).text = s
+        find<TextView>(R.id.statusText).text = s
     }
 
     /* ---- loading ---- */
@@ -135,7 +144,7 @@ class NovelSettingsActivity : AppCompatActivity() {
        were being erased by the reload that followed them. */
     private fun load(keepStatus: Boolean = false) {
         val folder = this.folder ?: return status("Pick a download folder first.")
-        lifecycleScope.launch {
+        host.lifecycleScope.launch {
             val state = withContext(Dispatchers.IO) { readState(folder) }
             rec = state.rec
             local = state.local
@@ -149,8 +158,8 @@ class NovelSettingsActivity : AppCompatActivity() {
             bindAutoDownload(folder, state)
             bindTranslate(folder, state)
             bindTtsLang(folder, state)
-            findViewById<Button>(R.id.recheckBtn).isEnabled = !busy
-            findViewById<Button>(R.id.redownloadBtn).isEnabled = !busy
+            find<Button>(R.id.recheckBtn).isEnabled = !busy
+            find<Button>(R.id.redownloadBtn).isEnabled = !busy
         }
     }
 
@@ -171,7 +180,7 @@ class NovelSettingsActivity : AppCompatActivity() {
         val local = NovelCheck.localCount(store, folder, rec)
         val order = try { store.getChapterOrder(folder, slug) } catch (e: Exception) { emptyMap() }
         val ch = try {
-            ChapterListActivity.chapterNames(this, Uri.parse(folder), dirName, order, slug)
+            ChapterListActivity.chapterNames(host, Uri.parse(folder), dirName, order, slug)
         } catch (e: Exception) { null }
         val ordered = ch?.ordered.orEmpty()
         val translated = ordered.count { ch?.translated?.containsKey(it) == true }
@@ -210,8 +219,8 @@ class NovelSettingsActivity : AppCompatActivity() {
         for (name in ch?.ordered.orEmpty().take(5)) {
             val ref = ch?.source?.get(name) ?: continue
             val text = try {
-                if (Zips.isGzRef(ref)) Zips.readGz(contentResolver, treeUri, Zips.gzDocId(ref))
-                else Saf.readText(contentResolver, treeUri, ref)
+                if (Zips.isGzRef(ref)) Zips.readGz(host.contentResolver, treeUri, Zips.gzDocId(ref))
+                else Saf.readText(host.contentResolver, treeUri, ref)
             } catch (e: Exception) { null } ?: continue
             Voices.detect(text)?.let { return it }
         }
@@ -221,12 +230,12 @@ class NovelSettingsActivity : AppCompatActivity() {
     /* ---- the two switches ---- */
 
     private fun bindAutoImage() {
-        val autoCheck = findViewById<CheckBox>(R.id.autoImageCheck)
-        val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
-        val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
-        autoCheck.isChecked = ChapterImages.autoEnabled(this, slug)
-        everyInput.setText(ChapterImages.autoEvery(this, slug).toString())
-        fromInput.setText(ChapterImages.autoFrom(this, slug).toString())
+        val autoCheck = find<CheckBox>(R.id.autoImageCheck)
+        val everyInput = find<EditText>(R.id.autoImageEveryInput)
+        val fromInput = find<EditText>(R.id.autoImageFromInput)
+        autoCheck.isChecked = ChapterImages.autoEnabled(host, slug)
+        everyInput.setText(ChapterImages.autoEvery(host, slug).toString())
+        fromInput.setText(ChapterImages.autoFrom(host, slug).toString())
         /* Every / from stay editable while the box is off so the cadence
            can be set before anything is posted. */
         autoCheck.setOnCheckedChangeListener { _, checked ->
@@ -248,16 +257,15 @@ class NovelSettingsActivity : AppCompatActivity() {
     }
 
     private fun saveAutoImage() {
-        if (!::slug.isInitialized) return
-        val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
-        val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
+        val everyInput = find<EditText>(R.id.autoImageEveryInput)
+        val fromInput = find<EditText>(R.id.autoImageFromInput)
         val every = everyInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
             ?: ChapterImages.AUTO_EVERY_DEFAULT
         val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0)
             ?: ChapterImages.AUTO_FROM_DEFAULT
         ChapterImages.setAuto(
-            this, slug,
-            findViewById<CheckBox>(R.id.autoImageCheck).isChecked,
+            host, slug,
+            find<CheckBox>(R.id.autoImageCheck).isChecked,
             every, from,
         )
         if (everyInput.text.toString() != every.toString()) everyInput.setText(every.toString())
@@ -269,7 +277,7 @@ class NovelSettingsActivity : AppCompatActivity() {
        the write dispatched — the setting silently not saved, showing its old
        value on the next open. */
     private fun persist(write: () -> Unit) {
-        lifecycleScope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+        host.lifecycleScope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
             try { write() } catch (e: Exception) {}
         }
     }
@@ -278,7 +286,7 @@ class NovelSettingsActivity : AppCompatActivity() {
        finished, since only the user's own mark can be taken back. Changing
        it reloads the screen — auto-download and the summary follow it. */
     private fun bindMarkComplete(folder: String, state: State) {
-        val box = findViewById<CheckBox>(R.id.markCompleteCheck)
+        val box = find<CheckBox>(R.id.markCompleteCheck)
         val rec = state.rec ?: return
         box.setOnCheckedChangeListener(null)
         box.isChecked = rec.complete
@@ -290,7 +298,7 @@ class NovelSettingsActivity : AppCompatActivity() {
             MARK_COMPLETE_HELP
         }
         box.setOnCheckedChangeListener { _, checked ->
-            lifecycleScope.launch {
+            host.lifecycleScope.launch {
                 withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
                     try {
                         store.setMarkedComplete(folder, rec.slug, rec.title.ifEmpty { title }, checked)
@@ -307,7 +315,7 @@ class NovelSettingsActivity : AppCompatActivity() {
        auto-download was turned on has not had that answer cleared, and if
        it is ever ongoing again the same tick still applies. */
     private fun bindAutoDownload(folder: String, state: State) {
-        val box = findViewById<CheckBox>(R.id.autoDownloadCheck)
+        val box = find<CheckBox>(R.id.autoDownloadCheck)
         box.setOnCheckedChangeListener(null)
         box.isChecked = state.rec?.autoDownload == true
         val finished = state.rec?.complete == true
@@ -333,7 +341,7 @@ class NovelSettingsActivity : AppCompatActivity() {
        translation has caught up has not stopped being a novel the user wants
        translated, and the next chapters it gains will be. */
     private fun bindTranslate(folder: String, state: State) {
-        val box = findViewById<CheckBox>(R.id.translateCheck)
+        val box = find<CheckBox>(R.id.translateCheck)
         val rec = state.rec
         box.setOnCheckedChangeListener(null)
         val appWide = prefs.getBoolean("translate", false)
@@ -381,9 +389,9 @@ class NovelSettingsActivity : AppCompatActivity() {
        also what an upgrade writes — so an existing novel shows Auto and
        keeps being judged from the chapter until someone picks. */
     private fun bindTtsLang(folder: String, state: State) {
-        val spinner = findViewById<Spinner>(R.id.ttsLangSpinner)
+        val spinner = find<Spinner>(R.id.ttsLangSpinner)
         spinner.adapter = ArrayAdapter(
-            this,
+            host,
             android.R.layout.simple_spinner_dropdown_item,
             Voices.PICKER,
         )
@@ -401,6 +409,7 @@ class NovelSettingsActivity : AppCompatActivity() {
                 if (lang == current) return
                 current = lang
                 persist { store.setTtsLang(folder, slug, lang) }
+                onTtsLang?.invoke(lang)
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
@@ -418,10 +427,10 @@ class NovelSettingsActivity : AppCompatActivity() {
         }
         setBusy(true)
         status("Checking the site…")
-        lifecycleScope.launch {
+        host.lifecycleScope.launch {
             val res = withContext(Dispatchers.IO) {
                 val engine = DownloadEngine(
-                    this@NovelSettingsActivity,
+                    host,
                     { line -> DownloadService.appendLog(line) },
                     {}, { _, _ -> },
                 )
@@ -444,11 +453,11 @@ class NovelSettingsActivity : AppCompatActivity() {
                auto-download and then checking, in that order, is the obvious
                way to use this screen and the write behind the tick is
                asynchronous */
-            val auto = findViewById<CheckBox>(R.id.autoDownloadCheck).isChecked
+            val auto = find<CheckBox>(R.id.autoDownloadCheck).isChecked
             when {
                 res.missing <= 0 -> status("Up to date — ${res.total} chapters.")
                 auto -> {
-                    if (NovelCheck.startDownload(this@NovelSettingsActivity, res.url)) {
+                    if (NovelCheck.startDownload(host, res.url)) {
                         status("${res.missing} new chapter(s) — downloading.")
                     } else {
                         status("${res.missing} new chapter(s) — the download would not start; try again with the app open.")
@@ -466,7 +475,7 @@ class NovelSettingsActivity : AppCompatActivity() {
 
     private fun confirmRedownload() {
         if (busy) return
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(host)
             .setTitle("Re-download this novel?")
             .setMessage(
                 "Every chapter of \"$title\" will be deleted from your phone — " +
@@ -500,7 +509,7 @@ class NovelSettingsActivity : AppCompatActivity() {
         }
         setBusy(true)
         status("Deleting chapters…")
-        lifecycleScope.launch {
+        host.lifecycleScope.launch {
             /* NonCancellable from the first delete to the last record write.
                This block destroys files and then repairs the records that
                describe them; cancelled between the two — Back, a rotation —
@@ -558,7 +567,7 @@ class NovelSettingsActivity : AppCompatActivity() {
                        tell. The download reads the listing itself; the count
                        arrives when it does. */
                     if (rec.url.isNotEmpty()) {
-                        started = NovelCheck.startDownload(applicationContext, rec.url)
+                        started = NovelCheck.startDownload(host.applicationContext, rec.url)
                     }
                 }
                 Pair(wiped, started)
@@ -611,11 +620,11 @@ class NovelSettingsActivity : AppCompatActivity() {
     private fun deleteChapters(folder: String, dirNow: String): Deleted {
         val treeUri = Uri.parse(folder)
         val dir = try {
-            Saf.children(contentResolver, treeUri, Saf.rootId(treeUri))
+            Saf.children(host.contentResolver, treeUri, Saf.rootId(treeUri))
                 .firstOrNull { it.isDir && it.name == dirNow }
         } catch (e: Exception) { null } ?: return Deleted(false, 0, 0)
         val kids = try {
-            Saf.children(contentResolver, treeUri, dir.docId)
+            Saf.children(host.contentResolver, treeUri, dir.docId)
         } catch (e: Exception) { return Deleted(false, 0, 0) }
         var gone = 0
         var kept = 0
@@ -626,7 +635,7 @@ class NovelSettingsActivity : AppCompatActivity() {
             if (!isChapter && !(kid.isDir && (kid.name == "translated" || kid.name == Scenes.DIR))) continue
             val ok = try {
                 DocumentsContract.deleteDocument(
-                    contentResolver,
+                    host.contentResolver,
                     DocumentsContract.buildDocumentUriUsingTree(treeUri, kid.docId),
                 )
             } catch (e: Exception) { false }
@@ -637,11 +646,11 @@ class NovelSettingsActivity : AppCompatActivity() {
 
     private fun setBusy(b: Boolean) {
         busy = b
-        findViewById<Button>(R.id.recheckBtn).isEnabled = !b
-        findViewById<Button>(R.id.redownloadBtn).isEnabled = !b
+        find<Button>(R.id.recheckBtn).isEnabled = !b
+        find<Button>(R.id.redownloadBtn).isEnabled = !b
         /* A finished novel stays untouchable even when nothing is in flight —
            setBusy used to flip this back on and undid bindAutoDownload. */
         val finished = rec?.complete == true
-        findViewById<CheckBox>(R.id.autoDownloadCheck).isEnabled = !b && !finished
+        find<CheckBox>(R.id.autoDownloadCheck).isEnabled = !b && !finished
     }
 }

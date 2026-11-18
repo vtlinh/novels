@@ -1,0 +1,396 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/novelTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="18sp"
+        android:textColor="@color/fg"
+        android:textStyle="bold"
+        android:maxLines="2"
+        android:ellipsize="end" />
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textSize="13sp"
+        android:textColor="@color/muted" />
+
+    <!-- ══ Updates ══ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_settings_card"
+        android:padding="18dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Updates"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <CheckBox
+                android:id="@+id/markCompleteCheck"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="6dp"
+                android:text="Complete"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                app:buttonTint="@color/accent" />
+
+            <ImageView
+                android:id="@+id/markCompleteHelp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="4dp"
+                android:padding="5dp"
+                android:src="@drawable/ic_help"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="About Complete" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <CheckBox
+                android:id="@+id/autoDownloadCheck"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="6dp"
+                android:text="Auto-download new chapters"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                app:buttonTint="@color/accent" />
+
+            <ImageView
+                android:id="@+id/autoDownloadHelp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="4dp"
+                android:padding="5dp"
+                android:src="@drawable/ic_help"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="About Auto-download new chapters" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <CheckBox
+                android:id="@+id/translateCheck"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="6dp"
+                android:text="Translate to English"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                app:buttonTint="@color/accent" />
+
+            <ImageView
+                android:id="@+id/translateHelp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="4dp"
+                android:padding="5dp"
+                android:src="@drawable/ic_help"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="About Translate to English" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ══ Chapter images ══ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_settings_card"
+        android:padding="18dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Chapter images"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg" />
+
+            <ImageView
+                android:id="@+id/autoImageHelp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="4dp"
+                android:padding="5dp"
+                android:src="@drawable/ic_help"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="About Chapter images" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <CheckBox
+                android:id="@+id/autoImageCheck"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="6dp"
+                android:text="Auto-generate images"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                app:buttonTint="@color/accent" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Every"
+                android:textSize="14sp"
+                android:textColor="@color/fg" />
+
+            <EditText
+                android:id="@+id/autoImageEveryInput"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="10dp"
+                android:background="@drawable/bg_input"
+                android:padding="11dp"
+                android:gravity="center"
+                android:hint="20"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                android:textColorHint="@color/muted"
+                android:inputType="number"
+                android:importantForAutofill="no" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="chapters"
+                android:textSize="14sp"
+                android:textColor="@color/fg" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Starting from chapter"
+                android:textSize="14sp"
+                android:textColor="@color/fg" />
+
+            <EditText
+                android:id="@+id/autoImageFromInput"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:background="@drawable/bg_input"
+                android:padding="11dp"
+                android:gravity="center"
+                android:hint="0"
+                android:textSize="14sp"
+                android:textColor="@color/fg"
+                android:textColorHint="@color/muted"
+                android:inputType="number"
+                android:importantForAutofill="no" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ══ Reading aloud ══ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_settings_card"
+        android:padding="18dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Reading aloud"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="6dp"
+                    android:text="TTS language"
+                    android:textSize="14sp"
+                    android:textColor="@color/fg" />
+
+                <Spinner
+                    android:id="@+id/ttsLangSpinner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:paddingStart="2dp" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/ttsLangHelp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="4dp"
+                android:padding="5dp"
+                android:src="@drawable/ic_help"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="About TTS language" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ══ This novel ══ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_settings_card"
+        android:padding="18dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="This novel"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/fg" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <Button
+                android:id="@+id/recheckBtn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Check for new chapters"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="#ffffff"
+                app:backgroundTint="@color/accent"
+                app:cornerRadius="8dp" />
+
+            <ImageView
+                android:id="@+id/recheckHelp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="8dp"
+                android:padding="5dp"
+                android:src="@drawable/ic_help"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="About Check for new chapters" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/redownloadRow"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <Button
+                android:id="@+id/redownloadBtn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Re-download all chapters"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/fg"
+                app:backgroundTint="@color/btn_secondary"
+                app:cornerRadius="8dp" />
+
+            <ImageView
+                android:id="@+id/redownloadHelp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="8dp"
+                android:padding="5dp"
+                android:src="@drawable/ic_help"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="About Re-download all chapters" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

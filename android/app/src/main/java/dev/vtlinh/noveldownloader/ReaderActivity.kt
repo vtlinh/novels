@@ -498,7 +498,7 @@ class ReaderActivity : AppCompatActivity() {
         treeUri = Uri.parse(folder)
 
         english = prefs.getString("readerLang", "en") == "en"
-        fontSp = prefs.getFloat("readerFontSize", 16f)
+        fontSp = prefs.getFloat(ReadingSettingsPanel.FONT_KEY, ReadingSettingsPanel.FONT_DEFAULT)
 
         titleBar = findViewById(R.id.readerTitle)
         list = findViewById(R.id.readerList)
@@ -2355,315 +2355,39 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /* ---- full-page reader settings (styled like the main app Settings) ---- */
+    /* ---- full-page reading settings: Reading tab, plus the novel's own
+       settings on the Novel tab (SettingsPage) ---- */
     private fun showReaderSettings() {
-        val ctx = this
-        val dialog = android.app.Dialog(ctx, android.R.style.Theme_DeviceDefault_NoActionBar)
-        val outer = ScrollView(ctx).apply {
-            setBackgroundColor(getColor(R.color.bg))
-            isFillViewport = true
-        }
-        val root = android.widget.LinearLayout(ctx).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(24))
-        }
-        outer.addView(root)
-
-        /* header: back + title */
-        val header = android.widget.LinearLayout(ctx).apply {
-            orientation = android.widget.LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        header.addView(
-            TextView(ctx).apply {
-                text = "←"; textSize = 24f; setTextColor(getColor(R.color.fg))
-                setPadding(0, dp(2), dp(14), dp(2))
-                isClickable = true; isFocusable = true
-                setOnClickListener { dialog.dismiss() }
+        val link = ReadingSettingsPanel.Reader(
+            fontSp = { fontSp },
+            adjustFont = { adjustFont(it) },
+            languageSwitch = if (chapters?.translated?.isNotEmpty() == true) {
+                if (english) "Switch to Tiếng Việt" else "Switch to English"
+            } else {
+                null
             },
+            toggleLanguage = { toggleLanguage() },
+            bindImage = if (asDocument()) null else { gen, card -> bindImageAction(gen, card) },
+            sleepChanged = { if (speaking) scheduleSleepTimer() },
+            shakeChanged = { if (speaking) { stopShakeDetection(); startShakeDetection() } },
         )
-        header.addView(
-            TextView(ctx).apply {
-                text = "Reading settings"; textSize = 22f
-                setTextColor(getColor(R.color.fg)); setTypeface(null, android.graphics.Typeface.BOLD)
-            },
-        )
-        root.addView(header)
-
-        fun card(): android.widget.LinearLayout {
-            val c = android.widget.LinearLayout(ctx).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-                background = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.bg_settings_card)
-                setPadding(dp(18), dp(18), dp(18), dp(18))
-            }
-            root.addView(
-                c,
-                android.widget.LinearLayout.LayoutParams(
-                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(14) },
-            )
-            return c
-        }
-        fun cardTitle(c: android.widget.LinearLayout, t: String) = c.addView(
-            TextView(ctx).apply {
-                text = t; textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD)
-                setTextColor(getColor(R.color.fg))
-            },
-        )
-        fun hint(c: android.widget.LinearLayout, t: String) = c.addView(
-            TextView(ctx).apply {
-                text = t; textSize = 12f; setTextColor(getColor(R.color.muted))
-                setPadding(0, dp(6), 0, 0)
-            },
-        )
-
-        if (!asDocument()) {
-            val img = card()
-            val gen = TextView(ctx).apply {
-                text = "Generate image"
-                textSize = 15f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(0, 0, 0, dp(2))
-                isFocusable = true
-            }
-            img.addView(gen)
-            bindImageAction(gen, img)
-        }
-
-        /* ── Display: language + font ── */
-        val disp = card()
-        cardTitle(disp, "Display")
-        if (chapters?.translated?.isNotEmpty() == true) {
-            disp.addView(
-                TextView(ctx).apply {
-                    text = if (english) "Switch to Tiếng Việt" else "Switch to English"
-                    textSize = 15f; setTextColor(getColor(R.color.accent))
-                    setTypeface(null, android.graphics.Typeface.BOLD)
-                    setPadding(0, dp(12), 0, dp(6))
-                    isClickable = true; isFocusable = true
-                    setOnClickListener { dialog.dismiss(); toggleLanguage() }
-                },
-            )
-        }
-        val fontRow = android.widget.LinearLayout(ctx).apply {
-            orientation = android.widget.LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, dp(10), 0, 0)
-        }
-        fontRow.addView(
-            TextView(ctx).apply {
-                text = "Font size"; textSize = 15f; setTextColor(getColor(R.color.fg))
-                layoutParams = android.widget.LinearLayout.LayoutParams(
-                    0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
-                )
-            },
-        )
-        val fontVal = TextView(ctx).apply {
-            text = fontSp.toInt().toString(); textSize = 15f; setTextColor(getColor(R.color.fg))
-            minWidth = dp(36); gravity = android.view.Gravity.CENTER
-        }
-        /* one-line preview of the current size (ellipsized, never wrapped) */
-        val fontSample = TextView(ctx).apply {
-            text = "The quick brown fox jumps over the lazy dog"
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
-            setTextColor(getColor(R.color.muted))
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(0, dp(10), 0, 0)
-        }
-        fun fontBtn(t: String, d: Float) = TextView(ctx).apply {
-            text = t; textSize = 22f; setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(getColor(R.color.accent)); setPadding(dp(16), dp(2), dp(16), dp(2))
-            isClickable = true; isFocusable = true
-            setOnClickListener {
-                adjustFont(d)
-                fontVal.text = fontSp.toInt().toString()
-                fontSample.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSp)
-            }
-        }
-        fontRow.addView(fontBtn("−", -1f))
-        fontRow.addView(fontVal)
-        fontRow.addView(fontBtn("+", +1f))
-        disp.addView(fontRow)
-        disp.addView(fontSample)
-
-        /* ── Pause duration ── */
-        val pauses = card()
-        cardTitle(pauses, "Pause duration")
-        fun pauseRow(label: String, key: String) {
-            val row = android.widget.LinearLayout(ctx).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(0, dp(10), 0, 0)
-            }
-            row.addView(
-                TextView(ctx).apply {
-                    text = label; textSize = 15f; setTextColor(getColor(R.color.fg))
-                    layoutParams = android.widget.LinearLayout.LayoutParams(
-                        0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
-                    )
-                },
-            )
-            val valTv = TextView(ctx).apply {
-                text = TtsPause.format(prefs.getFloat(key, 0f))
-                textSize = 15f; setTextColor(getColor(R.color.fg))
-                minWidth = dp(44); gravity = android.view.Gravity.CENTER
-            }
-            fun nudge(delta: Float) {
-                val next = TtsPause.step(prefs.getFloat(key, 0f), delta)
-                prefs.edit().putFloat(key, next).apply()
-                valTv.text = TtsPause.format(next)
-            }
-            fun pauseBtn(t: String, d: Float) = TextView(ctx).apply {
-                text = t; textSize = 22f; setTypeface(null, android.graphics.Typeface.BOLD)
-                setTextColor(getColor(R.color.accent)); setPadding(dp(16), dp(2), dp(16), dp(2))
-                isClickable = true; isFocusable = true
-                setOnClickListener { nudge(d) }
-            }
-            row.addView(pauseBtn("−", -TtsPause.STEP))
-            row.addView(valTv)
-            row.addView(pauseBtn("+", +TtsPause.STEP))
-            pauses.addView(row)
-        }
-        pauseRow("Between sentences", TtsPause.SENTENCE_KEY)
-        pauseRow("Between paragraphs", TtsPause.PARAGRAPH_KEY)
-        pauseRow("Between chapters", TtsPause.CHAPTER_KEY)
-        hint(pauses, "Seconds of silence after each sentence, paragraph, or chapter. The voice keeps going — it just says nothing for that long.")
-
-        /* ── All-caps sentences ── */
-        val caps = card()
-        cardTitle(caps, "All-caps sentences")
-        val capsCheck = android.widget.CheckBox(ctx).apply {
-            text = "Read them as lowercase"
-            textSize = 14f; setTextColor(getColor(R.color.fg))
-            setPadding(dp(6), dp(10), 0, 0)
-            isChecked = prefs.getBoolean(SpeechText.FOLD_ALL_CAPS_KEY, SpeechText.FOLD_ALL_CAPS_DEFAULT)
-            setOnCheckedChangeListener { _, checked ->
-                prefs.edit().putBoolean(SpeechText.FOLD_ALL_CAPS_KEY, checked).apply()
-            }
-        }
-        caps.addView(capsCheck)
-        hint(caps, "A sentence written in full capitals is spoken as ordinary text, and speech-edit replacements see the lowercase form. The page on screen does not change.")
-
-        var stopShakeTest: () -> Unit = {}
-
-        /* ── Sleep timer ── */
-        val sleep = card()
-        cardTitle(sleep, "Sleep timer")
-        val sleepInput = android.widget.EditText(ctx).apply {
-            setBackgroundResource(R.drawable.bg_input)
-            setPadding(dp(11), dp(11), dp(11), dp(11))
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            hint = "0 = off"
-            setTextColor(getColor(R.color.fg)); setHintTextColor(getColor(R.color.muted))
-            textSize = 14f
-            val cur = prefs.getInt("sleepMinutes", 0)
-            if (cur > 0) setText(cur.toString())
-        }
-        val sleepLp = android.widget.LinearLayout.LayoutParams(
-            android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = dp(12) }
-        sleep.addView(sleepInput, sleepLp)
-        hint(sleep, "Stop reading after this many minutes. The timer restarts each time you press play. Blank or 0 turns it off.")
-        val saveSleep = {
-            val mins = sleepInput.text.toString().toIntOrNull() ?: 0
-            prefs.edit().putInt("sleepMinutes", mins.coerceAtLeast(0)).apply()
-            if (speaking) scheduleSleepTimer()
-        }
-
-        /* ── Shake to reset ── */
-        val shake = card()
-        cardTitle(shake, "Shake to reset")
-        val shakeCheck = android.widget.CheckBox(ctx).apply {
-            text = "Reset the sleep timer when I shake the phone"
-            textSize = 14f; setTextColor(getColor(R.color.fg))
-            setPadding(dp(6), dp(10), 0, 0)
-            isChecked = prefs.getBoolean("shakeEnabled", false)
-        }
-        shake.addView(shakeCheck)
-        val startLevel = prefs.getInt("shakeLevel", 5).coerceIn(1, 10)
-        val shakeLabel = TextView(ctx).apply {
-            text = "Shake threshold: $startLevel"; textSize = 13f
-            setTextColor(getColor(R.color.muted)); setPadding(0, dp(12), 0, dp(4))
-        }
-        shake.addView(shakeLabel)
-        val shakeBar = android.widget.SeekBar(ctx).apply {
-            min = 1; max = 10; progress = startLevel
-            // visible notch at each whole step so the slider reads as integer 1–10
-            tickMark = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.seekbar_tick)
-        }
-        shake.addView(
-            shakeBar,
-            android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-            ),
-        )
-        shakeBar.setOnSeekBarChangeListener(
-            object : android.widget.SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: android.widget.SeekBar, p: Int, u: Boolean) {
-                    shakeLabel.text = "Shake threshold: ${p.coerceAtLeast(1)}"
+        val dir = intent.getStringExtra("dir") ?: ""
+        SettingsPage.open(
+            this,
+            slug = if (asDocument()) null else intent.getStringExtra("slug"),
+            dirName = dir,
+            title = intent.getStringExtra("title") ?: dir,
+            reader = link,
+            startTab = SettingsPage.TAB_READING,
+            setUpNovel = { novel ->
+                novel.allowRedownload = false
+                novel.onTtsLang = { lang ->
+                    novelTtsLang = Voices.pin(lang)
+                    curTtsLang = ""
+                    ensureSavedVoice()
                 }
-                override fun onStartTrackingTouch(sb: android.widget.SeekBar) {}
-                override fun onStopTrackingTouch(sb: android.widget.SeekBar) {}
             },
         )
-        hint(shake, "1 = the gentlest nudge (most sensitive), 10 = a firm shake. Shake the phone now to test — the status below flashes red when a shake passes this level.")
-        /* live tester: flashes here so the threshold can be calibrated while
-           this page is open (uses the slider's current level, not the saved one) */
-        val shakeStatus = TextView(ctx).apply {
-            text = "shaking — sleep timer reset"; textSize = 14f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(getColor(R.color.err)); setPadding(0, dp(12), 0, 0)
-            visibility = android.view.View.INVISIBLE   // reserve space, no jump
-        }
-        shake.addView(shakeStatus)
-        val sm = getSystemService(SENSOR_SERVICE) as? android.hardware.SensorManager
-        val accel = sm?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
-        if (sm != null && accel != null) {
-            var shownAt = 0L
-            val listener = object : android.hardware.SensorEventListener {
-                override fun onSensorChanged(e: android.hardware.SensorEvent) {
-                    val g = Math.sqrt(
-                        (e.values[0] * e.values[0] + e.values[1] * e.values[1] +
-                            e.values[2] * e.values[2]).toDouble(),
-                    ) - android.hardware.SensorManager.GRAVITY_EARTH
-                    val thr = shakeBar.progress.coerceAtLeast(1) / 5f
-                    if (Math.abs(g) > thr) {
-                        val now = System.currentTimeMillis()
-                        if (now - shownAt < 2500) return
-                        shownAt = now
-                        shakeStatus.visibility = android.view.View.VISIBLE
-                        shakeStatus.postDelayed(
-                            { shakeStatus.visibility = android.view.View.INVISIBLE }, 2000,
-                        )
-                    }
-                }
-                override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
-            }
-            sm.registerListener(listener, accel, android.hardware.SensorManager.SENSOR_DELAY_GAME)
-            stopShakeTest = { sm.unregisterListener(listener) }
-        }
-        val saveShake = {
-            prefs.edit()
-                .putBoolean("shakeEnabled", shakeCheck.isChecked)
-                .putInt("shakeLevel", shakeBar.progress.coerceIn(1, 10))
-                .apply()
-            /* re-arm with the new config if currently reading */
-            if (speaking) { stopShakeDetection(); startShakeDetection() }
-        }
-
-        /* persist timer + shake settings and stop the tester when the page closes */
-        dialog.setOnDismissListener { saveSleep(); saveShake(); stopShakeTest() }
-
-        dialog.setContentView(outer)
-        dialog.window?.setLayout(
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-        )
-        dialog.show()
     }
 
     /* bottom sheet: voice picker + rate/pitch sliders (0.5–3, step 0.1,
@@ -2963,8 +2687,8 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun adjustFont(delta: Float) {
-        fontSp = (fontSp + delta).coerceIn(12f, 50f)
-        prefs.edit().putFloat("readerFontSize", fontSp).apply()
+        fontSp = ReadingSettingsPanel.stepFont(fontSp, delta)
+        prefs.edit().putFloat(ReadingSettingsPanel.FONT_KEY, fontSp).apply()
         for (i in 0 until list.childCount) {
             (list.getChildViewHolder(list.getChildAt(i)) as? ChapterHolder)?.applyFont(fontSp)
         }

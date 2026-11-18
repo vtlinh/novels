@@ -198,11 +198,14 @@ class ChapterListActivity : AppCompatActivity() {
             infoBtn.visibility = android.view.View.GONE
         } else {
             settingsBtn.setOnClickListener {
-                startActivity(
-                    Intent(this, NovelSettingsActivity::class.java)
-                        .putExtra("slug", slugForSettings)
-                        .putExtra("dir", dirName)
-                        .putExtra("title", title),
+                SettingsPage.open(
+                    this,
+                    slug = slugForSettings,
+                    dirName = dirName,
+                    title = title,
+                    reader = null,
+                    startTab = SettingsPage.TAB_NOVEL,
+                    onClose = { load() },
                 )
             }
         }
