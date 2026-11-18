@@ -870,7 +870,10 @@ class ReaderActivity : AppCompatActivity() {
         })
         findViewById<android.widget.ImageView>(R.id.settingsBtn).setOnClickListener { showReaderSettings() }
         findViewById<android.widget.ImageView>(R.id.speechEditsBtn).setOnClickListener {
-            startActivity(android.content.Intent(this, SpeechEditsActivity::class.java))
+            startActivity(
+                android.content.Intent(this, SpeechEditsActivity::class.java)
+                    .putExtra(SpeechEditsActivity.EXTRA_SLUG, intent.getStringExtra("slug")),
+            )
         }
         if (asDocument()) bindDocumentChrome(drawer)
     }
@@ -1815,8 +1818,9 @@ class ReaderActivity : AppCompatActivity() {
             return
         }
         try {
-            userSpeechRules = SpeechEdits.enabledUserRules(this)
-            defaultSpeechRules = SpeechEdits.enabledDefaultRules(this)
+            val slug = intent.getStringExtra("slug")
+            userSpeechRules = SpeechEdits.enabledUserRules(this, slug)
+            defaultSpeechRules = SpeechEdits.enabledDefaultRules(this, slug)
         } catch (e: Exception) {
             userSpeechRules = emptyList()
             defaultSpeechRules = emptyList()

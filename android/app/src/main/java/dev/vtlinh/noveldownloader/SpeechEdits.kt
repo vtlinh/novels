@@ -113,6 +113,12 @@ object SpeechEdits {
 
     fun newId(): String = "u" + System.nanoTime()
 
+    /* A pattern as typed in the editor. Keyboards add a space after a
+       symbol and the field doesn't show it; since every sentence is matched
+       with a trailing space, a typed `"` + space replaced only the quote
+       that ends the sentence. A space that matters is written as \s. */
+    fun typedPattern(text: String): String = text.trim()
+
     /* ── per-rule overrides of the built-in defaults ──
        The default rules stay hard-coded, but each can be EDITED: the edited
        version is stored here keyed by the default's id and shadows the
@@ -158,23 +164,66 @@ object SpeechEdits {
         return defaults.map { d -> ovr[d.id] ?: d }
     }
 
+    /* ── per-novel versions ──
+       Any rule, user or default, can be changed for one novel only. That
+       version is stored under the novel's slug, keyed by the rule's id, and
+       shadows the global rule in its slot while that novel is read. Turning
+       it off drops the entry, and the rule is the global one again. An entry
+       whose rule was deleted has no slot, so it is never applied. */
+
+    private fun novelKey(slug: String) = "novel:$slug"
+
+    fun novelEdits(ctx: Context, slug: String?): MutableMap<String, SpeechEdit> {
+        if (slug.isNullOrEmpty()) return linkedMapOf()
+        val raw = prefs(ctx).getString(novelKey(slug), null) ?: return linkedMapOf()
+        return try {
+            val o = JSONObject(raw)
+            val out = linkedMapOf<String, SpeechEdit>()
+            for (k in o.keys()) out[k] = SpeechEdit.fromJson(o.getJSONObject(k))
+            out
+        } catch (e: Exception) {
+            linkedMapOf()
+        }
+    }
+
+    private fun saveNovelEdits(ctx: Context, slug: String, map: Map<String, SpeechEdit>) {
+        val ed = prefs(ctx).edit()
+        if (map.isEmpty()) {
+            ed.remove(novelKey(slug))
+        } else {
+            val o = JSONObject()
+            map.forEach { (k, v) -> o.put(k, v.toJson()) }
+            ed.putString(novelKey(slug), o.toString())
+        }
+        ed.apply()
+    }
+
+    fun saveNovelEdit(ctx: Context, slug: String, edit: SpeechEdit) {
+        val m = novelEdits(ctx, slug)
+        m[edit.id] = edit
+        saveNovelEdits(ctx, slug, m)
+    }
+
+    fun clearNovelEdit(ctx: Context, slug: String, id: String) {
+        val m = novelEdits(ctx, slug)
+        if (m.remove(id) != null) saveNovelEdits(ctx, slug, m)
+    }
+
+    /* the global rules with this novel's versions put in their slots */
+    fun forNovel(global: List<SpeechEdit>, novel: Map<String, SpeechEdit>): List<SpeechEdit> =
+        global.map { g -> novel[g.id]?.copy(isDefault = g.isDefault) ?: g }
+
+    private fun compileEnabled(list: List<SpeechEdit>): List<Pair<Regex, String>> =
+        list.filter { it.enabled }.mapNotNull { it.compiled() }
+
     /* compiled enabled rules for the reader: user rules first, then the
        built-in defaults (each possibly overridden, and skippable when its
-       override disables it) */
-    fun enabledUserRules(ctx: Context): List<Pair<Regex, String>> {
-        val out = ArrayList<Pair<Regex, String>>()
-        user(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
-        return out
-    }
+       override disables it), with the novel's own versions in their slots */
+    fun enabledUserRules(ctx: Context, slug: String? = null): List<Pair<Regex, String>> =
+        compileEnabled(forNovel(user(ctx), novelEdits(ctx, slug)))
 
-    fun enabledDefaultRules(ctx: Context): List<Pair<Regex, String>> {
-        val out = ArrayList<Pair<Regex, String>>()
-        effectiveDefaults(ctx).filter { it.enabled }.forEach { e -> e.compiled()?.let { out.add(it) } }
-        return out
-    }
-
-    fun enabledRules(ctx: Context): List<Pair<Regex, String>> =
-        enabledUserRules(ctx) + enabledDefaultRules(ctx)
+    fun enabledDefaultRules(ctx: Context, slug: String? = null): List<Pair<Regex, String>> =
+        compileEnabled(forNovel(effectiveDefaults(ctx), novelEdits(ctx, slug)))
 
     /* ── @Voice Aloud Reader replacement-file format ── */
 
