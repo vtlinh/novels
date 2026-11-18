@@ -588,15 +588,6 @@ class SpeechEditsActivity : AppCompatActivity() {
             setPadding(dp(6), dp(12), 0, 0)
             isChecked = novelVersion != null || existing?.novel != null
         }
-        val onlyNovelNote = TextView(this).apply {
-            text = "Other novels don't see or use it. Turn this off to use the same rule for all novels."
-            textSize = 12f; setTextColor(getColor(R.color.muted))
-            setPadding(dp(6), dp(2), 0, 0)
-        }
-        if (novelSlug != null) {
-            form.addView(onlyNovel)
-            form.addView(onlyNovelNote)
-        }
 
         val start = novelVersion ?: existing
         form.addView(label("Type"))
@@ -629,6 +620,7 @@ class SpeechEditsActivity : AppCompatActivity() {
             setPadding(dp(6), dp(12), 0, 0)
         }
         if (!forDefault) form.addView(atTop)
+        if (novelSlug != null) form.addView(onlyNovel)
 
         fun load(e: SpeechEdit) {
             typeSpinner.setSelection(e.type)
