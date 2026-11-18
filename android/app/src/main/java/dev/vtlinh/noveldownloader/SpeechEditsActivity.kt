@@ -28,6 +28,16 @@ import androidx.appcompat.app.AppCompatActivity
    rule to its hard-coded form), plus a full-page add/edit form. */
 class SpeechEditsActivity : AppCompatActivity() {
 
+    companion object {
+        /* the novel the page was opened from; with it, a rule can be changed
+           for that novel only */
+        const val EXTRA_SLUG = "slug"
+    }
+
+    private var slug: String? = null
+    /* this novel's own versions, by rule id (empty without a novel) */
+    private var novelEdits: Map<String, SpeechEdit> = emptyMap()
+
     private var tab = 0            // 0 = User, 1 = Default
     /* selected rows within the current tab (multi-select). Kept ascending so
        "move to top/bottom" preserves the items' on-screen order. Typed as the
@@ -67,11 +77,13 @@ class SpeechEditsActivity : AppCompatActivity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun doExport(uri: Uri) {
+        /* the file format has no way to say which novel a rule is for */
+        val global = userList.filter { it.novel == null }
         try {
             contentResolver.openOutputStream(uri)?.use {
-                it.write(SpeechEdits.export(userList).toByteArray())
+                it.write(SpeechEdits.export(global).toByteArray())
             }
-            Toast.makeText(this, "Exported ${userList.size} edits", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Exported ${global.size} edits", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -89,11 +101,12 @@ class SpeechEditsActivity : AppCompatActivity() {
             Toast.makeText(this, "No rules found in that file", Toast.LENGTH_LONG).show()
             return
         }
+        val kept = userList.filter { it.novel != null }
         AlertDialog.Builder(this)
             .setTitle("Import speech edits")
-            .setMessage("Replace your ${userList.size} user edit(s) with ${parsed.size} imported edit(s)?")
+            .setMessage("Replace your ${userList.size - kept.size} user edit(s) with ${parsed.size} imported edit(s)?")
             .setPositiveButton("Replace") { _, _ ->
-                userList = parsed.toMutableList()
+                userList = (parsed + kept).toMutableList()
                 SpeechEdits.saveUser(this, userList)
                 selected = sortedSetOf()
                 switchTab(0)
@@ -106,6 +119,7 @@ class SpeechEditsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         userList = SpeechEdits.user(this)
+        slug = intent.getStringExtra(EXTRA_SLUG)?.takeIf { it.isNotEmpty() }
         hideInactive = getSharedPreferences("app", MODE_PRIVATE)
             .getBoolean("hideInactiveEdits", false)
 
@@ -268,8 +282,12 @@ class SpeechEditsActivity : AppCompatActivity() {
         switchTab(0)
     }
 
-    private fun currentList(): List<SpeechEdit> =
+    private fun globalList(): List<SpeechEdit> =
         if (tab == 0) userList else SpeechEdits.effectiveDefaults(this)
+
+    /* same rows, same order as globalList(), with this novel's versions in
+       their slots — indices address both */
+    private fun currentList(): List<SpeechEdit> = SpeechEdits.forNovel(globalList(), novelEdits)
 
     private fun switchTab(t: Int) {
         tab = t
@@ -288,6 +306,7 @@ class SpeechEditsActivity : AppCompatActivity() {
 
     private fun refresh() {
         ovrIds = if (tab == 1) SpeechEdits.overrides(this).keys else emptySet()
+        novelEdits = SpeechEdits.novelEdits(this, slug)
         val list = currentList()
         /* a row hidden by the filter must not linger in the selection — ✕/⟲
            would silently act on rows the user can't see */
@@ -299,22 +318,33 @@ class SpeechEditsActivity : AppCompatActivity() {
         }
         visible.clear()
         var hidden = 0
+        var shown = 0
+        var enabled = 0
+        var forNovel = 0
         list.forEachIndexed { i, edit ->
+            /* another novel's own rules are not listed at all */
+            if (!edit.appliesTo(slug)) return@forEachIndexed
+            shown++
+            if (edit.enabled) enabled++
+            if (isForNovel(edit)) forNovel++
             if (hideInactive && !edit.enabled) hidden++ else visible.add(i to edit)
         }
         listAdapter?.notifyDataSetChanged()
         emptyMsg.text = when {
-            list.isNotEmpty() && visible.isEmpty() ->
-                "All ${list.size} edits here are inactive (hidden by the ⋮ filter)."
+            shown > 0 && visible.isEmpty() ->
+                "All $shown edits here are inactive (hidden by the ⋮ filter)."
             tab == 0 -> "No custom edits yet. Tap + to add one."
             else -> "No default edits."
         }
         emptyMsg.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
-        val enabled = list.count { it.enabled }
-        footer.text = "Enabled $enabled of ${list.size}" +
+        footer.text = "Enabled $enabled of $shown" +
+            (if (forNovel > 0) "  ·  $forNovel only for this novel" else "") +
             (if (hidden > 0) "  ·  $hidden hidden" else "") +
             if (selected.isNotEmpty()) "  ·  ${selected.size} selected" else ""
     }
+
+    /* changed for, or added for, the novel the page was opened from */
+    private fun isForNovel(edit: SpeechEdit) = edit.id in novelEdits || edit.novel != null
 
     private fun rowView(index: Int, edit: SpeechEdit): View {
         val row = LinearLayout(this).apply {
@@ -322,13 +352,22 @@ class SpeechEditsActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6), dp(8), dp(12), dp(8))
             setBackgroundColor(
-                if (index in selected) 0x334F8CFF else 0x00000000,
+                when {
+                    index in selected -> 0x334F8CFF
+                    isForNovel(edit) -> 0x227EE2A8
+                    else -> 0x00000000
+                },
             )
         }
         val check = CheckBox(this).apply {
             isChecked = edit.enabled
             setOnClickListener {
-                if (tab == 0) {
+                val s = slug
+                if (s != null && edit.id in novelEdits) {
+                    SpeechEdits.saveNovelEdit(
+                        this@SpeechEditsActivity, s, edit.copy(enabled = isChecked),
+                    )
+                } else if (tab == 0) {
                     userList[index].enabled = isChecked
                     SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
                 } else {
@@ -435,8 +474,9 @@ class SpeechEditsActivity : AppCompatActivity() {
             return
         }
         val from = selected.first()
-        val to = from + delta
-        if (to < 0 || to >= userList.size) return
+        /* step past rows that aren't listed, or the press looks like it did nothing */
+        val pos = visible.indexOfFirst { it.first == from }
+        val to = visible.getOrNull(pos + delta)?.first ?: return
         val item = userList.removeAt(from)
         userList.add(to, item)
         selected = sortedSetOf(to)
@@ -490,9 +530,31 @@ class SpeechEditsActivity : AppCompatActivity() {
         refresh()
     }
 
+    private fun addUser(edit: SpeechEdit, top: Boolean) {
+        if (top) {
+            userList.add(0, edit)
+            selected = selected.map { it + 1 }.toSortedSet()
+        } else {
+            userList.add(edit)
+        }
+        SpeechEdits.saveUser(this, userList)
+    }
+
+    private fun moveUserToTop(id: String) {
+        val idx = userList.indexOfFirst { it.id == id }
+        if (idx <= 0) return
+        userList.add(0, userList.removeAt(idx))
+        selected = selected.map { if (it == idx) 0 else if (it < idx) it + 1 else it }.toSortedSet()
+        SpeechEdits.saveUser(this, userList)
+    }
+
     /* full-page add/edit form; forDefault saves the result as an override of
-       the built-in default instead of into the user list */
-    private fun openEditor(existing: SpeechEdit?, forDefault: Boolean = false) {
+       the built-in default instead of into the user list. `shown` is the row
+       as listed, which may be this novel's version of the rule. */
+    private fun openEditor(shown: SpeechEdit?, forDefault: Boolean = false) {
+        val novelSlug = slug
+        val existing = shown?.let { e -> globalList().firstOrNull { it.id == e.id } ?: e }
+        val novelVersion = shown?.let { novelEdits[it.id] }
         val dialog = Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar)
         val scroll = ScrollView(this).apply { setBackgroundColor(getColor(R.color.bg)) }
         val form = LinearLayout(this).apply {
@@ -521,29 +583,67 @@ class SpeechEditsActivity : AppCompatActivity() {
             },
         )
 
+        val onlyNovel = CheckBox(this).apply {
+            text = "Only for this novel"; textSize = 14f; setTextColor(getColor(R.color.fg))
+            setPadding(dp(6), dp(12), 0, 0)
+            isChecked = novelVersion != null || existing?.novel != null
+        }
+        val onlyNovelNote = TextView(this).apply {
+            text = "Other novels don't see or use it. Turn this off to use the same rule for all novels."
+            textSize = 12f; setTextColor(getColor(R.color.muted))
+            setPadding(dp(6), dp(2), 0, 0)
+        }
+        if (novelSlug != null) {
+            form.addView(onlyNovel)
+            form.addView(onlyNovelNote)
+        }
+
+        val start = novelVersion ?: existing
         form.addView(label("Type"))
         val typeSpinner = Spinner(this)
         typeSpinner.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item,
             listOf("Case Insensitive", "Case Sensitive", "Regular Expression"),
         )
-        typeSpinner.setSelection(existing?.type ?: 2)
+        typeSpinner.setSelection(start?.type ?: 2)
         form.addView(typeSpinner)
 
         val wholeWord = CheckBox(this).apply {
             text = "Match whole words only"; textSize = 14f; setTextColor(getColor(R.color.fg))
             setPadding(dp(6), dp(12), 0, dp(4))
-            isChecked = existing?.wholeWord ?: false
+            isChecked = start?.wholeWord ?: false
         }
         form.addView(wholeWord)
 
         form.addView(label("Pattern"))
-        val patternField = field(existing?.pattern ?: "", "text or regex to match")
+        val patternField = field(SpeechEdits.typedPattern(start?.pattern ?: ""), "text or regex to match")
         form.addView(patternField)
 
         form.addView(label("Replace"))
-        val replaceField = field(existing?.replace ?: "", "replacement text")
+        val replaceField = field(start?.replace ?: "", "replacement text")
         form.addView(replaceField)
+
+        /* default rules keep their built-in order */
+        val atTop = CheckBox(this).apply {
+            text = "Put at the top"; textSize = 14f; setTextColor(getColor(R.color.fg))
+            setPadding(dp(6), dp(12), 0, 0)
+        }
+        if (!forDefault) form.addView(atTop)
+
+        fun load(e: SpeechEdit) {
+            typeSpinner.setSelection(e.type)
+            wholeWord.isChecked = e.wholeWord
+            patternField.setText(SpeechEdits.typedPattern(e.pattern))
+            replaceField.setText(e.replace)
+        }
+        /* off: the fields show the rule all novels use, so saving without
+           touching them leaves it as it was; back on: this novel's version */
+        onlyNovel.setOnCheckedChangeListener { _, on ->
+            /* a rule added for this novel has no other version to show */
+            if (existing?.novel != null) return@setOnCheckedChangeListener
+            val e = if (on) novelVersion else existing
+            if (e != null) load(e)
+        }
 
         /* live test — the text box starts as the paragraph TTS last stopped
            at (falling back to a sample sentence); it stays freely editable */
@@ -569,22 +669,26 @@ class SpeechEditsActivity : AppCompatActivity() {
             title = existing?.title ?: "",   // titles no longer edited; keep as-is
             type = typeSpinner.selectedItemPosition,
             wholeWord = wholeWord.isChecked,
-            pattern = patternField.text.toString(),
+            pattern = SpeechEdits.typedPattern(patternField.text.toString()),
             replace = replaceField.text.toString(),
             enabled = true,
             isDefault = false,
         )
-        /* every active rule in speaking order — user rules then defaults —
-           with the form's in-progress version substituted for the rule being
-           edited (or appended after the user rules when adding a new one) */
+        /* every active rule in speaking order — user rules then defaults,
+           with this novel's versions — with the form's in-progress version
+           substituted for the rule being edited (first with "Put at the top",
+           after the user rules when adding a new one) */
         fun allActiveRules(cur: Pair<Regex, String>): List<Pair<Regex, String>> {
             val out = ArrayList<Pair<Regex, String>>()
-            for (e in userList) {
-                if (!forDefault && existing != null && e.id == existing.id) out.add(cur)
+            val top = !forDefault && atTop.isChecked
+            if (top) out.add(cur)
+            for (e in SpeechEdits.forNovel(userList, novelEdits)) {
+                if (!e.appliesTo(novelSlug)) continue
+                if (!forDefault && existing != null && e.id == existing.id) { if (!top) out.add(cur) }
                 else if (e.enabled) e.compiled()?.let { out.add(it) }
             }
-            if (existing == null) out.add(cur)
-            for (e in SpeechEdits.effectiveDefaults(this)) {
+            if (existing == null && !top) out.add(cur)
+            for (e in SpeechEdits.forNovel(SpeechEdits.effectiveDefaults(this), novelEdits)) {
                 if (forDefault && existing != null && e.id == existing.id) out.add(cur)
                 else if (e.enabled) e.compiled()?.let { out.add(it) }
             }
@@ -629,6 +733,11 @@ class SpeechEditsActivity : AppCompatActivity() {
         replaceField.addTextChangedListener(watcher)
         testInput.addTextChangedListener(watcher)
         wholeWord.setOnCheckedChangeListener { _, _ -> updateTest() }
+        atTop.setOnCheckedChangeListener { _, _ -> updateTest() }
+        typeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) = updateTest()
+            override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+        }
         updateTest()
 
         /* CANCEL / SAVE */
@@ -656,24 +765,57 @@ class SpeechEditsActivity : AppCompatActivity() {
                 if (edit.compiled() == null) {
                     patternField.error = "Invalid regex"; return@setOnClickListener
                 }
-                if (forDefault && existing != null) {
+                val ctx = this@SpeechEditsActivity
+                val top = !forDefault && atTop.isChecked
+                fun done() {
+                    if (top && existing != null) moveUserToTop(existing.id)
+                    dialog.dismiss()
+                    refresh()
+                    if (top) listView.setSelection(0)
+                }
+                if (novelSlug != null && onlyNovel.isChecked) {
+                    when {
+                        existing == null ->
+                            addUser(edit.copy(id = SpeechEdits.newId(), novel = novelSlug), top)
+                        existing.novel != null -> {
+                            val idx = userList.indexOfFirst { it.id == existing.id }
+                            if (idx >= 0) {
+                                userList[idx] = edit.copy(enabled = userList[idx].enabled, novel = novelSlug)
+                            }
+                            SpeechEdits.saveUser(ctx, userList)
+                        }
+                        else -> SpeechEdits.saveNovelEdit(
+                            ctx, novelSlug, edit.copy(id = existing.id, enabled = novelVersion?.enabled ?: true),
+                        )
+                    }
+                    done()
+                    return@setOnClickListener
+                }
+                if (novelSlug != null && existing != null && novelVersion != null) {
+                    SpeechEdits.clearNovelEdit(ctx, novelSlug, existing.id)
+                }
+                /* a rule added for this novel, box now off, is saved below
+                   without its novel — it becomes a rule for all novels */
+                val unchanged = existing != null && existing.novel == null && edit.type == existing.type &&
+                    edit.wholeWord == existing.wholeWord && edit.pattern == existing.pattern &&
+                    edit.replace == existing.replace
+                if (unchanged) {
+                    /* nothing to store — and saving an untouched default would
+                       mark it modified */
+                } else if (forDefault && existing != null) {
                     /* an edited default is stored as an override in its slot */
                     SpeechEdits.saveOverride(
-                        this@SpeechEditsActivity,
+                        ctx,
                         edit.copy(id = existing.id, enabled = existing.enabled, isDefault = true),
                     )
                 } else if (existing == null) {
-                    userList.add(
-                        edit.copy(id = SpeechEdits.newId()),
-                    )
-                    SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
+                    addUser(edit.copy(id = SpeechEdits.newId()), top)
                 } else {
                     val idx = userList.indexOfFirst { it.id == existing.id }
                     if (idx >= 0) userList[idx] = edit.copy(enabled = userList[idx].enabled)
-                    SpeechEdits.saveUser(this@SpeechEditsActivity, userList)
+                    SpeechEdits.saveUser(ctx, userList)
                 }
-                dialog.dismiss()
-                refresh()
+                done()
             }
         }
         btnRow.addView(cancel)
