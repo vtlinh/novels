@@ -459,7 +459,7 @@
                     android:background="@drawable/bg_input"
                     android:padding="11dp"
                     android:gravity="center"
-                    android:hint="1"
+                    android:hint="0"
                     android:textSize="14sp"
                     android:textColor="@color/fg"
                     android:textColorHint="@color/muted"

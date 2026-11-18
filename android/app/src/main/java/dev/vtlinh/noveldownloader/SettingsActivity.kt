@@ -204,7 +204,8 @@ class SettingsActivity : AppCompatActivity() {
             "When this is on, the app makes pictures for novels that meet " +
                 "the filters below. It keeps going while you are in the app " +
                 "or while it is reading aloud.\n\n" +
-                "Every and Starting from chapter pick which chapters. " +
+                "Every and Starting from chapter pick which chapters. For example, " +
+                "every 20 starting from chapter 0 means chapters 1, 20, 40, and so on. " +
                 "A finished novel also always gets pictures for its last 5 chapters. " +
                 "Wait minutes between pictures is how long the app waits " +
                 "after asking for one before asking for the next. " +
@@ -227,7 +228,7 @@ class SettingsActivity : AppCompatActivity() {
             gapInput.text.toString().trim().toIntOrNull()
                 ?: ChapterImages.AUTO_GAP_MINUTES_DEFAULT,
         )
-        val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
+        val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0)
             ?: ChapterImages.AUTO_FROM_DEFAULT
         val stars = starsInput.text.toString().trim().toIntOrNull()
             ?.coerceIn(0, NovelRating.MAX)

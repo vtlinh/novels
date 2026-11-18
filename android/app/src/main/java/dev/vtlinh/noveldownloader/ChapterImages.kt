@@ -27,7 +27,8 @@ import java.io.IOException
    with a minimum star rating and an unread-only filter. A
    novel's own ⚙ switch, when on, always includes that book and
    uses its Every / Starting from. The app posts chapter N ≥
-   from where (N − from) is a multiple of every — and, once the
+   from where (N − from) is a multiple of every (chapter 1 standing
+   in for chapter 0 when from is 0) — and, once the
    novel is marked complete, its last 5 chapters too — at most one
    chapter per the wait in Settings, including while it is
    reading aloud in the background. A post does not wait for that png before the next
@@ -41,7 +42,7 @@ object ChapterImages {
     private const val WAIT_KEY = "slackImageWait"
     const val GIVE_UP_MS = 30L * 24L * 60L * 60L * 1000L
     const val AUTO_EVERY_DEFAULT = 20
-    const val AUTO_FROM_DEFAULT = 1
+    const val AUTO_FROM_DEFAULT = 0
     const val AUTO_MIN_STARS_DEFAULT = 7
     const val AUTO_GAP_MINUTES_DEFAULT = 30
     const val AUTO_GAP_MINUTES_MIN = 1
@@ -116,7 +117,7 @@ object ChapterImages {
         items.sortedWith(compareByDescending(lastReadOf).thenBy(tieOf))
 
     /* First due chapter that is actually on disk, walking from, from+every,
-       from+2*every. A hole — Starting from 21 when only 1–20 are
+       from+2*every (from 0 starts at chapter 1). A hole — Starting from 21 when only 1–20 are
        downloaded, or chapter 1 missing while 21 is present — waits
        rather than jumping ahead. Then the last `last` chapters. A hole
        does not hold those back: they are only asked for a finished
@@ -137,12 +138,12 @@ object ChapterImages {
             if (n !in byNum) byNum[n] = chapter
             if (n > maxN) maxN = n
         }
-        if (every >= 1 && from >= 1) {
-            var n = from
+        if (every >= 1 && from >= 0) {
+            var n = firstDue(from)
             while (n <= maxN) {
                 val chapter = byNum[n] ?: break
                 if (!skip(chapter)) return chapter
-                n += every
+                n = dueAfter(n, from, every)
             }
         }
         for (chapter in lastChapters(chapters, last)) {
@@ -263,11 +264,20 @@ object ChapterImages {
         (expired(startedAt, now) && looked && foundNothing)
 
     /* Chapter N is due when it is at or after `from` and lands on the
-       every-th step from there. Defaults (from 1, every 20) → 1, 21, 41. */
+       every-th step from there. From 0 there is no chapter 0, so
+       chapter 1 stands in for it: defaults (from 0, every 20) → 1, 20,
+       40; from 1 → 1, 21, 41. */
     fun due(n: Int, from: Int, every: Int): Boolean {
-        if (every < 1 || from < 1 || n < from) return false
+        if (every < 1 || from < 0 || n < 1) return false
+        if (from == 0 && n == 1) return true
+        if (n < from) return false
         return (n - from) % every == 0
     }
+
+    private fun firstDue(from: Int): Int = if (from == 0) 1 else from
+
+    private fun dueAfter(n: Int, from: Int, every: Int): Int =
+        if (n < from) from else from + ((n - from) / every + 1) * every
 
     fun autoEnabledKey(slug: String) = "autoImage:$slug"
     fun autoEveryKey(slug: String) = "autoImageEvery:$slug"
@@ -321,14 +331,14 @@ object ChapterImages {
 
     fun autoFrom(ctx: Context, slug: String): Int =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-            .getInt(autoFromKey(slug), AUTO_FROM_DEFAULT).coerceAtLeast(1)
+            .getInt(autoFromKey(slug), AUTO_FROM_DEFAULT).coerceAtLeast(0)
 
     fun setAuto(ctx: Context, slug: String, enabled: Boolean, every: Int, from: Int) {
         if (slug.isEmpty()) return
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
             .putBoolean(autoEnabledKey(slug), enabled)
             .putInt(autoEveryKey(slug), every.coerceAtLeast(1))
-            .putInt(autoFromKey(slug), from.coerceAtLeast(1))
+            .putInt(autoFromKey(slug), from.coerceAtLeast(0))
             .commit()
         if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
     }
@@ -364,8 +374,8 @@ object ChapterImages {
         globalEvery: Int,
         globalFrom: Int,
     ): AutoCadence =
-        if (novelOn) AutoCadence(novelEvery.coerceAtLeast(1), novelFrom.coerceAtLeast(1))
-        else AutoCadence(globalEvery.coerceAtLeast(1), globalFrom.coerceAtLeast(1))
+        if (novelOn) AutoCadence(novelEvery.coerceAtLeast(1), novelFrom.coerceAtLeast(0))
+        else AutoCadence(globalEvery.coerceAtLeast(1), globalFrom.coerceAtLeast(0))
 
     fun globalEnabled(ctx: Context): Boolean =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
@@ -377,7 +387,7 @@ object ChapterImages {
 
     fun globalFrom(ctx: Context): Int =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
-            .getInt(GLOBAL_FROM_KEY, AUTO_FROM_DEFAULT).coerceAtLeast(1)
+            .getInt(GLOBAL_FROM_KEY, AUTO_FROM_DEFAULT).coerceAtLeast(0)
 
     fun minStars(ctx: Context): Int =
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
@@ -408,7 +418,7 @@ object ChapterImages {
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
             .putBoolean(GLOBAL_ON_KEY, enabled)
             .putInt(GLOBAL_EVERY_KEY, every.coerceAtLeast(1))
-            .putInt(GLOBAL_FROM_KEY, from.coerceAtLeast(1))
+            .putInt(GLOBAL_FROM_KEY, from.coerceAtLeast(0))
             .putInt(GLOBAL_MIN_STARS_KEY, minStars.coerceIn(0, NovelRating.MAX))
             .putBoolean(GLOBAL_UNREAD_KEY, unreadOnly)
             .putInt(GLOBAL_GAP_MINUTES_KEY, clampGapMinutes(gapMinutes))
