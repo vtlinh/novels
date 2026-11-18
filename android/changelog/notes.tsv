@@ -4,7 +4,7 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Speech edits: a stray space after the pattern no longer stops it matching; ⋮ can add new edits at the top; an edit can be changed for just the novel you're reading
+	Speech edits: a stray space after the pattern no longer stops it matching; Put at the top moves an edit to the front of the list; an edit can be changed for just the novel you're reading
 1.47.5	A novel's settings are now the Novel tab of Reading settings, with tabs along the top; the ⚙ on a novel's chapter list opens it there
 1.47.4	Automatic pictures can start from chapter 0 (now the default): chapter 1, then every chapter that's a multiple of your Every number
 1.47.3	Tap the website on a novel's page to open the novel there; novels show the website's star rating until you rate them yourself

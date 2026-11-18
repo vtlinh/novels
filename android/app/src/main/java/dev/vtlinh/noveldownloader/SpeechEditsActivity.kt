@@ -62,8 +62,6 @@ class SpeechEditsActivity : AppCompatActivity() {
     private var ovrIds: Set<String> = emptySet()    // overridden default ids
     /* ⋮ menu toggle: list only the enabled edits (persisted) */
     private var hideInactive = false
-    /* ⋮ menu toggle: + adds the new edit at the top, so it runs first (persisted) */
-    private var newAtTop = false
     /* long-press enters multi-select; taps then toggle rows. Outside it, a
        tap opens the row in the editor. Deselecting the last row exits. */
     private var multiSelect = false
@@ -119,9 +117,8 @@ class SpeechEditsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         userList = SpeechEdits.user(this)
         slug = intent.getStringExtra(EXTRA_SLUG)?.takeIf { it.isNotEmpty() }
-        val appPrefs = getSharedPreferences("app", MODE_PRIVATE)
-        hideInactive = appPrefs.getBoolean("hideInactiveEdits", false)
-        newAtTop = appPrefs.getBoolean("newEditsAtTop", false)
+        hideInactive = getSharedPreferences("app", MODE_PRIVATE)
+            .getBoolean("hideInactiveEdits", false)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -164,10 +161,6 @@ class SpeechEditsActivity : AppCompatActivity() {
                 isCheckable = true
                 isChecked = hideInactive
             }
-            menu.menu.add("Add new edits at the top").apply {
-                isCheckable = true
-                isChecked = newAtTop
-            }
             menu.setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
                     "Import" -> importLauncher.launch(arrayOf("*/*"))
@@ -179,11 +172,6 @@ class SpeechEditsActivity : AppCompatActivity() {
                         multiSelect = false          // hidden rows must not stay selected
                         selected = sortedSetOf()
                         refresh()
-                    }
-                    "Add new edits at the top" -> {
-                        newAtTop = !newAtTop
-                        getSharedPreferences("app", MODE_PRIVATE).edit()
-                            .putBoolean("newEditsAtTop", newAtTop).apply()
                     }
                 }
                 true
@@ -404,14 +392,6 @@ class SpeechEditsActivity : AppCompatActivity() {
                 },
             )
         }
-        if (edit.id in novelEdits) {
-            texts.addView(
-                TextView(this).apply {
-                    text = "only for this novel"
-                    textSize = 11f; setTextColor(getColor(R.color.ok_fg))
-                },
-            )
-        }
         if (edit.id in ovrIds) {
             texts.addView(
                 TextView(this).apply {
@@ -537,13 +517,21 @@ class SpeechEditsActivity : AppCompatActivity() {
         refresh()
     }
 
-    private fun addUser(edit: SpeechEdit) {
-        if (newAtTop) {
+    private fun addUser(edit: SpeechEdit, top: Boolean) {
+        if (top) {
             userList.add(0, edit)
             selected = selected.map { it + 1 }.toSortedSet()
         } else {
             userList.add(edit)
         }
+        SpeechEdits.saveUser(this, userList)
+    }
+
+    private fun moveUserToTop(id: String) {
+        val idx = userList.indexOfFirst { it.id == id }
+        if (idx <= 0) return
+        userList.add(0, userList.removeAt(idx))
+        selected = selected.map { if (it == idx) 0 else if (it < idx) it + 1 else it }.toSortedSet()
         SpeechEdits.saveUser(this, userList)
     }
 
@@ -622,6 +610,13 @@ class SpeechEditsActivity : AppCompatActivity() {
         val replaceField = field(start?.replace ?: "", "replacement text")
         form.addView(replaceField)
 
+        /* default rules keep their built-in order */
+        val atTop = CheckBox(this).apply {
+            text = "Put at the top"; textSize = 14f; setTextColor(getColor(R.color.fg))
+            setPadding(dp(6), dp(12), 0, 0)
+        }
+        if (!forDefault) form.addView(atTop)
+
         fun load(e: SpeechEdit) {
             typeSpinner.setSelection(e.type)
             wholeWord.isChecked = e.wholeWord
@@ -666,16 +661,17 @@ class SpeechEditsActivity : AppCompatActivity() {
         )
         /* every active rule in speaking order — user rules then defaults,
            with this novel's versions — with the form's in-progress version
-           substituted for the rule being edited (or put where + would add it
-           when adding a new one) */
+           substituted for the rule being edited (first with "Put at the top",
+           after the user rules when adding a new one) */
         fun allActiveRules(cur: Pair<Regex, String>): List<Pair<Regex, String>> {
             val out = ArrayList<Pair<Regex, String>>()
-            if (existing == null && newAtTop) out.add(cur)
+            val top = !forDefault && atTop.isChecked
+            if (top) out.add(cur)
             for (e in SpeechEdits.forNovel(userList, novelEdits)) {
-                if (!forDefault && existing != null && e.id == existing.id) out.add(cur)
+                if (!forDefault && existing != null && e.id == existing.id) { if (!top) out.add(cur) }
                 else if (e.enabled) e.compiled()?.let { out.add(it) }
             }
-            if (existing == null && !newAtTop) out.add(cur)
+            if (existing == null && !top) out.add(cur)
             for (e in SpeechEdits.forNovel(SpeechEdits.effectiveDefaults(this), novelEdits)) {
                 if (forDefault && existing != null && e.id == existing.id) out.add(cur)
                 else if (e.enabled) e.compiled()?.let { out.add(it) }
@@ -721,6 +717,7 @@ class SpeechEditsActivity : AppCompatActivity() {
         replaceField.addTextChangedListener(watcher)
         testInput.addTextChangedListener(watcher)
         wholeWord.setOnCheckedChangeListener { _, _ -> updateTest() }
+        atTop.setOnCheckedChangeListener { _, _ -> updateTest() }
         typeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) = updateTest()
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
@@ -753,17 +750,22 @@ class SpeechEditsActivity : AppCompatActivity() {
                     patternField.error = "Invalid regex"; return@setOnClickListener
                 }
                 val ctx = this@SpeechEditsActivity
+                val top = !forDefault && atTop.isChecked
+                fun done() {
+                    if (top && existing != null) moveUserToTop(existing.id)
+                    dialog.dismiss()
+                    refresh()
+                    if (top) listView.setSelection(0)
+                }
                 if (novelSlug != null && onlyNovel.isChecked) {
                     /* a new rule meant only for this novel still needs a slot:
                        everywhere else it is listed, switched off */
                     val id = existing?.id
-                        ?: SpeechEdits.newId().also { addUser(edit.copy(id = it, enabled = false)) }
+                        ?: SpeechEdits.newId().also { addUser(edit.copy(id = it, enabled = false), top) }
                     SpeechEdits.saveNovelEdit(
                         ctx, novelSlug, edit.copy(id = id, enabled = novelVersion?.enabled ?: true),
                     )
-                    dialog.dismiss()
-                    refresh()
-                    if (existing == null && newAtTop) listView.setSelection(0)
+                    done()
                     return@setOnClickListener
                 }
                 if (novelSlug != null && existing != null && novelVersion != null) {
@@ -782,15 +784,13 @@ class SpeechEditsActivity : AppCompatActivity() {
                         edit.copy(id = existing.id, enabled = existing.enabled, isDefault = true),
                     )
                 } else if (existing == null) {
-                    addUser(edit.copy(id = SpeechEdits.newId()))
+                    addUser(edit.copy(id = SpeechEdits.newId()), top)
                 } else {
                     val idx = userList.indexOfFirst { it.id == existing.id }
                     if (idx >= 0) userList[idx] = edit.copy(enabled = userList[idx].enabled)
                     SpeechEdits.saveUser(ctx, userList)
                 }
-                dialog.dismiss()
-                refresh()
-                if (existing == null && newAtTop) listView.setSelection(0)
+                done()
             }
         }
         btnRow.addView(cancel)
