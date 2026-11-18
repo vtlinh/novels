@@ -63,7 +63,8 @@ class NovelSettingsActivity : AppCompatActivity() {
             "That includes a novel you marked as read or one " +
             "with fewer stars than Settings asks for.\n\n" +
             "Every and Starting from chapter pick which ones. For example, every 20 " +
-            "starting from chapter 1 means chapters 1, 21, 41, and so on. " +
+            "starting from chapter 0 means chapters 1, 20, 40, and so on, and " +
+            "starting from chapter 1 means chapters 1, 21, 41. " +
             "Once the novel is finished, its last 5 chapters always get one too.\n\n" +
             "It waits between pictures as set in Settings, and skips a chapter that already " +
             "has one. If the next chapter is not on your phone yet, it waits. " +
@@ -252,7 +253,7 @@ class NovelSettingsActivity : AppCompatActivity() {
         val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
         val every = everyInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
             ?: ChapterImages.AUTO_EVERY_DEFAULT
-        val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(1)
+        val from = fromInput.text.toString().trim().toIntOrNull()?.coerceAtLeast(0)
             ?: ChapterImages.AUTO_FROM_DEFAULT
         ChapterImages.setAuto(
             this, slug,

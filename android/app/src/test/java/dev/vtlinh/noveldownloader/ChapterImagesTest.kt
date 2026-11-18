@@ -404,15 +404,63 @@ class ChapterImagesTest {
     }
 
     @Test
-    fun `defaults pick chapter 1 then every 20`() {
+    fun `defaults pick chapter 1 then every 20 counted from 0`() {
         val from = ChapterImages.AUTO_FROM_DEFAULT
         val every = ChapterImages.AUTO_EVERY_DEFAULT
+        assertEquals(0, from)
+        assertFalse(ChapterImages.due(0, from, every))
         assertTrue(ChapterImages.due(1, from, every))
         assertFalse(ChapterImages.due(2, from, every))
-        assertFalse(ChapterImages.due(20, from, every))
-        assertTrue(ChapterImages.due(21, from, every))
-        assertFalse(ChapterImages.due(40, from, every))
-        assertTrue(ChapterImages.due(41, from, every))
+        assertTrue(ChapterImages.due(20, from, every))
+        assertFalse(ChapterImages.due(21, from, every))
+        assertTrue(ChapterImages.due(40, from, every))
+        assertFalse(ChapterImages.due(41, from, every))
+    }
+
+    @Test
+    fun `starting from 1 picks 1, 21, 41`() {
+        assertTrue(ChapterImages.due(1, 1, 20))
+        assertFalse(ChapterImages.due(20, 1, 20))
+        assertTrue(ChapterImages.due(21, 1, 20))
+        assertTrue(ChapterImages.due(41, 1, 20))
+    }
+
+    @Test
+    fun `starting from 0 every 1 picks every chapter once`() {
+        assertTrue((1..5).all { ChapterImages.due(it, 0, 1) })
+        val chapters = (1..4).map { "Chapter $it.txt" }
+        val taken = mutableListOf<String>()
+        while (true) {
+            val next = ChapterImages.nextDueName(chapters, 0, 1) { it in taken } ?: break
+            taken += next
+        }
+        assertEquals(chapters, taken)
+    }
+
+    @Test
+    fun `starting from 0 walks chapter 1 then the multiples of every`() {
+        val chapters = (1..45).map { "Chapter $it.txt" }
+        assertEquals(
+            listOf("Chapter 1.txt", "Chapter 20.txt", "Chapter 40.txt"),
+            ChapterImages.dueChapters(chapters, 0, 20),
+        )
+        assertEquals("Chapter 1.txt", ChapterImages.nextDueName(chapters, 0, 20) { false })
+        assertEquals(
+            "Chapter 20.txt",
+            ChapterImages.nextDueName(chapters, 0, 20) { it == "Chapter 1.txt" },
+        )
+        assertEquals(
+            "Chapter 40.txt",
+            ChapterImages.nextDueName(chapters, 0, 20) {
+                it == "Chapter 1.txt" || it == "Chapter 20.txt"
+            },
+        )
+        assertEquals(
+            null,
+            ChapterImages.nextDueName(chapters.filter { it != "Chapter 20.txt" }, 0, 20) {
+                it == "Chapter 1.txt"
+            },
+        )
     }
 
     @Test
