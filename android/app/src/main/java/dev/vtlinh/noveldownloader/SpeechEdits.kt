@@ -20,7 +20,11 @@ data class SpeechEdit(
     var replace: String,
     var enabled: Boolean,
     val isDefault: Boolean,
+    /* slug of the one novel this rule belongs to; null = every novel */
+    val novel: String? = null,
 ) {
+    fun appliesTo(slug: String?) = novel == null || novel == slug
+
     /* compiled (regex, replacement) or null if the pattern doesn't compile */
     fun compiled(): Pair<Regex, String>? = try {
         val p = if (type == 2) pattern else SpeechText.literalPattern(pattern, wholeWord)
@@ -38,6 +42,7 @@ data class SpeechEdit(
         put("pattern", pattern)
         put("replace", replace)
         put("enabled", enabled)
+        if (novel != null) put("novel", novel)
     }
 
     companion object {
@@ -50,6 +55,7 @@ data class SpeechEdit(
             replace = o.optString("replace"),
             enabled = o.optBoolean("enabled", true),
             isDefault = false,
+            novel = o.optString("novel").takeIf { it.isNotEmpty() },
         )
     }
 }
@@ -169,7 +175,9 @@ object SpeechEdits {
        version is stored under the novel's slug, keyed by the rule's id, and
        shadows the global rule in its slot while that novel is read. Turning
        it off drops the entry, and the rule is the global one again. An entry
-       whose rule was deleted has no slot, so it is never applied. */
+       whose rule was deleted has no slot, so it is never applied.
+       A rule ADDED for one novel has no global version to shadow; it is a
+       user rule carrying that novel's slug, and every other novel skips it. */
 
     private fun novelKey(slug: String) = "novel:$slug"
 
@@ -220,7 +228,7 @@ object SpeechEdits {
        built-in defaults (each possibly overridden, and skippable when its
        override disables it), with the novel's own versions in their slots */
     fun enabledUserRules(ctx: Context, slug: String? = null): List<Pair<Regex, String>> =
-        compileEnabled(forNovel(user(ctx), novelEdits(ctx, slug)))
+        compileEnabled(forNovel(user(ctx).filter { it.appliesTo(slug) }, novelEdits(ctx, slug)))
 
     fun enabledDefaultRules(ctx: Context, slug: String? = null): List<Pair<Regex, String>> =
         compileEnabled(forNovel(effectiveDefaults(ctx), novelEdits(ctx, slug)))

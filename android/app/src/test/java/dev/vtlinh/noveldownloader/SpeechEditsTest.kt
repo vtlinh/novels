@@ -61,4 +61,13 @@ class SpeechEditsTest {
         assertEquals(listOf(true, false), out.map { it.enabled })
         assertEquals(global, SpeechEdits.forNovel(global, emptyMap()))
     }
+
+    @Test
+    fun `a rule added for one novel is skipped everywhere else`() {
+        val own = regexRule("n", "x", "1").copy(novel = "novel-a")
+        assertEquals(true, own.appliesTo("novel-a"))
+        assertEquals(false, own.appliesTo("novel-b"))
+        assertEquals(false, own.appliesTo(null))
+        assertEquals(true, regexRule("g", "x", "1").appliesTo("novel-b"))
+    }
 }

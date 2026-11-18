@@ -77,11 +77,13 @@ class SpeechEditsActivity : AppCompatActivity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun doExport(uri: Uri) {
+        /* the file format has no way to say which novel a rule is for */
+        val global = userList.filter { it.novel == null }
         try {
             contentResolver.openOutputStream(uri)?.use {
-                it.write(SpeechEdits.export(userList).toByteArray())
+                it.write(SpeechEdits.export(global).toByteArray())
             }
-            Toast.makeText(this, "Exported ${userList.size} edits", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Exported ${global.size} edits", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -99,11 +101,12 @@ class SpeechEditsActivity : AppCompatActivity() {
             Toast.makeText(this, "No rules found in that file", Toast.LENGTH_LONG).show()
             return
         }
+        val kept = userList.filter { it.novel != null }
         AlertDialog.Builder(this)
             .setTitle("Import speech edits")
-            .setMessage("Replace your ${userList.size} user edit(s) with ${parsed.size} imported edit(s)?")
+            .setMessage("Replace your ${userList.size - kept.size} user edit(s) with ${parsed.size} imported edit(s)?")
             .setPositiveButton("Replace") { _, _ ->
-                userList = parsed.toMutableList()
+                userList = (parsed + kept).toMutableList()
                 SpeechEdits.saveUser(this, userList)
                 selected = sortedSetOf()
                 switchTab(0)
@@ -315,24 +318,33 @@ class SpeechEditsActivity : AppCompatActivity() {
         }
         visible.clear()
         var hidden = 0
+        var shown = 0
+        var enabled = 0
+        var forNovel = 0
         list.forEachIndexed { i, edit ->
+            /* another novel's own rules are not listed at all */
+            if (!edit.appliesTo(slug)) return@forEachIndexed
+            shown++
+            if (edit.enabled) enabled++
+            if (isForNovel(edit)) forNovel++
             if (hideInactive && !edit.enabled) hidden++ else visible.add(i to edit)
         }
         listAdapter?.notifyDataSetChanged()
         emptyMsg.text = when {
-            list.isNotEmpty() && visible.isEmpty() ->
-                "All ${list.size} edits here are inactive (hidden by the ⋮ filter)."
+            shown > 0 && visible.isEmpty() ->
+                "All $shown edits here are inactive (hidden by the ⋮ filter)."
             tab == 0 -> "No custom edits yet. Tap + to add one."
             else -> "No default edits."
         }
         emptyMsg.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
-        val enabled = list.count { it.enabled }
-        val forNovel = list.count { it.id in novelEdits }
-        footer.text = "Enabled $enabled of ${list.size}" +
+        footer.text = "Enabled $enabled of $shown" +
             (if (forNovel > 0) "  ·  $forNovel only for this novel" else "") +
             (if (hidden > 0) "  ·  $hidden hidden" else "") +
             if (selected.isNotEmpty()) "  ·  ${selected.size} selected" else ""
     }
+
+    /* changed for, or added for, the novel the page was opened from */
+    private fun isForNovel(edit: SpeechEdit) = edit.id in novelEdits || edit.novel != null
 
     private fun rowView(index: Int, edit: SpeechEdit): View {
         val row = LinearLayout(this).apply {
@@ -342,7 +354,7 @@ class SpeechEditsActivity : AppCompatActivity() {
             setBackgroundColor(
                 when {
                     index in selected -> 0x334F8CFF
-                    edit.id in novelEdits -> 0x227EE2A8
+                    isForNovel(edit) -> 0x227EE2A8
                     else -> 0x00000000
                 },
             )
@@ -462,8 +474,9 @@ class SpeechEditsActivity : AppCompatActivity() {
             return
         }
         val from = selected.first()
-        val to = from + delta
-        if (to < 0 || to >= userList.size) return
+        /* step past rows that aren't listed, or the press looks like it did nothing */
+        val pos = visible.indexOfFirst { it.first == from }
+        val to = visible.getOrNull(pos + delta)?.first ?: return
         val item = userList.removeAt(from)
         userList.add(to, item)
         selected = sortedSetOf(to)
@@ -573,10 +586,10 @@ class SpeechEditsActivity : AppCompatActivity() {
         val onlyNovel = CheckBox(this).apply {
             text = "Only for this novel"; textSize = 14f; setTextColor(getColor(R.color.fg))
             setPadding(dp(6), dp(12), 0, 0)
-            isChecked = novelVersion != null
+            isChecked = novelVersion != null || existing?.novel != null
         }
         val onlyNovelNote = TextView(this).apply {
-            text = "Changes apply to this novel only. Turn this off to use the rule for all novels again."
+            text = "Other novels don't see or use it. Turn this off to use the same rule for all novels."
             textSize = 12f; setTextColor(getColor(R.color.muted))
             setPadding(dp(6), dp(2), 0, 0)
         }
@@ -626,6 +639,8 @@ class SpeechEditsActivity : AppCompatActivity() {
         /* off: the fields show the rule all novels use, so saving without
            touching them leaves it as it was; back on: this novel's version */
         onlyNovel.setOnCheckedChangeListener { _, on ->
+            /* a rule added for this novel has no other version to show */
+            if (existing?.novel != null) return@setOnCheckedChangeListener
             val e = if (on) novelVersion else existing
             if (e != null) load(e)
         }
@@ -668,6 +683,7 @@ class SpeechEditsActivity : AppCompatActivity() {
             val top = !forDefault && atTop.isChecked
             if (top) out.add(cur)
             for (e in SpeechEdits.forNovel(userList, novelEdits)) {
+                if (!e.appliesTo(novelSlug)) continue
                 if (!forDefault && existing != null && e.id == existing.id) { if (!top) out.add(cur) }
                 else if (e.enabled) e.compiled()?.let { out.add(it) }
             }
@@ -758,20 +774,29 @@ class SpeechEditsActivity : AppCompatActivity() {
                     if (top) listView.setSelection(0)
                 }
                 if (novelSlug != null && onlyNovel.isChecked) {
-                    /* a new rule meant only for this novel still needs a slot:
-                       everywhere else it is listed, switched off */
-                    val id = existing?.id
-                        ?: SpeechEdits.newId().also { addUser(edit.copy(id = it, enabled = false), top) }
-                    SpeechEdits.saveNovelEdit(
-                        ctx, novelSlug, edit.copy(id = id, enabled = novelVersion?.enabled ?: true),
-                    )
+                    when {
+                        existing == null ->
+                            addUser(edit.copy(id = SpeechEdits.newId(), novel = novelSlug), top)
+                        existing.novel != null -> {
+                            val idx = userList.indexOfFirst { it.id == existing.id }
+                            if (idx >= 0) {
+                                userList[idx] = edit.copy(enabled = userList[idx].enabled, novel = novelSlug)
+                            }
+                            SpeechEdits.saveUser(ctx, userList)
+                        }
+                        else -> SpeechEdits.saveNovelEdit(
+                            ctx, novelSlug, edit.copy(id = existing.id, enabled = novelVersion?.enabled ?: true),
+                        )
+                    }
                     done()
                     return@setOnClickListener
                 }
                 if (novelSlug != null && existing != null && novelVersion != null) {
                     SpeechEdits.clearNovelEdit(ctx, novelSlug, existing.id)
                 }
-                val unchanged = existing != null && edit.type == existing.type &&
+                /* a rule added for this novel, box now off, is saved below
+                   without its novel — it becomes a rule for all novels */
+                val unchanged = existing != null && existing.novel == null && edit.type == existing.type &&
                     edit.wholeWord == existing.wholeWord && edit.pattern == existing.pattern &&
                     edit.replace == existing.replace
                 if (unchanged) {
