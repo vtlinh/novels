@@ -729,6 +729,8 @@ class ChapterListActivity : AppCompatActivity() {
     private var winStart = 0
     private var winEnd = 0
     private var currentPos = -1
+    /* positions in allOrdered the sleep timer read through — see SleepCrumbs */
+    private var sleepRows: IntRange? = null
     private var expanding = false
     /* True from bind until the posted jump onto the current row has
        landed. onScroll at the top of a fresh window would otherwise
@@ -818,6 +820,9 @@ class ChapterListActivity : AppCompatActivity() {
                 )
                 v.findViewById<android.view.View>(R.id.chapterNow).visibility =
                     if (current) android.view.View.VISIBLE else android.view.View.GONE
+                v.findViewById<android.view.View>(R.id.chapterAsleep).visibility =
+                    if (sleepRows?.contains(winStart + position) == true) android.view.View.VISIBLE
+                    else android.view.View.GONE
                 val name = allOrdered.getOrNull(winStart + position)
                 val pic = v.findViewById<ImageView>(R.id.chapterPictureBtn)
                 val hasPic = ChapterImagePreview.shouldShowListButton(
@@ -1018,6 +1023,15 @@ class ChapterListActivity : AppCompatActivity() {
 
             allOrdered = ordered
             currentPos = newCurrent
+            val crumbs = slug?.let { SleepCrumbs.load(prefs, it) }
+            sleepRows = crumbs?.let { (from, to) -> SleepCrumbs.range(ordered, from, to) }
+            val sleepNote = findViewById<TextView>(R.id.sleepNote)
+            if (crumbs != null && sleepRows != null) {
+                sleepNote.text = SleepCrumbs.note(crumbs.first, crumbs.second)
+                sleepNote.visibility = android.view.View.VISIBLE
+            } else {
+                sleepNote.visibility = android.view.View.GONE
+            }
             /* keepPos is relative to the visible window. When newest-first
                prepends, slide the window by the same shift so the relative
                position still points at the same rows. */

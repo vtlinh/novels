@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Speech edits: Only for this novel sits below Put at the top, without the explanation under it
+	When the sleep timer stops reading, the chapter list shows which chapters were read after you last moved, until you press play again
+1.47.7	Speech edits: Only for this novel sits below Put at the top, without the explanation under it
 1.47.6	Speech edits: a stray space after the pattern no longer stops it matching; Put at the top moves an edit to the front of the list; an edit can be changed for just the novel you're reading
 1.47.5	A novel's settings are now the Novel tab of Reading settings, with tabs along the top; the ⚙ on a novel's chapter list opens it there
 1.47.4	Automatic pictures can start from chapter 0 (now the default): chapter 1, then every chapter that's a multiple of your Every number
