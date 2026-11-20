@@ -431,14 +431,30 @@ class ReaderActivity : AppCompatActivity() {
 
     /* ---- sleep timer + shake-to-reset ---- */
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val sleepRunnable = Runnable { if (speaking) pauseTts() }
+    private val sleepRunnable = Runnable {
+        if (!speaking) return@Runnable
+        val slug = intent.getStringExtra("slug")
+        val stoppedIn = chapterNameAt(resumeAt ?: speakAt)
+        if (!asDocument() && slug != null && stoppedIn != null) {
+            SleepCrumbs.save(prefs, slug, sleepArmedIn ?: stoppedIn, stoppedIn)
+        }
+        pauseTts()
+    }
+    /* chapter being spoken when the sleep timer was last armed — see SleepCrumbs */
+    private var sleepArmedIn: String? = null
     private var sensorManager: android.hardware.SensorManager? = null
     private var shakeListener: android.hardware.SensorEventListener? = null
 
+    private fun chapterNameAt(place: ReaderPlace): String? {
+        val idx = loadedChapters.getOrNull(place.row)?.idx ?: return null
+        return chapters?.ordered?.getOrNull(idx)
+    }
+
     /* (re)arm the sleep timer for the configured minutes; 0 = off. Called on
-       every play and whenever a shake resets it. */
-    private fun scheduleSleepTimer() {
+       every play and whenever a shake resets it, with the spot being spoken. */
+    private fun scheduleSleepTimer(at: ReaderPlace? = resumeAt) {
         sleepHandler.removeCallbacks(sleepRunnable)
+        sleepArmedIn = chapterNameAt(at ?: speakAt)
         val mins = prefs.getInt("sleepMinutes", 0)
         if (mins > 0) sleepHandler.postDelayed(sleepRunnable, mins * 60_000L)
     }
@@ -1560,6 +1576,7 @@ class ReaderActivity : AppCompatActivity() {
         val folder = prefs.getString("tree", null)
         val slug = intent.getStringExtra("slug")
         if (!speaking && !asDocument() && folder != null && slug != null) {
+            SleepCrumbs.clear(prefs, slug)
             lifecycleScope.launch(Dispatchers.IO) {
                 try { store.setLastRead(folder, slug, System.currentTimeMillis()) } catch (e: Exception) {}
             }
@@ -1571,7 +1588,7 @@ class ReaderActivity : AppCompatActivity() {
            own, running. Focus does not — see Silence, and the comment that
            used to sit on this line claiming it did. */
         silence.start()
-        scheduleSleepTimer()  // the timer counts from each play
+        scheduleSleepTimer(speakAt)  // the timer counts from each play
         startShakeDetection()
         /* foreground service keeps reading alive with the screen off */
         lastNotifHeading = currentHeading()
