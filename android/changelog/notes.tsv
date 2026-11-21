@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	Keep the app in portrait
+	Library shows a dot on a novel you've read aloud past halfway
+1.47.12	Keep the app in portrait
 1.47.11	Add a PDF, EPUB, or Kindle book from the Library, split into chapters, with its pictures
 1.47.11	Speech edits: Match whole words only no longer matches inside a longer word
 1.47.9	A book added from a file gets a cover from the file, or from its title and author

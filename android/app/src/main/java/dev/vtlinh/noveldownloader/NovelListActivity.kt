@@ -32,7 +32,9 @@ import kotlinx.coroutines.withContext
    a Complete tag instead of a Download button, and an ongoing novel with
    every chapter on disk shows an Up to date tag. Two tabs split the list:
    Read holds every novel the user marked as read, Novels is the rest. Each
-   sorts by stars, then most recently updated.
+   sorts by stars, then most recently updated. A novel whose read-aloud
+   spot is past halfway shows a dot; the dot does not say how many
+   chapters are left.
 
    Cold start: resume a live reading session when one exists; otherwise open
    the Browser when this list is empty. Console output (formerly the Home
@@ -814,6 +816,17 @@ class NovelListActivity : AppCompatActivity() {
                 },
             )
         }
+        /* Past halfway read aloud, and not marked read — that tab already
+           says so. Beside the title, so covers stay in a line. No
+           remaining-chapter count. */
+        if (!isRead(row.rec.slug) && LibraryUnread.pastHalfway(
+                prefs.getString("ttsPos:${row.rec.slug}", null),
+                row.rec.total,
+                row.local,
+            )
+        ) {
+            line.addView(unreadDot())
+        }
         line.addView(
             TextView(ctx).apply {
                 this.text = text
@@ -1341,4 +1354,16 @@ class NovelListActivity : AppCompatActivity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun unreadDot(): View =
+        View(this).apply {
+            contentDescription = "Unread"
+            layoutParams = LinearLayout.LayoutParams(dp(10), dp(10)).apply {
+                marginEnd = dp(12)
+            }
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(getColor(R.color.accent))
+            }
+        }
 }
