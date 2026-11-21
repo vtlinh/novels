@@ -15,7 +15,7 @@ package dev.vtlinh.noveldownloader
    recovered from git history, and check what comes out. */
 object Schema {
 
-    const val VERSION = 29
+    const val VERSION = 30
 
     const val CHAPTERS_TABLE =
         "CREATE TABLE chapters (" +
@@ -127,6 +127,14 @@ object Schema {
             "folder TEXT, slug TEXT, chapter TEXT, image TEXT DEFAULT '', " +
             "alt TEXT DEFAULT '', " +
             "PRIMARY KEY(folder, slug, chapter))"
+    /* Every picture on a chapter, in the order it was saved. `ord` 0 is
+       the picture the chapter row also points at. A chapter can have
+       more than one — a book added from a file often does. */
+    const val CHAPTER_PICTURE_TABLE =
+        "CREATE TABLE IF NOT EXISTS chapter_picture (" +
+            "folder TEXT, slug TEXT, chapter TEXT, ord INTEGER, " +
+            "image TEXT DEFAULT '', alt TEXT DEFAULT '', " +
+            "PRIMARY KEY(folder, slug, chapter, ord))"
 
     /* Somewhere to send the statements. `soft` is for the ones whose failure is
        an ordinary outcome rather than a fault — an ALTER adding a column the
@@ -153,6 +161,7 @@ object Schema {
         db.exec(CHLIST_TABLE)
         db.exec(CHAPTER_IMAGE_REQ_TABLE)
         db.exec(CHAPTER_IMAGE_TABLE)
+        db.exec(CHAPTER_PICTURE_TABLE)
     }
 
     fun upgrade(db: Exec, oldVersion: Int) {
@@ -367,6 +376,17 @@ object Schema {
            measurement of a page, and there is no page here to measure. */
         if (oldVersion < 29) {
             db.soft("ALTER TABLE novels ADD COLUMN site_rating REAL DEFAULT -1")
+        }
+        /* Pictures already saved stay the first picture of their chapter.
+           Nothing else to seed: a second picture is a file we have not
+           saved yet. Runs after the chapter row has its image column. */
+        if (oldVersion < 30) {
+            db.exec(CHAPTER_PICTURE_TABLE)
+            db.exec(
+                "INSERT OR IGNORE INTO chapter_picture(folder,slug,chapter,ord,image,alt) " +
+                    "SELECT folder, slug, filename, 0, image, image_alt FROM chapters " +
+                    "WHERE image<>''",
+            )
         }
     }
 }

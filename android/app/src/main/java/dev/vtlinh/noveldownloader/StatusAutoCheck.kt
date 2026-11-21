@@ -109,6 +109,7 @@ object StatusAutoCheck {
         for (rec in store.novels(folder)) {
             val key = Ownership.normKey(rec.slug)
             if (key in garbage) continue
+            if (ImportedBook.isImported(rec.url)) continue
             if (DownloadService.isBusy(key)) continue
             val local = NovelCheck.localCount(store, folder, rec)
             val done = rec.complete && rec.total > 0 && local == rec.total

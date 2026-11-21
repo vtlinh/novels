@@ -71,6 +71,7 @@ object NovelCheck {
        re-downloads the whole novel from it next run: its chapter paths differ,
        so every file reads as holding the wrong page and is replaced. */
     internal fun candidates(url: String, slug: String): List<String> {
+        if (ImportedBook.isImported(url)) return emptyList()
         val site = Sites.forUrl(url)
         val guesses = listOf(
             "https://truyenfull.today/$slug/",

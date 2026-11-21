@@ -1206,6 +1206,7 @@ object ChapterImages {
         val uri: Uri,
         val alt: String = "",
         val title: String = "",
+        val ord: Int = 0,
     )
 
     /* Slack's description after trim. Padding is not a caption. */
@@ -1324,7 +1325,7 @@ object ChapterImages {
             val uri = DocumentsContract.buildDocumentUriUsingTree(
                 tree, resolveImageDocId(rootId, dirName, row.image),
             )
-            out.add(savedOf(row.chapter, uri, row.alt))
+            out.add(savedOf(row.chapter, uri, row.alt, ord = row.ord))
         }
         return sortSaved(out)
     }
@@ -1597,14 +1598,20 @@ object ChapterImages {
         return true
     }
 
-    fun savedOf(chapter: String, uri: Uri, alt: String = "", title: String = ""): Saved {
+    fun savedOf(
+        chapter: String,
+        uri: Uri,
+        alt: String = "",
+        title: String = "",
+        ord: Int = 0,
+    ): Saved {
         val number = Scenes.chapterNumber(chapter) ?: Int.MAX_VALUE
         val label = if (number == Int.MAX_VALUE) Scenes.chapterStem(chapter) else number.toString()
-        return Saved(chapter, number, label, uri, altText(alt), title.trim())
+        return Saved(chapter, number, label, uri, altText(alt), title.trim(), ord)
     }
 
     fun sortSaved(items: List<Saved>): List<Saved> =
-        items.sortedWith(compareBy<Saved> { it.number }.thenBy { it.chapter })
+        items.sortedWith(compareBy<Saved> { it.number }.thenBy { it.chapter }.thenBy { it.ord })
 
     /* What tapping a synopsis-grid picture does. Expand — never
        open the chapter. */
@@ -1660,6 +1667,21 @@ object ChapterImages {
         if (kotlin.math.abs(dx) < kotlin.math.abs(dy)) return null
         if (kotlin.math.abs(dx) < minDist || kotlin.math.abs(vx) < minSpeed) return null
         return if (dx < 0f) 1 else -1
+    }
+
+    /* Every picture on this chapter, in the order they were saved. */
+    fun linkedPictures(
+        ctx: Context,
+        folder: String,
+        slug: String,
+        chapter: String,
+    ): List<ChapterImage> {
+        if (folder.isEmpty() || slug.isEmpty() || chapter.isEmpty()) return emptyList()
+        return try {
+            DownloadStore(ctx).chapterPictures(folder, slug, chapter)
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     fun linkedImage(ctx: Context, folder: String, slug: String, chapter: String): String? {
@@ -1766,6 +1788,57 @@ object ChapterImages {
             return
         }
         savePng(ctx, folder, dirName, slug, chapter, bytes, alt)
+    }
+
+    /* Pictures from a file the reader added. Each one is saved the same
+       way a generated picture is — a png under scenes/, drawn under the
+       chapter heading — and a chapter keeps every picture it had. */
+    fun saveImported(
+        ctx: Context,
+        folder: String,
+        dirName: String,
+        slug: String,
+        chapter: String,
+        images: List<Pair<ByteArray, String>>,
+    ) {
+        if (images.isEmpty()) return
+        val dir = scenesDir(ctx, folder, dirName, create = true) ?: return
+        val store = DownloadStore(ctx)
+        val used = HashSet<String>()
+        val saved = ArrayList<Pair<String, String>>()
+        for ((bytes, alt) in images) {
+            val png = toPng(bytes) ?: continue
+            val name = Scenes.freeImageName(chapter) { n ->
+                if (n in used) return@freeImageName true
+                val f = dir.findFile(n) ?: return@freeImageName false
+                val id = try { DocumentsContract.getDocumentId(f.uri) } catch (e: Exception) { n }
+                val holder = store.chapterWithImage(folder, slug, id)
+                holder != null && holder != chapter
+            }
+            val docId = writeBytes(ctx, dir, name, "image/png", png) ?: continue
+            used.add(name)
+            saved.add(docId to alt)
+        }
+        if (saved.isNotEmpty()) {
+            store.setChapterPictures(folder, slug, chapter, saved)
+            try { store.forgetDiskBytes(folder, slug) } catch (e: Exception) {}
+        }
+    }
+
+    private fun toPng(bytes: ByteArray): ByteArray? {
+        if (bytes.size < 32) return null
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth < 1 || bounds.outHeight < 1) return null
+        if (bounds.outWidth > 8000 || bounds.outHeight > 8000) return null
+        val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        return try {
+            val out = java.io.ByteArrayOutputStream()
+            if (!bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)) null
+            else out.toByteArray()
+        } finally {
+            bmp.recycle()
+        }
     }
 
     private fun savePng(

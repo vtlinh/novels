@@ -25,7 +25,9 @@ import kotlinx.coroutines.withContext
    one tap — no URLs to remember. Rows come from three sources, deduped by slug:
    the novels registry, the chapter index, and a scan of the root folder's
    subdirectories (novels downloaded before the registry existed, or copied
-   in from elsewhere). "Check status" asks each site for its chapter count,
+   in from elsewhere). "+" adds a PDF, EPUB, or Kindle file from the file
+   picker; the book is split into chapters, and its pictures stay with the
+   chapter they came from. "Check status" asks each site for its chapter count,
    finished flag, and author; a finished novel with everything on disk shows
    a Complete tag instead of a Download button, and an ongoing novel with
    every chapter on disk shows an Up to date tag. Two tabs split the list:
@@ -64,6 +66,22 @@ class NovelListActivity : AppCompatActivity() {
             }.apply()
         }
 
+    private var importing = false
+
+    private val pickBook =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode != RESULT_OK) return@registerForActivityResult
+            val data = result.data ?: return@registerForActivityResult
+            val uris = ArrayList<Uri>()
+            val clip = data.clipData
+            if (clip != null) {
+                for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
+            } else {
+                data.data?.let { uris.add(it) }
+            }
+            if (uris.isNotEmpty()) importBooks(uris)
+        }
+
     private val pickFolder =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             val pending = pendingShareUrl
@@ -100,6 +118,7 @@ class NovelListActivity : AppCompatActivity() {
         if (folderKey == null) {
             findViewById<TextView>(R.id.statusText).text = "Pick a download folder first."
         }
+        findViewById<Button>(R.id.addBtn).setOnClickListener { addBook() }
         findViewById<Button>(R.id.checkBtn).setOnClickListener { checkStatuses() }
         showingRead = savedInstanceState?.getBoolean(STATE_READ_TAB)
             ?: prefs.getBoolean(PREF_READ_TAB, false)
@@ -611,6 +630,7 @@ class NovelListActivity : AppCompatActivity() {
        carried the message, and the one it erased was the warning that the
        auto-downloads a check queued were refused. */
     private fun render(finalStatus: String? = null) {
+        if (importing && finalStatus == null) return
         val list = findViewById<LinearLayout>(R.id.novelList)
         val status = findViewById<TextView>(R.id.statusText)
         /* onResume always follows onCreate, so the instruction set there was
@@ -646,8 +666,10 @@ class NovelListActivity : AppCompatActivity() {
             if (showingRead != wantRead) return@launch
             list.removeAllViews()
             if (rs.isEmpty()) {
-                /* explain WHICH source came up empty instead of a blank shrug */
-                status.text = "No novels found. ($sourceInfo)"
+                /* explain WHICH source came up empty instead of a blank shrug.
+                   A message from adding a book has to survive an empty list,
+                   or the failure is replaced by "No novels found". */
+                status.text = finalStatus ?: "No novels found. ($sourceInfo)"
                 return@launch
             }
             fetchCovers(rs)
@@ -845,7 +867,7 @@ class NovelListActivity : AppCompatActivity() {
                     }
                 },
             )
-        } else if (row.rec.url.isNotEmpty()) {   // includes finished-but-incomplete
+        } else if (row.rec.url.isNotEmpty() && !ImportedBook.isImported(row.rec.url)) {
             /* already downloading (or waiting its turn) → say so and go dead,
                so a second job can't be started for the same novel */
             val key = Ownership.normKey(row.rec.slug)
@@ -1125,6 +1147,93 @@ class NovelListActivity : AppCompatActivity() {
        with no URL (legacy or folder-scanned) is probed at each site's
        canonical slug URL first. A novel is complete when the site says
        finished AND every chapter is on disk. */
+    private fun addBook() {
+        if (folderKey == null) {
+            Toast.makeText(this, "Pick a download folder first — it's in Settings", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            putExtra(Intent.EXTRA_MIME_TYPES, ImportedBook.MIME_TYPES)
+        }
+        pickBook.launch(intent)
+    }
+
+    private fun importBooks(uris: List<Uri>) {
+        if (importing) return
+        val tree = folderKey ?: return
+        importing = true
+        val add = findViewById<Button>(R.id.addBtn)
+        add.isEnabled = false
+        val status = findViewById<TextView>(R.id.statusText)
+        lifecycleScope.launch {
+            var ok = 0
+            var bad = 0
+            var added: String? = null
+            var failed: String? = null
+            try {
+                for ((i, uri) in uris.withIndex()) {
+                    val name = displayNameOf(uri)
+                    if (uris.size > 1 && !isDestroyed) status.text = "Saving ${i + 1} of ${uris.size}…"
+                    try {
+                        /* Finish the copy even if this screen goes away
+                           mid-save. A half-written book would sit in the
+                           library with no way to tell it was unfinished. */
+                        added = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                            BookImport.import(this@NovelListActivity, Uri.parse(tree), uri, name) { line ->
+                                runOnUiThread { if (!isDestroyed) status.text = line }
+                            }
+                        }
+                        ok++
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: ImportedBook.CannotRead) {
+                        bad++
+                        failed = "$name — ${e.message}"
+                    } catch (e: Exception) {
+                        bad++
+                        failed = "$name — ${ImportedBook.COULDNT}"
+                    }
+                }
+            } finally {
+                importing = false
+                if (!isDestroyed) add.isEnabled = true
+            }
+            if (isDestroyed) return@launch
+            val finalStatus = when {
+                ok == 1 && bad == 0 -> added
+                ok > 0 && bad == 0 -> "Added $ok books."
+                ok > 0 -> {
+                    val books = if (ok == 1) "1 book" else "$ok books"
+                    "Added $books. $bad couldn't be read."
+                }
+                uris.size == 1 -> failed ?: "Couldn't add that file."
+                else -> "Couldn't read those files."
+            }
+            if (ok > 0 && showingRead) {
+                showingRead = false
+                prefs.edit().putBoolean(PREF_READ_TAB, false).apply()
+                paintLibraryTabs()
+            }
+            render(finalStatus)
+        }
+    }
+
+    private fun displayNameOf(uri: Uri): String {
+        return try {
+            contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null,
+            )?.use { if (it.moveToFirst()) it.getString(0) else null }
+        } catch (e: Exception) {
+            null
+        } ?: uri.lastPathSegment ?: "book"
+    }
+
     private fun checkStatuses() {
         val folder = folderKey ?: return
         val btn = findViewById<Button>(R.id.checkBtn)
@@ -1165,7 +1274,8 @@ class NovelListActivity : AppCompatActivity() {
                        counts they each save contradict each other. Leave a
                        busy novel to its download — it renames on the way out
                        anyway. */
-                    !DownloadService.isBusy(Ownership.normKey(it.rec.slug)) &&
+                    !ImportedBook.isImported(it.rec.url) &&
+                        !DownloadService.isBusy(Ownership.normKey(it.rec.slug)) &&
                         (!done || store.chapterOrderCount(folder, it.rec.slug) == 0)
                 }.map { NovelCheck.Target(it.rec, it.display, it.local) }
             } } catch (e: Exception) {

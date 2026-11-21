@@ -2,6 +2,7 @@ package dev.vtlinh.noveldownloader
 
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.util.TypedValue
 import android.widget.ArrayAdapter
 import android.widget.ImageView
@@ -2842,48 +2843,57 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    /* Picture sits on its own line under the heading so headingOf / TTS
+    /* Pictures sit on their own lines under the heading so headingOf / TTS
        still see the chapter title as the first line. \uFFFC is skipped
-       when reading aloud. */
+       when reading aloud. A chapter can have more than one. */
     private fun decorateChapter(chapter: String, raw: String): CharSequence {
         if (asDocument()) return raw
         val folder = prefs.getString("tree", null) ?: return raw
         val dir = intent.getStringExtra("dir") ?: return raw
         val slug = intent.getStringExtra("slug") ?: ""
-        if (ChapterImages.linkedImage(this, folder, slug, chapter) == null) return raw
-        val uri = ChapterImages.chapterUri(this, folder, dir, chapter, slug) ?: return raw
+        val pics = ChapterImages.linkedPictures(this, folder, slug, chapter)
+        if (pics.isEmpty()) return raw
         val maxW = (list.width - dp(36))
             .let { if (it > 0) it else resources.displayMetrics.widthPixels - dp(36) }
         val pad = dp(10)
-        val bmp = ChapterImages.thumb(this, uri, (maxW - pad * 2).coerceAtLeast(1))
-        if (bmp == null) {
-            DownloadService.appendLog(
-                "image: ${ChapterImages.describe(dir, chapter)} — could not open the picture on this phone",
-            )
-            return raw
-        }
-        val alt = ChapterImages.linkedAlt(this, folder, slug, chapter)
+        val tree = Uri.parse(folder)
+        val rootId = Saf.rootId(tree)
         val nl = raw.indexOf('\n')
         val head = if (nl >= 0) raw.substring(0, nl + 1) else raw + "\n"
         val rest = if (nl >= 0) raw.substring(nl + 1) else ""
         val sb = android.text.SpannableStringBuilder(head)
-        val at = sb.length
-        sb.append('\uFFFC').append('\n')
-        sb.setSpan(
-            ChapterImageSpan(
-                bmp, maxW, pad, dp(8), dp(10), dp(1),
-                getColor(R.color.card), getColor(R.color.input_stroke),
-                READER_LINE_MULT, 0f,
-                alt,
-                TypedValue.applyDimension(
-                    TypedValue.COMPLEX_UNIT_SP,
-                    ChapterImageSpan.CAPTION_SP,
-                    resources.displayMetrics,
+        var drew = false
+        for (pic in pics) {
+            val uri = DocumentsContract.buildDocumentUriUsingTree(
+                tree, ChapterImages.resolveImageDocId(rootId, dir, pic.image),
+            )
+            val bmp = ChapterImages.thumb(this, uri, (maxW - pad * 2).coerceAtLeast(1))
+            if (bmp == null) {
+                DownloadService.appendLog(
+                    "image: ${ChapterImages.describe(dir, chapter)} — could not open the picture on this phone",
+                )
+                continue
+            }
+            val at = sb.length
+            sb.append('\uFFFC').append('\n')
+            sb.setSpan(
+                ChapterImageSpan(
+                    bmp, maxW, pad, dp(8), dp(10), dp(1),
+                    getColor(R.color.card), getColor(R.color.input_stroke),
+                    READER_LINE_MULT, 0f,
+                    pic.alt,
+                    TypedValue.applyDimension(
+                        TypedValue.COMPLEX_UNIT_SP,
+                        ChapterImageSpan.CAPTION_SP,
+                        resources.displayMetrics,
+                    ),
                 ),
-            ),
-            at, at + 1,
-            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
-        )
+                at, at + 1,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            drew = true
+        }
+        if (!drew) return raw
         sb.append(rest)
         return sb
     }
