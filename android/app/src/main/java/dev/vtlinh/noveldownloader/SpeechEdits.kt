@@ -11,6 +11,12 @@ import org.json.JSONObject
      type 2 = regular expression         ("*" prefix)
    Default rules are built in and always applied; user rules are editable,
    persisted as JSON, and import/export in the @Voice text format. */
+
+/* Whole-word boundary around a regex. Shared by compiled() and export so a
+   backup round-trip (which stores the wrap and clears the flag) matches the
+   same text the rule matches now. Non-capturing, so $1 stays the user's group. */
+private fun wholeWordRegex(pattern: String) = "\\b(?:$pattern)\\b"
+
 data class SpeechEdit(
     val id: String,
     var title: String,
@@ -25,9 +31,17 @@ data class SpeechEdit(
 ) {
     fun appliesTo(slug: String?) = novel == null || novel == slug
 
-    /* compiled (regex, replacement) or null if the pattern doesn't compile */
+    /* compiled (regex, replacement) or null if the pattern doesn't compile.
+       "Match whole words" on a regex used to be saved and exported, then
+       ignored here, so `(\d+) s` still rewrote the "s" inside "seconds".
+       The wrap is the same text a backup bakes in (a re-imported rule comes
+       back with the flag off), and (?:) does not renumber $1. */
     fun compiled(): Pair<Regex, String>? = try {
-        val p = if (type == 2) pattern else SpeechText.literalPattern(pattern, wholeWord)
+        val p = when {
+            type != 2 -> SpeechText.literalPattern(pattern, wholeWord)
+            wholeWord -> wholeWordRegex(pattern)
+            else -> pattern
+        }
         val opts = if (type == 0) setOf(RegexOption.IGNORE_CASE) else emptySet()
         Regex(p, opts) to replace
     } catch (e: Exception) {
@@ -244,7 +258,7 @@ object SpeechEdits {
             var regex = e.type == 2
             var pat = e.pattern
             if (e.wholeWord) {
-                pat = if (regex) "\\b(?:$pat)\\b" else "\\b\\Q$pat\\E\\b"
+                pat = if (regex) wholeWordRegex(pat) else "\\b\\Q$pat\\E\\b"
                 /* Wrapping forces this out as a regex, and a regex rule is
                    read back as case-SENSITIVE — so exporting and re-importing
                    (the documented backup route) quietly stopped a
