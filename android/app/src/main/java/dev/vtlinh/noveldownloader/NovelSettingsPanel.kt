@@ -56,7 +56,8 @@ class NovelSettingsPanel(
     var allowRedownload: Boolean = true
         set(v) {
             field = v
-            find<View>(R.id.redownloadRow).visibility = if (v) View.VISIBLE else View.GONE
+            val fromFile = rec?.url?.let { ImportedBook.isImported(it) } == true
+            find<View>(R.id.redownloadRow).visibility = if (v && !fromFile) View.VISIBLE else View.GONE
         }
 
     private fun <T : View> find(id: Int): T = view.findViewById(id)
@@ -154,6 +155,7 @@ class NovelSettingsPanel(
                 return@launch
             }
             if (!keepStatus) status(state.summary)
+            showSiteActions(got.url)
             bindMarkComplete(folder, state)
             bindAutoDownload(folder, state)
             bindTranslate(folder, state)
@@ -188,6 +190,7 @@ class NovelSettingsPanel(
             if (rec.total > 0) append("$local/${rec.total} chapters") else append("$local chapter(s)")
             append(
                 when {
+                    ImportedBook.isImported(rec.url) -> " — added from a file"
                     rec.siteComplete -> " — the site has finished this novel"
                     rec.markedComplete -> " — you marked this novel complete"
                     else -> " — ongoing"
@@ -292,10 +295,12 @@ class NovelSettingsPanel(
         box.isChecked = rec.complete
         box.isEnabled = !rec.siteComplete
         box.alpha = if (box.isEnabled) 1f else 0.5f
-        markCompleteHelp = if (rec.siteComplete) {
-            "The website says this novel is finished, so it is always complete."
-        } else {
-            MARK_COMPLETE_HELP
+        markCompleteHelp = when {
+            ImportedBook.isImported(rec.url) ->
+                "This book was added from a file, so the whole thing is already here."
+            rec.siteComplete ->
+                "The website says this novel is finished, so it is always complete."
+            else -> MARK_COMPLETE_HELP
         }
         box.setOnCheckedChangeListener { _, checked ->
             host.lifecycleScope.launch {
@@ -417,9 +422,21 @@ class NovelSettingsPanel(
 
     /* ---- check for new chapters ---- */
 
+    private fun showSiteActions(url: String) {
+        val show = if (ImportedBook.isImported(url)) View.GONE else View.VISIBLE
+        find<View>(R.id.autoDownloadRow).visibility = show
+        find<View>(R.id.recheckRow).visibility = show
+        find<View>(R.id.redownloadRow).visibility =
+            if (show == View.VISIBLE && allowRedownload) View.VISIBLE else View.GONE
+    }
+
     private fun recheck() {
         val folder = this.folder ?: return
         val rec = this.rec ?: return
+        if (ImportedBook.isImported(rec.url)) {
+            status("This book was added from a file, so there is nothing new to check.")
+            return
+        }
         if (busy) return
         if (DownloadService.isBusy(Ownership.normKey(slug))) {
                     status("This novel is downloading — wait until it finishes, then check again.")
@@ -475,6 +492,7 @@ class NovelSettingsPanel(
 
     private fun confirmRedownload() {
         if (busy) return
+        if (ImportedBook.isImported(rec?.url.orEmpty())) return
         AlertDialog.Builder(host)
             .setTitle("Re-download this novel?")
             .setMessage(
@@ -491,6 +509,10 @@ class NovelSettingsPanel(
     private fun redownload() {
         val folder = this.folder ?: return
         val rec = this.rec ?: return
+        if (ImportedBook.isImported(rec.url)) {
+            status("This book was added from a file, so there is nothing to download again.")
+            return
+        }
         /* the confirm dialog checks `busy` too, but it can already be on
            screen when something else sets it — the guard has to sit on the
            ACTION, or two confirmed dialogs run the wipe twice */

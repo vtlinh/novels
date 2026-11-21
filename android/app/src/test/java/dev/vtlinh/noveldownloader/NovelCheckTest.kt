@@ -30,6 +30,13 @@ class NovelCheckTest {
     }
 
     @Test
+    fun `a book added from a file is not checked against a site`() {
+        assertEquals(emptyList<String>(), NovelCheck.candidates("import:epub", "import-door"))
+        assertEquals(emptyList<String>(), NovelCheck.candidates("import:pdf", "import-door"))
+        assertEquals(emptyList<String>(), NovelCheck.candidates("import:kindle", "import-door"))
+    }
+
+    @Test
     fun `a novel with no recorded address is tried everywhere`() {
         assertEquals(
             listOf(

@@ -94,6 +94,7 @@ data class ChapterImage(
     val chapter: String,
     val image: String,
     val alt: String = "",
+    val ord: Int = 0,
 )
 
 class DownloadStore(context: Context) :
@@ -680,6 +681,7 @@ class DownloadStore(context: Context) :
         writableDatabase.delete("novels", "folder=? AND slug=?", arrayOf(folder, slug))
         writableDatabase.delete("chapter_image_req", "folder=? AND slug=?", arrayOf(folder, slug))
         writableDatabase.delete("chapter_image", "folder=? AND slug=?", arrayOf(folder, slug))
+        writableDatabase.delete("chapter_picture", "folder=? AND slug=?", arrayOf(folder, slug))
     }
 
     /* ---- Slack chapter images (request threads + file→image link) ---- */
@@ -820,6 +822,10 @@ class DownloadStore(context: Context) :
             "INSERT OR REPLACE INTO chapter_image(folder,slug,chapter,image,alt) VALUES(?,?,?,?,?)",
             arrayOf(folder, slug, chapter, image, kept),
         )
+        writableDatabase.execSQL(
+            "INSERT OR REPLACE INTO chapter_picture(folder,slug,chapter,ord,image,alt) VALUES(?,?,?,?,?,?)",
+            arrayOf(folder, slug, chapter, 0, image, kept),
+        )
         writableDatabase.delete(
             "chapter_image_req",
             "folder=? AND slug=? AND chapter=?",
@@ -827,8 +833,94 @@ class DownloadStore(context: Context) :
         )
     }
 
+    /* Replace every picture on a chapter, in order. The first is also the
+       picture the chapter row points at, so a screen that asks for one
+       still gets one. */
+    fun setChapterPictures(
+        folder: String,
+        slug: String,
+        chapter: String,
+        images: List<Pair<String, String>>,
+    ) {
+        if (images.isEmpty()) {
+            clearChapterImage(folder, slug, chapter)
+            return
+        }
+        ensureChapterRow(folder, slug, chapter)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(
+                "chapter_picture",
+                "folder=? AND slug=? AND chapter=?",
+                arrayOf(folder, slug, chapter),
+            )
+            images.forEachIndexed { i, (image, alt) ->
+                db.execSQL(
+                    "INSERT INTO chapter_picture(folder,slug,chapter,ord,image,alt) VALUES(?,?,?,?,?,?)",
+                    arrayOf(folder, slug, chapter, i, image, alt.trim()),
+                )
+            }
+            val first = images.first()
+            val alt = first.second.trim()
+            db.execSQL(
+                "UPDATE chapters SET image=?, image_alt=?, slack_thread='' " +
+                    "WHERE folder=? AND slug=? AND filename=?",
+                arrayOf(first.first, alt, folder, slug, chapter),
+            )
+            db.execSQL(
+                "INSERT OR REPLACE INTO chapter_image(folder,slug,chapter,image,alt) VALUES(?,?,?,?,?)",
+                arrayOf(folder, slug, chapter, first.first, alt),
+            )
+            db.delete(
+                "chapter_image_req",
+                "folder=? AND slug=? AND chapter=?",
+                arrayOf(folder, slug, chapter),
+            )
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun chapterPictures(folder: String, slug: String, chapter: String): List<ChapterImage> {
+        val out = ArrayList<ChapterImage>()
+        readableDatabase.query(
+            "chapter_picture",
+            arrayOf("image", "alt", "ord"),
+            "folder=? AND slug=? AND chapter=? AND image<>''",
+            arrayOf(folder, slug, chapter),
+            null, null, "ord",
+        ).use { c ->
+            while (c.moveToNext()) {
+                val image = c.getString(0).orEmpty()
+                if (image.isEmpty()) continue
+                out.add(ChapterImage(chapter, image, c.getString(1).orEmpty(), c.getInt(2)))
+            }
+        }
+        if (out.isNotEmpty()) return out
+        val one = chapterImage(folder, slug, chapter) ?: return emptyList()
+        return listOf(ChapterImage(chapter, one, chapterImageAlt(folder, slug, chapter), 0))
+    }
+
     fun chapterImages(folder: String, slug: String): List<ChapterImage> {
         val out = ArrayList<ChapterImage>()
+        val seen = HashSet<String>()
+        readableDatabase.query(
+            "chapter_picture",
+            arrayOf("chapter", "image", "alt", "ord"),
+            "folder=? AND slug=? AND image<>''",
+            arrayOf(folder, slug),
+            null, null, "ord",
+        ).use { c ->
+            while (c.moveToNext()) {
+                val chapter = c.getString(0).orEmpty()
+                val image = c.getString(1).orEmpty()
+                if (chapter.isEmpty() || image.isEmpty()) continue
+                seen.add(chapter)
+                out.add(ChapterImage(chapter, image, c.getString(2).orEmpty(), c.getInt(3)))
+            }
+        }
         readableDatabase.query(
             "chapters",
             arrayOf("filename", "image", "image_alt"),
@@ -839,10 +931,8 @@ class DownloadStore(context: Context) :
             while (c.moveToNext()) {
                 val chapter = c.getString(0).orEmpty()
                 val image = c.getString(1).orEmpty()
-                val alt = c.getString(2).orEmpty()
-                if (chapter.isNotEmpty() && image.isNotEmpty()) {
-                    out.add(ChapterImage(chapter, image, alt))
-                }
+                if (chapter.isEmpty() || image.isEmpty() || chapter in seen) continue
+                out.add(ChapterImage(chapter, image, c.getString(2).orEmpty(), 0))
             }
         }
         return out
@@ -852,6 +942,12 @@ class DownloadStore(context: Context) :
     fun chapterWithImage(folder: String, slug: String, image: String): String? {
         readableDatabase.query(
             "chapters", arrayOf("filename"),
+            "folder=? AND slug=? AND image=?",
+            arrayOf(folder, slug, image),
+            null, null, null, "1",
+        ).use { c -> if (c.moveToFirst()) return c.getString(0) }
+        readableDatabase.query(
+            "chapter_picture", arrayOf("chapter"),
             "folder=? AND slug=? AND image=?",
             arrayOf(folder, slug, image),
             null, null, null, "1",
@@ -893,6 +989,11 @@ class DownloadStore(context: Context) :
         )
         writableDatabase.delete(
             "chapter_image",
+            "folder=? AND slug=? AND chapter=?",
+            arrayOf(folder, slug, chapter),
+        )
+        writableDatabase.delete(
+            "chapter_picture",
             "folder=? AND slug=? AND chapter=?",
             arrayOf(folder, slug, chapter),
         )
@@ -1274,6 +1375,16 @@ class DownloadStore(context: Context) :
                     "UPDATE chapter_image_req SET chapter=? WHERE folder=? AND slug=? AND chapter=?",
                     arrayOf(to, folder, slug, from),
                 )
+                db.delete("chapter_image", "folder=? AND slug=? AND chapter=?", arrayOf(folder, slug, to))
+                db.execSQL(
+                    "UPDATE chapter_image SET chapter=? WHERE folder=? AND slug=? AND chapter=?",
+                    arrayOf(to, folder, slug, from),
+                )
+                db.delete("chapter_picture", "folder=? AND slug=? AND chapter=?", arrayOf(folder, slug, to))
+                db.execSQL(
+                    "UPDATE chapter_picture SET chapter=? WHERE folder=? AND slug=? AND chapter=?",
+                    arrayOf(to, folder, slug, from),
+                )
             } else {
                 /* already migrated — just refresh where it lives */
                 db.execSQL(
@@ -1421,6 +1532,7 @@ class DownloadStore(context: Context) :
         writableDatabase.delete("chapters", "folder=? AND slug=?", arrayOf(folder, slug))
         writableDatabase.delete("chapter_image_req", "folder=? AND slug=?", arrayOf(folder, slug))
         writableDatabase.delete("chapter_image", "folder=? AND slug=?", arrayOf(folder, slug))
+        writableDatabase.delete("chapter_picture", "folder=? AND slug=?", arrayOf(folder, slug))
         clearChapterList(folder, slug)
     }
 }

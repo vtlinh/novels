@@ -3,6 +3,7 @@ package dev.vtlinh.noveldownloader
 import java.sql.Connection
 import java.sql.DriverManager
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -241,6 +242,33 @@ class SchemaTest {
                         assertEquals("upgrading from v$v: image", "Chapter 1.png", r.getString(1))
                         assertEquals("upgrading from v$v: alt must stay empty", "", r.getString(2))
                     }
+                }
+            }
+        }
+    }
+
+    /* A picture saved before a chapter could hold more than one stays the
+       first picture of that chapter. */
+    @Test
+    fun `an existing picture becomes the first picture of its chapter`() {
+        open().use { c ->
+            at(29, c)
+            c.createStatement().use {
+                it.execute(
+                    "INSERT INTO chapters(folder,slug,filename,uri,image,image_alt) " +
+                        "VALUES('f','s','Chapter 1.txt','content://x','Chapter 1.png','A door')",
+                )
+            }
+            Schema.upgrade(Jdbc(c), 29)
+            c.createStatement().use { s ->
+                s.executeQuery(
+                    "SELECT ord, image, alt FROM chapter_picture WHERE chapter='Chapter 1.txt'",
+                ).use { r ->
+                    assertTrue(r.next())
+                    assertEquals(0, r.getInt(1))
+                    assertEquals("Chapter 1.png", r.getString(2))
+                    assertEquals("A door", r.getString(3))
+                    assertFalse(r.next())
                 }
             }
         }
