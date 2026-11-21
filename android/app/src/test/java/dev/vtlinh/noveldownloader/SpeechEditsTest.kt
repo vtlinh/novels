@@ -70,4 +70,52 @@ class SpeechEditsTest {
         assertEquals(false, own.appliesTo(null))
         assertEquals(true, regexRule("g", "x", "1").appliesTo("novel-b"))
     }
+
+    /* THE DEFECT. Match whole words was checked on a regular expression,
+       and the test line "Cooldown: 30 se" still became "Cooldown: 30
+       secondse". The "s" is the start of a word, not a word of its own. */
+    @Test
+    fun `a whole-word regex does not match inside a longer word`() {
+        val rule = regexRule("u", "(\\d+) s", "$1 seconds").copy(wholeWord = true)
+        fun spoken(text: String) = SpeechText.apply(listOf(rule.compiled()!!), text)
+        assertEquals("Cooldown: 30 se", spoken("Cooldown: 30 se"))
+        assertEquals("Cooldown: 30 seconds", spoken("Cooldown: 30 seconds"))
+        assertEquals("x30 s", spoken("x30 s"))
+        assertEquals("Cooldown: 30 seconds", spoken("Cooldown: 30 s"))
+        assertEquals("Cooldown: 30 seconds.", spoken("Cooldown: 30 s."))
+        assertEquals("Cooldown: 30 seconds left", spoken("Cooldown: 30 s left"))
+        assertEquals("5 seconds and 10 seconds", spoken("5 s and 10 s"))
+    }
+
+    @Test
+    fun `the same regex without whole words still matches a prefix`() {
+        val rule = regexRule("u", "(\\d+) s", "$1 seconds")
+        assertEquals(
+            "Cooldown: 30 secondse",
+            SpeechText.apply(listOf(rule.compiled()!!), "Cooldown: 30 se"),
+        )
+    }
+
+    /* Export bakes the boundaries into the pattern and import reads the
+       flag back as off. The spoken result has to survive that round trip,
+       because a backup is how these rules are restored. */
+    @Test
+    fun `a whole-word regex matches the same after a backup round-trip`() {
+        val rule = regexRule("u", "(\\d+) s", "$1 seconds").copy(wholeWord = true)
+        val imported = SpeechEdits.parse(SpeechEdits.export(listOf(rule))).single()
+        val samples = listOf("Cooldown: 30 se", "Cooldown: 30 s", "Cooldown: 30 seconds")
+        for (sample in samples) {
+            assertEquals(
+                SpeechText.apply(listOf(rule.compiled()!!), sample),
+                SpeechText.apply(listOf(imported.compiled()!!), sample),
+            )
+        }
+    }
+
+    @Test
+    fun `a whole-word literal still matches only the whole word`() {
+        val rule = SpeechEdit("u", "", 1, true, "se", "seconds", true, false)
+        assertEquals("30 seconds", SpeechText.apply(listOf(rule.compiled()!!), "30 se"))
+        assertEquals("30 seconds", SpeechText.apply(listOf(rule.compiled()!!), "30 seconds"))
+    }
 }
