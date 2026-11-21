@@ -650,6 +650,7 @@ class NovelListActivity : AppCompatActivity() {
                 status.text = "No novels found. ($sourceInfo)"
                 return@launch
             }
+            fetchCovers(rs)
             val shown = rs.filter { isRead(it.rec.slug) == showingRead }
             if (shown.isEmpty()) {
                 status.text = finalStatus ?: if (showingRead) "No novels marked as read" else "No novels"
@@ -1204,6 +1205,28 @@ class NovelListActivity : AppCompatActivity() {
                 }
             DownloadService.appendLog(summary)
             render(summary)
+        }
+    }
+
+    /* Books added from a file have no site to take a cover from. Look them
+       up once; when one arrives, draw the list again so the picture shows. */
+    private fun fetchCovers(rows: List<Row>) {
+        val want = rows.filter { row ->
+            BookCover.needsLookup(row.rec.url, row.rec.slug, row.rec.title) &&
+                !DownloadEngine.coverFile(this, row.rec.slug).let { it.exists() && it.length() > 0L }
+        }
+        if (want.isEmpty()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            var found = false
+            for (row in want) {
+                if (BookCoverFetch.forNovel(
+                        this@NovelListActivity, row.rec.slug, row.rec.title, row.rec.author,
+                    )
+                ) found = true
+            }
+            if (found) withContext(Dispatchers.Main) {
+                if (!isDestroyed) render()
+            }
         }
     }
 

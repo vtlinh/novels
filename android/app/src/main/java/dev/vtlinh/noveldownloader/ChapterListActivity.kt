@@ -375,6 +375,15 @@ class ChapterListActivity : AppCompatActivity() {
                 }
             }
             renderNovelInfo(card, panel, rec, slug, prefs)
+            /* A file added to the library has no site cover. Look one up
+               from its title and author, then show it. */
+            val info = rec
+            if (info != null && BookCover.needsLookup(info.url, slug, info.title)) {
+                val found = withContext(Dispatchers.IO) {
+                    BookCoverFetch.forNovel(this@ChapterListActivity, slug, info.title, info.author)
+                }
+                if (found) bindCover(slug, intent.getStringExtra("title").orEmpty())
+            }
         }
     }
 
