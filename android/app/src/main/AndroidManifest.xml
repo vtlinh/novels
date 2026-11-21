@@ -32,7 +32,8 @@
         <activity
             android:name=".NovelListActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -47,46 +48,54 @@
 
         <activity
             android:name=".BrowserActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".DocumentListActivity"
             android:exported="false"
-            android:launchMode="singleTop" />
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".DocumentEditActivity"
             android:exported="false"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustResize"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".ChapterListActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
-        <!-- Rotating must NOT recreate the reader: a rebuild runs onDestroy,
-             which shuts the TTS engine down and stops the reading service.
-             Handling these config changes in-place keeps playback going (the
-             layout is orientation-agnostic; the text just re-wraps). -->
+        <!-- A rebuild runs onDestroy, which shuts the TTS engine down and
+             stops the reading service. Handling these config changes in-place
+             keeps playback going through dark mode, font size, and the rest. -->
         <activity
             android:name=".ReaderActivity"
             android:exported="false"
+            android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density|fontScale" />
 
         <activity
             android:name=".LogsActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".SettingsActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".AboutActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".SpeechEditsActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <!-- Foreground service: downloads keep running with the screen off -->
         <service
