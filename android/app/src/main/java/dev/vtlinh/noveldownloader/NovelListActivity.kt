@@ -32,9 +32,10 @@ import kotlinx.coroutines.withContext
    a Complete tag instead of a Download button, and an ongoing novel with
    every chapter on disk shows an Up to date tag. Two tabs split the list:
    Read holds every novel the user marked as read, Novels is the rest. Each
-   sorts by stars, then most recently updated. A novel whose read-aloud
-   spot is past halfway shows a dot; the dot does not say how many
-   chapters are left.
+   sorts by stars, then most recently updated. A novel shows a dot when
+   read-aloud stopped past halfway, new chapters have arrived since that
+   read, and it did not stop on the last chapter. The dot does not say
+   how many chapters are left.
 
    Cold start: resume a live reading session when one exists; otherwise open
    the Browser when this list is empty. Console output (formerly the Home
@@ -816,13 +817,17 @@ class NovelListActivity : AppCompatActivity() {
                 },
             )
         }
-        /* Past halfway read aloud, and not marked read — that tab already
-           says so. Beside the title, so covers stay in a line. No
-           remaining-chapter count. */
-        if (!isRead(row.rec.slug) && LibraryUnread.pastHalfway(
+        /* Past halfway, new chapters since that read, and not already on
+           the last chapter. Marked-read novels stay plain — that tab
+           already says so. Beside the title, so covers stay in a line. */
+        if (!isRead(row.rec.slug) && LibraryUnread.show(
                 prefs.getString("ttsPos:${row.rec.slug}", null),
                 row.rec.total,
                 row.local,
+                row.rec.lastRead,
+                prefs.getLong("ttsPosAt:${row.rec.slug}", 0L),
+                row.rec.lastDl,
+                prefs.getLong(LibraryUnread.ADDED_PREFIX + row.rec.slug, 0L),
             )
         ) {
             line.addView(unreadDot())

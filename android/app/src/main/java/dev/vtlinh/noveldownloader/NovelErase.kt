@@ -18,6 +18,7 @@ object NovelErase {
         "readParaText:",
         "ttsPos:",
         "ttsParaText:",
+        LibraryUnread.ADDED_PREFIX,
         /* so a book added again can be looked up; a miss belongs to the copy that was deleted */
         BookCover.MISS_PREFIX,
     )
