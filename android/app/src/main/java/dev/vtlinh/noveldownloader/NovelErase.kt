@@ -18,6 +18,8 @@ object NovelErase {
         "readParaText:",
         "ttsPos:",
         "ttsParaText:",
+        /* so a book added again can be looked up; a miss belongs to the copy that was deleted */
+        BookCover.MISS_PREFIX,
     )
 
     fun prefKeys(slug: String): List<String> = PREF_PREFIXES.map { it + slug }
