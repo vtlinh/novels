@@ -13,6 +13,7 @@ object SlugMerge {
         "lastCh:", "lastChAt:", "readPos:", "readParaText:",
         "ttsPos:", "ttsPosAt:", "ttsParaText:",
         "novelRead:",
+        LibraryUnread.ADDED_PREFIX,
         NovelRating.PREF_PREFIX,
     )
 

@@ -100,6 +100,10 @@ data class ChapterImage(
 class DownloadStore(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "downloads.db", null, Schema.VERSION) {
 
+    /* Same file the activities use, so a growth stamp written here is the
+       one the Library reads. */
+    private val prefs = context.applicationContext.getSharedPreferences("app", Context.MODE_PRIVATE)
+
     companion object {
         private const val RETAIN_MS = 29L * 24 * 60 * 60 * 1000   // Anthropic keeps batch results 29 days
         /* Process-wide, because every screen builds its own helper over the
@@ -1045,10 +1049,24 @@ class DownloadStore(context: Context) :
     }
 
     fun updateNovelCheck(folder: String, slug: String, total: Int, complete: Boolean) {
+        /* Read the old total first. A higher one means chapters arrived;
+           the first total a novel ever gets does not. */
+        val previous = novelTotal(folder, slug)
         writableDatabase.execSQL(
             "UPDATE novels SET total=?, complete=? WHERE folder=? AND slug=?",
             arrayOf(total, if (complete) 1 else 0, folder, slug),
         )
+        if (LibraryUnread.grew(previous, total)) {
+            prefs.edit().putLong(LibraryUnread.ADDED_PREFIX + slug, System.currentTimeMillis()).apply()
+        }
+    }
+
+    private fun novelTotal(folder: String, slug: String): Int {
+        readableDatabase.rawQuery(
+            "SELECT total FROM novels WHERE folder=? AND slug=?",
+            arrayOf(folder, slug),
+        ).use { c -> if (c.moveToNext()) return c.getInt(0) }
+        return 0
     }
 
     /* distinct novels present in the chapter index but never registered
