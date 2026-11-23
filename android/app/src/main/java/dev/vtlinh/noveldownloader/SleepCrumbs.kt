@@ -2,12 +2,15 @@ package dev.vtlinh.noveldownloader
 
 /* What the sleep timer read to someone who had likely dozed off.
 
-   The timer is armed on play and re-armed by every shake, so the chapter
-   being spoken at its last arming is the last sign the listener was awake.
-   When the timer stops reading, that chapter and the one it stopped in are
-   kept, and the chapter list marks everything between them. A pause by hand
-   leaves nothing — the listener was awake to press it — and the next play
-   clears them. */
+   The timer is armed on play and re-armed by every shake while a sentence
+   is actually being read, so the chapter being spoken at its last arming
+   is the last sign the listener was awake. When the timer stops reading,
+   that chapter and the one it stopped in are kept. Both chapter lists mark
+   everything between them: the novel page, and the list you swipe open
+   while reading — a morning open resumes the reader, and that is the list
+   on screen. A pause by hand leaves nothing — the listener was awake to
+   press it — and the next play clears them. A shake after the stop does
+   not: detection is off, and the saved chapters stay. */
 object SleepCrumbs {
 
     private fun fromKey(slug: String) = "sleepFrom:$slug"
