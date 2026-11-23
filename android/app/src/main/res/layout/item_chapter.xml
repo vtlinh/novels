@@ -18,6 +18,15 @@
         android:background="@color/accent"
         android:visibility="invisible" />
 
+    <View
+        android:id="@+id/chapterAsleep"
+        android:layout_width="10dp"
+        android:layout_height="10dp"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/dot_asleep"
+        android:contentDescription="Read after you last moved"
+        android:visibility="gone" />
+
     <TextView
         android:id="@+id/chapterLabel"
         android:layout_width="0dp"
@@ -43,23 +52,6 @@
         android:focusable="false"
         android:focusableInTouchMode="false"
         android:contentDescription="Chapter picture"
-        android:visibility="gone" />
-
-    <TextView
-        android:id="@+id/chapterAsleep"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:text="ASLEEP"
-        android:textSize="10sp"
-        android:textStyle="bold"
-        android:textColor="@color/muted"
-        android:letterSpacing="0.06"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp"
-        android:background="@drawable/bg_chip"
         android:visibility="gone" />
 
     <TextView
