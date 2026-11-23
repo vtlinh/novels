@@ -348,6 +348,7 @@ class ReaderActivity : AppCompatActivity() {
             pictured = fresh.pictured
             drawerAdapter?.clear()
             drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
+            syncDrawerSleep()
             drawerAdapter?.notifyDataSetChanged()
             for (lc in loadedChapters) lc.idx += d
             if (currentChapterIdx >= 0) currentChapterIdx += d
@@ -440,9 +441,14 @@ class ReaderActivity : AppCompatActivity() {
             SleepCrumbs.save(prefs, slug, sleepArmedIn ?: stoppedIn, stoppedIn)
         }
         pauseTts()
+        /* the drawer adapter was built at play, hours before this save */
+        syncDrawerSleep()
+        drawerAdapter?.notifyDataSetChanged()
     }
     /* chapter being spoken when the sleep timer was last armed — see SleepCrumbs */
     private var sleepArmedIn: String? = null
+    /* rows of chapters.ordered the sleep timer read through, for the drawer */
+    private var drawerSleepRows: IntRange? = null
     private var sensorManager: android.hardware.SensorManager? = null
     private var shakeListener: android.hardware.SensorEventListener? = null
 
@@ -495,10 +501,32 @@ class ReaderActivity : AppCompatActivity() {
         shakeListener = null
     }
 
-    /* during reading a shake silently re-arms the sleep timer; the visible
-       "shaking" feedback lives in the settings page (for calibration) */
+    /* Re-arm only while a sentence is being read. The stop turns shake
+       detection off, so picking the phone up afterwards does not move the
+       saved chapters or clear them. The visible "shaking" feedback lives
+       in the settings page (for calibration). */
     private fun onShake() {
         if (speaking) scheduleSleepTimer()
+    }
+
+    /* The novel page already paints these. Opening the app in the morning
+       resumes the reader, and the chapter list on screen is this drawer.
+       Its adapter is built when reading starts, hours before the timer
+       saves, so read the saved chapters again whenever the drawer is shown. */
+    private fun syncDrawerSleep() {
+        val ordered = chapters?.ordered
+        val slug = if (asDocument()) null else intent.getStringExtra("slug")
+        val crumbs = if (ordered == null || slug == null) null else SleepCrumbs.load(prefs, slug)
+        val rows = if (ordered == null || crumbs == null) null
+            else SleepCrumbs.range(ordered, crumbs.first, crumbs.second)
+        drawerSleepRows = rows
+        val note = findViewById<TextView>(R.id.drawerSleepNote) ?: return
+        if (crumbs != null && rows != null) {
+            note.text = SleepCrumbs.note(crumbs.first, crumbs.second)
+            note.visibility = android.view.View.VISIBLE
+        } else {
+            note.visibility = android.view.View.GONE
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -655,6 +683,9 @@ class ReaderActivity : AppCompatActivity() {
                     )
                     v.findViewById<android.view.View>(R.id.chapterNow).visibility =
                         if (current) android.view.View.VISIBLE else android.view.View.GONE
+                    v.findViewById<android.view.View>(R.id.chapterAsleep).visibility =
+                        if (drawerSleepRows?.contains(position) == true) android.view.View.VISIBLE
+                        else android.view.View.GONE
                     val name = chapters?.ordered?.getOrNull(position)
                     val pic = v.findViewById<ImageView>(R.id.chapterPictureBtn)
                     val hasPic = ChapterImagePreview.shouldShowListButton(
@@ -685,6 +716,7 @@ class ReaderActivity : AppCompatActivity() {
                     return v
                 }
             }
+            syncDrawerSleep()
             drawerList.adapter = drawerAdapter
             /* Not found means the saved chapter is gone — a dedupe removed it,
                or it was deleted outside the app. Coercing -1 to 0 opened
@@ -875,6 +907,8 @@ class ReaderActivity : AppCompatActivity() {
             override fun onDrawerSlide(view: android.view.View, slideOffset: Float) {
                 if (slideOffset > 0f && !prepared) {
                     prepared = true
+                    /* crumbs are saved hours after this adapter was built */
+                    syncDrawerSleep()
                     drawerAdapter?.notifyDataSetChanged()
                     drawerList.post {
                         drawerList.setSelectionFromTop(
@@ -1578,6 +1612,8 @@ class ReaderActivity : AppCompatActivity() {
         val slug = intent.getStringExtra("slug")
         if (!speaking && !asDocument() && folder != null && slug != null) {
             SleepCrumbs.clear(prefs, slug)
+            syncDrawerSleep()
+            drawerAdapter?.notifyDataSetChanged()
             lifecycleScope.launch(Dispatchers.IO) {
                 try { store.setLastRead(folder, slug, System.currentTimeMillis()) } catch (e: Exception) {}
             }
@@ -3373,6 +3409,7 @@ class ReaderActivity : AppCompatActivity() {
                 lastRelistAt = 0L
                 drawerAdapter?.clear()
                 drawerAdapter?.addAll(fresh.ordered.map { it.removeSuffix(".txt") })
+                syncDrawerSleep()
                 drawerAdapter?.notifyDataSetChanged()
             }
             onDone()

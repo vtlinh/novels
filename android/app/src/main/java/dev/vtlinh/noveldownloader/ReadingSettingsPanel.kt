@@ -239,7 +239,7 @@ class ReadingSettingsPanel(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) },
         )
-        hint(sleep, "Stop reading after this many minutes. The timer restarts each time you press play. Blank or 0 turns it off. When it stops reading, the chapter list marks the chapters read since you last moved.")
+        hint(sleep, "Stop reading after this many minutes. The timer restarts each time you press play. Blank or 0 turns it off. When it stops reading, the chapter list marks the chapters read since you last moved, on the novel's page and in the list you open while reading.")
         saveSleep = {
             val mins = sleepInput.text.toString().toIntOrNull() ?: 0
             prefs.edit().putInt("sleepMinutes", mins.coerceAtLeast(0)).apply()

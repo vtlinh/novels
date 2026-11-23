@@ -178,15 +178,45 @@
         </FrameLayout>
     </LinearLayout>
 
-    <!-- right-side inline chapter list -->
-    <ListView
-        android:id="@+id/chapterDrawerList"
+    <!-- right-side inline chapter list. The sleep-timer note sits above
+         the rows so it stays on screen when the list is jumped to the
+         chapter being read. -->
+    <LinearLayout
+        android:id="@+id/chapterDrawer"
         android:layout_width="300dp"
         android:layout_height="match_parent"
         android:layout_gravity="end"
+        android:orientation="vertical"
         android:background="@color/card"
-        android:divider="@color/bg"
-        android:dividerHeight="1dp"
-        android:fastScrollEnabled="true"
-        android:fastScrollAlwaysVisible="true" />
+        android:clickable="true"
+        android:focusable="false">
+
+        <TextView
+            android:id="@+id/drawerSleepNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="4dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:background="@color/bg"
+            android:textSize="13sp"
+            android:textColor="@color/fg"
+            android:lineSpacingMultiplier="1.2"
+            android:visibility="gone" />
+
+        <ListView
+            android:id="@+id/chapterDrawerList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="@color/bg"
+            android:dividerHeight="1dp"
+            android:fastScrollEnabled="true"
+            android:fastScrollAlwaysVisible="true" />
+    </LinearLayout>
 </androidx.drawerlayout.widget.DrawerLayout>
