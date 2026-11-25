@@ -4,7 +4,8 @@
 # Stamp blank rows with the published versionName before adding a new one
 # (tools/seal-changelog.py).
 
-	An orange dot marks the chapters the sleep timer read
+	Mr., Dr., and Mt. Tai stay in the sentence being read, and Mt. is said as Mount
+1.48.2	An orange dot marks the chapters the sleep timer read
 1.48.1	The chapter list you open while reading shows which chapters the sleep timer read
 1.47.14	The Library dot stays off on the last chapter, and only shows when new chapters arrived after you last read
 1.47.13	Library shows a dot on a novel you've read aloud past halfway

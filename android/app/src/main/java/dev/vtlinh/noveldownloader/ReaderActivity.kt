@@ -1413,7 +1413,8 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /* next sentence at/after `from`: bounded by paragraph breaks, split on
-       terminator punctuation followed by a space (so "3.5" stays intact) */
+       terminator punctuation followed by a space (so "3.5" stays intact).
+       An abbreviation's period is not a split — see ReaderText. */
     private fun nextSentence(body: CharSequence, from: Int): Pair<Int, Int>? =
         ReaderText.nextSentence(body, from)
 

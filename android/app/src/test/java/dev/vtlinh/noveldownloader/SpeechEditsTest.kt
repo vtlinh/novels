@@ -28,6 +28,44 @@ class SpeechEditsTest {
         assertEquals("No; She left.", spoken("No. She left."))
     }
 
+    /* THE DEFECT. "Mt. Tai" was split, and the half the engine did see
+       was not "Mount". The title abbreviations are expanded the same way
+       Mr. and Dr. already were, now that the splitter leaves them whole. */
+    @Test
+    fun `Mt-dot is spoken as Mount`() {
+        assertEquals(
+            "a pebble and Mount Tai!",
+            spoken("a pebble and Mt. Tai!"),
+        )
+        assertEquals("Mount Elgin", spoken("Mt. Elgin"))
+        assertEquals("Mount Tai", spoken("mt. Tai"))
+    }
+
+    @Test
+    fun `a title and the name after it are both spoken`() {
+        assertEquals("Mister Liang, the car is ready.", spoken("Mr. Liang, the car is ready."))
+        assertEquals("Doctor Watson narrated it.", spoken("Dr. Watson narrated it."))
+        assertEquals("Mrs Li paused.", spoken("Mrs. Li paused."))
+        assertEquals("Saint John cycle.", spoken("St. John cycle."))
+        assertEquals("Captain Knox's journal.", spoken("Capt. Knox's journal."))
+        assertEquals("Colonel Grangerford was a gentleman.", spoken("Col. Grangerford was a gentleman."))
+        assertEquals("Reverend Allen thought so.", spoken("Rev. Allen thought so."))
+        assertEquals("Messieurs Chaplin and Walker.", spoken("Messrs. Chaplin and Walker."))
+        assertEquals("versus magic casters.", spoken("vs. magic casters."))
+        assertEquals("77 feet wide.", spoken("77 ft. wide."))
+        assertEquals("Fort Worth", spoken("Ft. Worth"))
+        assertEquals("6:00 a m sharp.", spoken("6:00 a.m. sharp."))
+        assertEquals("in the U S Army.", spoken("in the U.S. Army."))
+        assertEquals("Volume 93, September.", spoken("Vol. 93, September."))
+        assertEquals("Boston, Jan 7th, 1839.", spoken("Boston, Jan. 7th, 1839."))
+        assertEquals("etcetera and more.", spoken("etc. and more."))
+        assertEquals("Figure 1 is tied.", spoken("Fig. 1 is tied."))
+        assertEquals(
+            "a freshly cracked fig. For a long time.",
+            spoken("a freshly cracked fig. For a long time."),
+        )
+    }
+
     private fun regexRule(id: String, pattern: String, replace: String) =
         SpeechEdit(id, "", 2, false, pattern, replace, true, false)
 

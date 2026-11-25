@@ -43,6 +43,111 @@ class ReaderTextTest {
         assertEquals("Hello.", body.substring(s.first, s.second).trim())
     }
 
+    /* THE DEFECT. The highlight stopped at "Mt." and "Tai!" was the next
+       sentence. The period is the abbreviation, and the name is Mount Tai. */
+    @Test
+    fun `Mt-dot Tai stays one sentence`() {
+        val body = "and Nie Yan. It was like the difference between a pebble and Mt. Tai! Simply recalling that attack."
+        assertEquals("and Nie Yan.", sentence(body))
+        assertEquals(
+            "It was like the difference between a pebble and Mt. Tai!",
+            sentence(body, at = body.indexOf("It was")),
+        )
+    }
+
+    /* The same cut, measured across the captured chapters: a title, rank,
+       or place abbreviation followed by the word it belongs to. */
+    @Test
+    fun `a title abbreviation stays with the word after it`() {
+        val titles = listOf(
+            "Mr", "Mrs", "Ms", "Dr", "Drs", "Prof", "Rev", "Hon", "Gen",
+            "Capt", "Col", "Lt", "Lieut", "Maj", "Sgt", "Esq", "Jr", "Sr",
+            "Mme", "Mlle", "Messrs", "Frl", "Wm", "Geo", "Chas", "Gov",
+            "St", "Ste", "Mt", "Ft", "Vol", "Fig", "Nos", "Eq", "Ph", "vs",
+        )
+        for (title in titles) {
+            val body = "See $title. Name today."
+            assertEquals(title, body, sentence(body))
+        }
+        assertEquals(
+            "Hearing Mrs. Li's words, she acted innocent.",
+            sentence("Hearing Mrs. Li's words, she acted innocent."),
+        )
+        assertEquals(
+            "Increases Perception vs. magic casters by 30%.",
+            sentence("Increases Perception vs. magic casters by 30%."),
+        )
+    }
+
+    @Test
+    fun `an initial stays with the name and a roman numeral still ends`() {
+        assertEquals(
+            "The Blue Envelope by Roy J. Snell is a novel.",
+            sentence("The Blue Envelope by Roy J. Snell is a novel."),
+        )
+        assertEquals(
+            "written by W. A. Pearl today.",
+            sentence("written by W. A. Pearl today."),
+        )
+        assertEquals(
+            "M. Madeleine waited at the door.",
+            sentence("M. Madeleine waited at the door."),
+        )
+        assertEquals(
+            "in the U.S. Army today.",
+            sentence("in the U.S. Army today."),
+        )
+        assertEquals(
+            "end of a choir: e.g. Westminster.",
+            sentence("end of a choir: e.g. Westminster."),
+        )
+        assertEquals("World War I.", sentence("World War I. His friendship ended."))
+        assertEquals("6:00 a.m.", sentence("6:00 a.m. He woke at once."))
+        assertEquals(
+            "6:00 a.m. sharp, he woke.",
+            sentence("6:00 a.m. sharp, he woke."),
+        )
+    }
+
+    @Test
+    fun `a lowercase word after a period stays in the sentence`() {
+        assertEquals(
+            "hoists, tackle, rope transmissions, etc. is ever increasing.",
+            sentence("hoists, tackle, rope transmissions, etc. is ever increasing."),
+        )
+        assertEquals(
+            "the recreancy, i.e. the tolerance of the old.",
+            sentence("the recreancy, i.e. the tolerance of the old."),
+        )
+        assertEquals(
+            "twenty per cent. of the statement was true.",
+            sentence("twenty per cent. of the statement was true."),
+        )
+        assertEquals("\"Yes.\" he said quietly.", sentence("\"Yes.\" he said quietly."))
+    }
+
+    @Test
+    fun `a real sentence end after an abbreviation-shaped word still splits`() {
+        assertEquals("No.", sentence("No. She left the room."))
+        assertEquals("Apples, oranges, etc.", sentence("Apples, oranges, etc. The next day he left."))
+        assertEquals("not worth a cent.", sentence("not worth a cent. I cleaned out the place."))
+        assertEquals("a freshly cracked fig.", sentence("a freshly cracked fig. For a long time."))
+        assertEquals("Ask Jan.", sentence("Ask Jan. She knows the way."))
+        assertEquals("Thanks, Ed.", sentence("Thanks, Ed. She smiled."))
+        assertEquals("Thanks, Al.", sentence("Thanks, Al. He waved."))
+        assertEquals("on the 1st.", sentence("on the 1st. But the next row differs."))
+        assertEquals("\"Yes.\"", sentence("\"Yes.\" He left the room."))
+        assertEquals("Fig. 1.", sentence("Fig. 1. The knot is simple."))
+        assertEquals("around 1,86m. His hair was black.", sentence("around 1,86m. His hair was black."))
+        assertEquals("Boston, Jan. 7th, 1839.", sentence("Boston, Jan. 7th, 1839."))
+    }
+
+    private fun sentence(body: String, at: Int = 0): String {
+        val s = ReaderText.nextSentence(body, at)
+            ?: throw AssertionError("expected a sentence in: $body")
+        return body.substring(s.first, s.second)
+    }
+
     @Test
     fun `a tap in the middle of a sentence starts at that sentence`() {
         val off = ch50.indexOf("continues")
