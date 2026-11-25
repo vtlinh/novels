@@ -28,10 +28,11 @@ object ReaderText {
 
     /* Next sentence at/after `from`: bounded by paragraph breaks, split
        on terminator punctuation followed by a space (so "3.5" stays
-       intact). "No. 12" is a number, not a sentence end — splitting
-       there handed TTS "No." alone, which it read as "no". Leading
-       newlines, spaces, the old ⁂ mark and the picture placeholder are
-       skipped so a tap on one of those still starts on real words. */
+       intact). A period that is an abbreviation does not split — "Mt. Tai"
+       was highlighted through "Mt." and "Tai" was spoken on its own, and
+       the same cut falls on Mr., Dr., Mrs. and the rest of that class.
+       Leading newlines, spaces, the old ⁂ mark and the picture placeholder
+       are skipped so a tap on one of those still starts on real words. */
     fun nextSentence(body: CharSequence, from: Int): Pair<Int, Int>? {
         var i = from.coerceAtLeast(0)
         while (i < body.length &&
@@ -53,7 +54,7 @@ object ReaderText {
                     k++
                 }
                 if (k >= body.length || body[k] == ' ' || body[k] == '\n') {
-                    if (!(c == '.' && isNumberAbbrev(body, j, k))) {
+                    if (c != '.' || endsSentence(body, j, k)) {
                         j = k
                         break
                     }
@@ -64,8 +65,24 @@ object ReaderText {
         return Pair(i, j.coerceAtMost(body.length))
     }
 
+    /* True when the period at `period` really ends the sentence. `after`
+       is the first character past any closing quote stuck to that period. */
+    private fun endsSentence(body: CharSequence, period: Int, after: Int): Boolean {
+        if (isNumberAbbrev(body, period, after)) return false
+        /* "etc. and", "vs. magic", "\"Yes.\" he said" — a sentence does
+           not continue in lowercase, so this period is inside the sentence. */
+        if (followedByLowercase(body, after)) return false
+        if (isNumericUnit(body, period)) return false
+        val word = abbrevAt(body, period) ?: return true
+        if (isMonthAbbrev(body, word, after)) return false
+        if (isTitleAbbrev(word)) return false
+        if (isInitial(body, word, after)) return false
+        return true
+    }
+
     /* The abbreviation "No." followed by a digit. The speech-edit that
-       rewrites it to "number 12" has to see both halves in one sentence. */
+       rewrites it to "number 12" has to see both halves in one sentence.
+       "No. She left" is a real sentence end and is not matched here. */
     private fun isNumberAbbrev(body: CharSequence, period: Int, after: Int): Boolean {
         if (period < 2) return false
         if (!body[period - 1].equals('o', ignoreCase = true)) return false
@@ -77,6 +94,132 @@ object ReaderText {
         var i = after
         while (i < body.length && (body[i] == ' ' || body[i] == '\n')) i++
         return i < body.length && body[i] in '0'..'9'
+    }
+
+    /* Titles, ranks, and place abbreviations measured in the captured
+       chapters, plus the same class the speech edits already expand.
+       The period is part of the abbreviation: "Mr. Liang", "Dr. Watson",
+       "Mt. Tai". "etc." is not here — a capital after it usually starts
+       the next sentence, and a lowercase "etc. and" is kept by the
+       lowercase rule. "ed." and "al." are not here either: "Ed." and
+       "Al." end sentences. */
+    private val ABBREV = setOf(
+        "mr", "mrs", "ms", "dr", "drs", "prof", "rev", "hon", "gen",
+        "capt", "col", "lt", "lieut", "maj", "sgt", "pvt", "cpl",
+        "adm", "cmdr", "rep", "pres", "esq", "jr", "sr",
+        "mme", "mlle", "messrs", "frl", "wm", "geo", "chas", "gov",
+        "st", "ste", "mt", "ft", "ph", "fr",
+        "vol", "nos", "eq", "chap", "ch", "pp", "op",
+        "dept", "univ", "inc", "ltd", "co", "corp", "bros", "approx",
+        "vs", "viz", "cf",
+        "oz", "lbs", "lb",
+    )
+
+    /* "Jan." before a digit is the month. "Jan." before a word is the
+       name, and that period ends the sentence. */
+    private val MONTH = setOf(
+        "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
+        "oct", "nov", "dec",
+    )
+
+    /* A letter stuck to a number: "86m.", "18s.", "6d.". Not "1st." —
+       an ordinal still ends the sentence. */
+    private val UNIT = setOf(
+        "m", "g", "s", "d", "l", "h",
+        "km", "cm", "mm", "kg", "lb", "oz", "ft", "hr", "mg", "ml", "am", "pm",
+    )
+    private val ORDINAL = setOf("st", "nd", "rd", "th")
+
+    /* The word after a single capital ("J. Snell", "W. A. Pearl", "U.S.
+       Army", "e.g. Westminster") is part of the same sentence. The word
+       after a roman numeral or a one-letter sentence ("War I. His",
+       "a.m. He", "A. The") is the next sentence. */
+    private val SENTENCE_START = setOf(
+        "a", "an", "the",
+        "he", "she", "it", "they", "we", "i", "you",
+        "his", "her", "their", "my", "our", "your", "its",
+        "him", "them", "me", "us",
+        "this", "that", "these", "those",
+        "there", "here",
+        "but", "and", "or", "nor", "so", "yet",
+        "if", "as", "at", "by", "to", "of", "in", "on", "for", "from", "with",
+        "when", "where", "while", "what", "which", "who", "whom", "whose", "why", "how",
+        "then", "than",
+        "not", "no", "yes",
+        "all", "any", "some", "each", "every", "both",
+        "now", "still", "once", "later", "soon", "again",
+        "after", "before", "during", "without", "within",
+        "however", "although", "though", "because", "until", "unless",
+        "oh", "ah", "well",
+        "chapter", "part", "book", "volume", "section",
+    )
+
+    private fun followedByLowercase(body: CharSequence, after: Int): Boolean {
+        var i = after
+        while (i < body.length && body[i] == ' ') i++
+        return i < body.length && body[i].isLowerCase()
+    }
+
+    private fun followedByDigit(body: CharSequence, after: Int): Boolean {
+        var i = after
+        while (i < body.length && body[i] == ' ') i++
+        return i < body.length && body[i].isDigit()
+    }
+
+    /* Letters immediately before the period, when they are a word of
+       their own. "1st." is an ordinal, not the abbreviation "st." */
+    private fun abbrevAt(body: CharSequence, period: Int): String? {
+        var i = period - 1
+        if (i < 0 || !body[i].isLetter()) return null
+        while (i >= 0 && body[i].isLetter()) i--
+        val start = i + 1
+        if (start > 0 && body[start - 1].isDigit()) return null
+        return body.subSequence(start, period).toString()
+    }
+
+    private fun isNumericUnit(body: CharSequence, period: Int): Boolean {
+        var i = period - 1
+        while (i >= 0 && body[i].isLetter()) i--
+        val start = i + 1
+        if (start >= period || start == 0 || !body[start - 1].isDigit()) return false
+        val suffix = body.subSequence(start, period).toString().lowercase()
+        return suffix in UNIT && suffix !in ORDINAL
+    }
+
+    private fun isMonthAbbrev(body: CharSequence, word: String, after: Int): Boolean =
+        word.lowercase() in MONTH && followedByDigit(body, after)
+
+    /* "Fig." is the plate; "fig." is the fruit, and that period ends
+       the sentence ("a cracked fig. For a long"). */
+    private fun isTitleAbbrev(word: String): Boolean {
+        if (word.equals("fig", ignoreCase = true)) return word[0].isUpperCase()
+        return word.lowercase() in ABBREV
+    }
+
+    private fun isInitial(body: CharSequence, word: String, after: Int): Boolean {
+        if (word.length != 1 || !word[0].isLetter()) return false
+        val next = nextWord(body, after) ?: return false
+        if (next[0].isDigit()) return true
+        if (next.length == 1 && next[0].isLetter()) return true
+        return next[0].isUpperCase() && next.lowercase() !in SENTENCE_START
+    }
+
+    private fun nextWord(body: CharSequence, after: Int): String? {
+        var i = after
+        while (i < body.length &&
+            (body[i] == ' ' || body[i] == '"' || body[i] == '\u201c' || body[i] == '\u2018')
+        ) {
+            i++
+        }
+        if (i >= body.length || body[i] == '\n' || !body[i].isLetterOrDigit()) return null
+        val start = i
+        i++
+        while (i < body.length &&
+            (body[i].isLetter() || body[i] == '\'' || body[i] == '\u2019' || body[i] == '-')
+        ) {
+            i++
+        }
+        return body.subSequence(start, i).toString()
     }
 
     /* Start of the sentence containing `off`. A tap in the middle of a
