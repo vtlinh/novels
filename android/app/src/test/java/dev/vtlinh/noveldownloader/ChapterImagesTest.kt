@@ -3,6 +3,7 @@ package dev.vtlinh.noveldownloader
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -152,6 +153,78 @@ class ChapterImagesTest {
             ChapterImages.nextAuto(listOf(older, newer)) { _, chapter ->
                 chapter == "Chapter 1.txt"
             },
+        )
+    }
+
+    @Test
+    fun `the novel open in the reader is the one being read`() {
+        val reads = mapOf("older" to 10L, "newer" to 50L, "never" to 0L)
+        assertEquals("open", ChapterImages.currentSlug("open", mapOf("open" to 0L, "newer" to 50L)))
+        assertEquals("newer", ChapterImages.currentSlug(null, reads))
+        assertEquals("newer", ChapterImages.currentSlug("", reads))
+        assertEquals("newer", ChapterImages.currentSlug("gone", reads))
+        assertEquals("a", ChapterImages.currentSlug(null, mapOf("b" to 5L, "a" to 5L)))
+        assertEquals("only", ChapterImages.currentSlug(null, mapOf("only" to 1L)))
+        assertNull(ChapterImages.currentSlug(null, mapOf("never" to 0L)))
+        assertNull(ChapterImages.currentSlug(null, emptyMap()))
+        assertEquals("open", ChapterImages.currentSlug("open", emptyMap()))
+    }
+
+    @Test
+    fun `a document open in the reader is not the novel being read`() {
+        assertNull(ChapterImages.openedSlug(null))
+        assertNull(ChapterImages.openedSlug(""))
+        assertNull(ChapterImages.openedSlug("not json"))
+        assertEquals(
+            "my-book",
+            ChapterImages.openedSlug("""{"dir":"d","title":"The Book","slug":"my-book"}"""),
+        )
+        assertEquals(
+            "my-book",
+            ChapterImages.openedSlug("""{"slug" : "my-book"}"""),
+        )
+        assertNull(
+            ChapterImages.openedSlug("""{"slug":"my-book","document":true}"""),
+        )
+        assertNull(
+            ChapterImages.openedSlug("""{"slug":"my-book","document" : true}"""),
+        )
+        assertEquals(
+            "real-one",
+            ChapterImages.openedSlug(
+                """{"title":"He said \"slug\": \"oops\"","slug":"real-one"}""",
+            ),
+        )
+        assertEquals(
+            "real",
+            ChapterImages.openedSlug(
+                """{"title":"not \"document\": true","slug":"real"}""",
+            ),
+        )
+        assertNull(ChapterImages.openedSlug("""{"slug":""}"""))
+    }
+
+    @Test
+    fun `the novel being read is asked for a picture first`() {
+        assertEquals(
+            listOf("open", "newer", "older"),
+            ChapterImages.pinFirst(listOf("newer", "older", "open"), "open") { it },
+        )
+        assertEquals(
+            listOf("newer", "older"),
+            ChapterImages.pinFirst(listOf("newer", "older"), "newer") { it },
+        )
+        assertEquals(
+            listOf("newer", "older"),
+            ChapterImages.pinFirst(listOf("newer", "older"), null) { it },
+        )
+        assertEquals(
+            listOf("newer"),
+            ChapterImages.pinFirst(listOf("newer"), "other") { it },
+        )
+        assertEquals(
+            listOf("a", "b"),
+            ChapterImages.pinFirst(listOf("a", "b"), "missing") { it },
         )
     }
 
@@ -330,6 +403,8 @@ class ChapterImagesTest {
         assertEquals("autoImageFrom:than-y", ChapterImages.autoFromKey("than-y"))
         assertEquals("novelRead:than-y", ChapterImages.readKey("than-y"))
         assertEquals("autoImageUnfinishedOnly", ChapterImages.GLOBAL_UNREAD_KEY)
+        assertEquals("autoImageReadingOnly", ChapterImages.GLOBAL_READING_KEY)
+        assertEquals("lastReading", ChapterImages.LAST_READING_KEY)
         assertNotEquals(ChapterImages.autoEnabledKey("a"), ChapterImages.autoEnabledKey("b"))
         assertNotEquals(ChapterImages.autoEveryKey("a"), ChapterImages.autoEveryKey("b"))
         assertNotEquals(ChapterImages.autoFromKey("a"), ChapterImages.autoFromKey("b"))
@@ -400,6 +475,50 @@ class ChapterImagesTest {
         assertEquals(
             ChapterImages.AutoCadence(20, 1),
             ChapterImages.autoCadence(false, 10, 5, 20, 1),
+        )
+    }
+
+    @Test
+    fun `the reading option follows only the novel being read`() {
+        assertTrue(
+            ChapterImages.autoApplies(
+                novelOn = false, globalOn = false,
+                stars = 0, minStars = 7,
+                read = true, unreadOnly = true,
+                current = true, readingOnly = true,
+            ),
+        )
+        assertFalse(
+            ChapterImages.autoApplies(
+                novelOn = false, globalOn = true,
+                stars = 10, minStars = 7,
+                read = false, unreadOnly = false,
+                current = false, readingOnly = true,
+            ),
+        )
+        assertTrue(
+            ChapterImages.autoApplies(
+                novelOn = true, globalOn = false,
+                stars = 0, minStars = 7,
+                read = true, unreadOnly = true,
+                current = false, readingOnly = true,
+            ),
+        )
+        assertFalse(
+            ChapterImages.autoApplies(
+                novelOn = false, globalOn = false,
+                stars = 10, minStars = 0,
+                read = false, unreadOnly = false,
+                current = true, readingOnly = false,
+            ),
+        )
+        assertTrue(
+            ChapterImages.autoApplies(
+                novelOn = false, globalOn = true,
+                stars = 8, minStars = 7,
+                read = false, unreadOnly = true,
+                current = false, readingOnly = false,
+            ),
         )
     }
 

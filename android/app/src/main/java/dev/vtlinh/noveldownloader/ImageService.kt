@@ -14,8 +14,9 @@ import kotlinx.coroutines.launch
 
    It does not post a notification. While the app is open the
    process is already alive; once the screen is off, the read-aloud
-   notification is what keeps it that way. Settings or a novel's
-   own switch is what turns this on. */
+   notification is what keeps it that way. Settings — the library,
+   or the novel being read — or a novel's own switch is what turns
+   this on. */
 object ImageService {
     /* Old foreground-service channel. Deleted on start so an
        existing install loses the leftover Chapter pictures

@@ -541,6 +541,9 @@ class ReaderActivity : AppCompatActivity() {
         val start = intent.getStringExtra("start") ?: return finish()
         val folder = prefs.getString("tree", null) ?: return finish()
         treeUri = Uri.parse(folder)
+        /* Before the chapter list comes back, so a picture pass during
+           open follows this novel rather than the one left open before. */
+        rememberReading()
 
         english = prefs.getString("readerLang", "en") == "en"
         fontSp = prefs.getFloat(ReadingSettingsPanel.FONT_KEY, ReadingSettingsPanel.FONT_DEFAULT)
@@ -2164,14 +2167,10 @@ class ReaderActivity : AppCompatActivity() {
     /* While this screen is live, remember we're in the middle of reading —
        the launcher resumes straight into it. Deliberately leaving (back or
        navigation → isFinishing) clears the marker; backgrounding or a
-       process kill does not. */
-    override fun onResume() {
-        super.onResume()
-        reloadSpeechRules()   // pick up any changes made on the Speech-edits screen
-        resyncIfRenamed()     // a rename while we were away must not latch saving off
-        loadNovelTtsLang()    // the novel-settings pin may have changed while away
-        val dir = intent.getStringExtra("dir") ?: return
-        val slug = intent.getStringExtra("slug") ?: return
+       process kill does not. False when this screen has no novel to resume. */
+    private fun rememberReading(): Boolean {
+        val dir = intent.getStringExtra("dir") ?: return false
+        val slug = intent.getStringExtra("slug") ?: return false
         val o = org.json.JSONObject()
         o.put("dir", dir)
         o.put("title", intent.getStringExtra("title") ?: dir)
@@ -2180,7 +2179,16 @@ class ReaderActivity : AppCompatActivity() {
             o.put(Documents.EXTRA_DOCUMENT, true)
             o.put(Documents.EXTRA_FILE, intent.getStringExtra(Documents.EXTRA_FILE) ?: "")
         }
-        prefs.edit().putString("lastReading", o.toString()).apply()
+        prefs.edit().putString(ChapterImages.LAST_READING_KEY, o.toString()).apply()
+        return true
+    }
+
+    override fun onResume() {
+        super.onResume()
+        reloadSpeechRules()   // pick up any changes made on the Speech-edits screen
+        resyncIfRenamed()     // a rename while we were away must not latch saving off
+        loadNovelTtsLang()    // the novel-settings pin may have changed while away
+        if (!rememberReading()) return
 
         /* coming back into the reader: recover the saved TTS voice. If the
            engine dropped while we were away, rebind it (its success path then
@@ -2191,7 +2199,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        if (isFinishing) prefs.edit().remove("lastReading").apply()
+        if (isFinishing) prefs.edit().remove(ChapterImages.LAST_READING_KEY).apply()
         super.onPause()
     }
 
