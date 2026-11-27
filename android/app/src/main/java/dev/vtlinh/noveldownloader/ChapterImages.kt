@@ -24,19 +24,22 @@ import java.io.IOException
    is not a look.
 
    Auto-generate: Settings can turn this on for the whole library,
-   with a minimum star rating and an unread-only filter. A
-   novel's own ⚙ switch, when on, always includes that book and
-   uses its Every / Starting from. The app posts chapter N ≥
-   from where (N − from) is a multiple of every (chapter 1 standing
-   in for chapter 0 when from is 0) — and, once the
-   novel is marked complete, its last 5 chapters too — at most one
-   chapter per the wait in Settings, including while it is
-   reading aloud in the background. A post does not wait for that png before the next
-   one is due. Novels are always tried in last-read order — the
-   book most recently read aloud goes first. The next
-   due chapter that is not on disk yet is skipped until it arrives
-   — later due chapters are not pulled forward. A chapter already
-   posted is not posted again. */
+   with a minimum star rating and an unread-only filter, or for
+   only the novel currently being read. That novel is the one the
+   reader has open, or, once the reader has been left, the one
+   most recently read aloud. A novel's own switch, when on, always
+   includes that book and uses its Every / Starting from. The app
+   posts chapter N ≥ from where (N − from) is a multiple of every
+   (chapter 1 standing in for chapter 0 when from is 0) — and, once
+   the novel is marked complete, its last 5 chapters too — at most
+   one chapter per the wait in Settings, including while it is
+   reading aloud in the background. A post does not wait for that
+   png before the next one is due. With the reading option on, the
+   novel being read is tried first. Otherwise novels are tried in
+   last-read order, the book most recently read aloud first. The
+   next due chapter that is not on disk yet is skipped until it
+   arrives — later due chapters are not pulled forward. A chapter
+   already posted is not posted again. */
 object ChapterImages {
 
     private const val WAIT_KEY = "slackImageWait"
@@ -56,6 +59,13 @@ object ChapterImages {
     /* Stored under the old unfinished-only name so existing installs
        keep the filter they already picked. */
     const val GLOBAL_UNREAD_KEY = "autoImageUnfinishedOnly"
+    const val GLOBAL_READING_KEY = "autoImageReadingOnly"
+    /* The reader writes this while it is open and clears it on Back.
+       The library resumes a session from the same marker. */
+    const val LAST_READING_KEY = "lastReading"
+    private val slugField = Regex("\"slug\"\\s*:\\s*\"([^\"\\\\]*)\"")
+    private val documentTrue =
+        Regex("\"" + Regex.escape(Documents.EXTRA_DOCUMENT) + "\"\\s*:\\s*true\\b")
     private const val AUTO_LAST_KEY = "autoImageLastAt"
     private val inflight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val autoLock = Any()
@@ -115,6 +125,51 @@ object ChapterImages {
         tieOf: (T) -> String = { "" },
     ): List<T> =
         items.sortedWith(compareByDescending(lastReadOf).thenBy(tieOf))
+
+    /* The novel the reading option follows. The one open in the
+       reader wins, even before read-aloud has started. Once that
+       session is gone, it is the novel most recently read aloud.
+       Never-read (lastRead 0) is not a fallback. Equal times keep
+       the slug that sorts first, the same tie the pass already
+       uses. An empty library list means the list was not loaded,
+       so the open novel is trusted. */
+    fun currentSlug(opened: String?, lastReads: Map<String, Long>): String? {
+        val open = opened?.takeIf { it.isNotEmpty() }
+        if (open != null && (lastReads.isEmpty() || open in lastReads)) return open
+        var best: String? = null
+        var bestAt = 0L
+        for ((slug, at) in lastReads) {
+            if (slug.isEmpty() || at <= 0L) continue
+            val prev = best
+            if (prev == null || at > bestAt || (at == bestAt && slug < prev)) {
+                best = slug
+                bestAt = at
+            }
+        }
+        return best
+    }
+
+    /* Slug of the novel whose reader is open, from the session
+       marker. A document is not a novel. Empty once the reader
+       has been left. Read directly so a JVM test can judge it. */
+    fun openedSlug(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        if (documentTrue.containsMatchIn(raw)) return null
+        val slug = slugField.find(raw)?.groupValues?.getOrNull(1) ?: return null
+        return slug.ifEmpty { null }
+    }
+
+    /* `slug` moves to the front. A miss, or a slug already first,
+       leaves the list as it was. */
+    fun <T> pinFirst(items: List<T>, slug: String?, slugOf: (T) -> String): List<T> {
+        if (slug.isNullOrEmpty() || items.size < 2) return items
+        val i = items.indexOfFirst { slugOf(it) == slug }
+        if (i <= 0) return items
+        val out = ArrayList<T>(items.size)
+        out.add(items[i])
+        for (n in items.indices) if (n != i) out.add(items[n])
+        return out
+    }
 
     /* First due chapter that is actually on disk, walking from, from+every,
        from+2*every (from 0 starts at chapter 1). A hole — Starting from 21 when only 1–20 are
@@ -350,8 +405,10 @@ object ChapterImages {
 
     data class AutoCadence(val every: Int, val from: Int)
 
-    /* A novel switch that is on always wins. Otherwise the global
-       switch applies, then the star floor and the unread filter. */
+    /* A novel switch that is on always wins. The reading option
+       includes only the novel currently being read, and ignores
+       the library switch, the star floor, and the unread filter.
+       Otherwise the library switch applies, then those filters. */
     fun autoApplies(
         novelOn: Boolean,
         globalOn: Boolean,
@@ -359,8 +416,11 @@ object ChapterImages {
         minStars: Int,
         read: Boolean,
         unreadOnly: Boolean,
+        current: Boolean = false,
+        readingOnly: Boolean = false,
     ): Boolean {
         if (novelOn) return true
+        if (readingOnly) return current
         if (!globalOn) return false
         if (stars < minStars.coerceAtLeast(0)) return false
         if (unreadOnly && read) return false
@@ -398,6 +458,10 @@ object ChapterImages {
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
             .getBoolean(GLOBAL_UNREAD_KEY, true)
 
+    fun readingOnly(ctx: Context): Boolean =
+        ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getBoolean(GLOBAL_READING_KEY, false)
+
     fun globalGapMinutes(ctx: Context): Int =
         clampGapMinutes(
             ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
@@ -413,6 +477,7 @@ object ChapterImages {
         from: Int,
         minStars: Int,
         unreadOnly: Boolean,
+        readingOnly: Boolean = false,
         gapMinutes: Int = AUTO_GAP_MINUTES_DEFAULT,
     ) {
         ctx.getSharedPreferences("app", Context.MODE_PRIVATE).edit()
@@ -421,15 +486,27 @@ object ChapterImages {
             .putInt(GLOBAL_FROM_KEY, from.coerceAtLeast(0))
             .putInt(GLOBAL_MIN_STARS_KEY, minStars.coerceIn(0, NovelRating.MAX))
             .putBoolean(GLOBAL_UNREAD_KEY, unreadOnly)
+            .putBoolean(GLOBAL_READING_KEY, readingOnly)
             .putInt(GLOBAL_GAP_MINUTES_KEY, clampGapMinutes(gapMinutes))
             .commit()
-        if (enabled) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
+        if (enabled || readingOnly) ImageService.start(ctx) else ImageService.startIfNeeded(ctx)
     }
 
     /* `siteRating` is the novel's NovelRec.siteRating: the minimum-stars
        filter judges the stars the novel shows, the site's until the user
        rates it. */
     fun autoOnFor(ctx: Context, slug: String, siteRating: Double): Boolean {
+        if (slug.isEmpty()) return false
+        val current = if (readingOnly(ctx)) openOrLastRead(ctx, lastReads(ctx)) else null
+        return autoOnFor(ctx, slug, siteRating, current)
+    }
+
+    fun autoOnFor(
+        ctx: Context,
+        slug: String,
+        siteRating: Double,
+        currentSlug: String?,
+    ): Boolean {
         if (slug.isEmpty()) return false
         val prefs = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
         return autoApplies(
@@ -439,8 +516,27 @@ object ChapterImages {
             minStars = minStars(ctx),
             read = novelRead(prefs, slug),
             unreadOnly = unreadOnly(ctx),
+            current = slug == currentSlug,
+            readingOnly = readingOnly(ctx),
         )
     }
+
+    private fun lastReads(ctx: Context): Map<String, Long> {
+        val folder = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+            .getString("tree", "") ?: ""
+        if (folder.isEmpty()) return emptyMap()
+        val recs = try { DownloadStore(ctx).novels(folder) } catch (e: Exception) { emptyList() }
+        return recs.associate { it.slug to it.lastRead }
+    }
+
+    private fun openOrLastRead(ctx: Context, lastReads: Map<String, Long>): String? =
+        currentSlug(
+            openedSlug(
+                ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+                    .getString(LAST_READING_KEY, null),
+            ),
+            lastReads,
+        )
 
     fun cadenceFor(ctx: Context, slug: String): AutoCadence =
         autoCadence(
@@ -594,10 +690,10 @@ object ChapterImages {
     }
 
     /* Slack is set and there is either a waiting download or at least
-       one novel auto-generate applies to (its own switch, or the
-       global switch plus filters). The loop uses this to decide
-       whether to start; a pass that finds nothing left to post or
-       fetch is the end of this run. */
+       one novel auto-generate applies to (its own switch, the novel
+       being read, or the library switch plus filters). The loop uses
+       this to decide whether to start; a pass that finds nothing left
+       to post or fetch is the end of this run. */
     fun hasBackgroundWork(ctx: Context): Boolean {
         if (!slackReady(ctx)) return false
         val store = try { DownloadStore(ctx) } catch (e: Exception) { return false }
@@ -607,16 +703,18 @@ object ChapterImages {
             .getString("tree", "") ?: ""
         if (folder.isEmpty()) return false
         val novels = try { store.novels(folder) } catch (e: Exception) { emptyList() }
-        return novels.any { autoOnFor(ctx, it.slug, it.siteRating) }
+        val current = openOrLastRead(ctx, novels.associate { it.slug to it.lastRead })
+        return novels.any { autoOnFor(ctx, it.slug, it.siteRating, current) }
     }
 
     /* Keeps posting and fetching while this process is alive. The
        read-aloud notification is what holds the process once the
        screen is off — pictures do not post a second one. One auto
-       post per the wait in Settings, always the next due chapter of the most
-       recently read novel that still has one. The post does not wait
-       for that png — Slack can take much longer than the gap, and
-       sitting on it delayed every later request. */
+       post per the wait in Settings. The novel being read goes
+       first when that option is on; otherwise the most recently
+       read novel that still has a due chapter. The post does not
+       wait for that png — Slack can take much longer than the gap,
+       and sitting on it delayed every later request. */
     suspend fun runBackground(ctx: Context) {
         val app = ctx.applicationContext
         while (true) {
@@ -682,10 +780,12 @@ object ChapterImages {
         val recs = try { store.novels(folder) } catch (e: Exception) { return emptyList() }
         val prefs = app.getSharedPreferences("app", Context.MODE_PRIVATE)
         val globalOn = globalEnabled(app)
+        val readingOn = readingOnly(app)
         val gEvery = globalEvery(app)
         val gFrom = globalFrom(app)
         val floor = minStars(app)
         val onlyUnread = unreadOnly(app)
+        val current = openOrLastRead(app, recs.associate { it.slug to it.lastRead })
         val out = ArrayList<AutoTarget>()
         for (rec in recs) {
             val novelOn = autoEnabled(app, rec.slug)
@@ -693,6 +793,8 @@ object ChapterImages {
                     novelOn, globalOn,
                     NovelRating.effective(prefs, rec), floor,
                     novelRead(prefs, rec.slug), onlyUnread,
+                    current = rec.slug == current,
+                    readingOnly = readingOn,
                 )
             ) continue
             val dir = try {
@@ -710,7 +812,8 @@ object ChapterImages {
                 ),
             )
         }
-        return byLastRead(out, { it.lastRead }, { it.slug })
+        val ordered = byLastRead(out, { it.lastRead }, { it.slug })
+        return if (readingOn) pinFirst(ordered, current) { it.slug } else ordered
     }
 
     private fun loadChapters(

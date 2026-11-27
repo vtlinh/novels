@@ -222,7 +222,7 @@ class NovelListActivity : AppCompatActivity() {
        resume straight into the reader at the saved spot (the marker is
        cleared when the user backs out of reading mode) */
     private fun resumeReadingIfNeeded(): Boolean {
-        val saved = prefs.getString("lastReading", null) ?: return false
+        val saved = prefs.getString(ChapterImages.LAST_READING_KEY, null) ?: return false
         return try {
             val o = org.json.JSONObject(saved)
             if (o.optBoolean(Documents.EXTRA_DOCUMENT)) {

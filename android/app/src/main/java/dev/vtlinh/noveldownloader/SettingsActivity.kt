@@ -177,18 +177,25 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun bindAutoImage() {
         val autoCheck = findViewById<CheckBox>(R.id.autoImageCheck)
+        val readingCheck = findViewById<CheckBox>(R.id.autoImageReadingCheck)
         val everyInput = findViewById<EditText>(R.id.autoImageEveryInput)
         val gapInput = findViewById<EditText>(R.id.autoImageGapInput)
         val fromInput = findViewById<EditText>(R.id.autoImageFromInput)
         val starsInput = findViewById<EditText>(R.id.autoImageMinStarsInput)
         val unreadCheck = findViewById<CheckBox>(R.id.autoImageUnreadCheck)
         autoCheck.isChecked = ChapterImages.globalEnabled(this)
+        readingCheck.isChecked = ChapterImages.readingOnly(this)
         everyInput.setText(ChapterImages.globalEvery(this).toString())
         gapInput.setText(ChapterImages.globalGapMinutes(this).toString())
         fromInput.setText(ChapterImages.globalFrom(this).toString())
         starsInput.setText(ChapterImages.minStars(this).toString())
         unreadCheck.isChecked = ChapterImages.unreadOnly(this)
+        syncAutoImageMode()
         autoCheck.setOnCheckedChangeListener { _, _ ->
+            saveAutoImage()
+        }
+        readingCheck.setOnCheckedChangeListener { _, _ ->
+            syncAutoImageMode()
             saveAutoImage()
         }
         unreadCheck.setOnCheckedChangeListener { _, _ -> saveAutoImage() }
@@ -201,9 +208,12 @@ class SettingsActivity : AppCompatActivity() {
         starsInput.setOnFocusChangeListener(persist)
         bindHelp(
             R.id.autoImageHelp, "Chapter images",
-            "When this is on, the app makes pictures for novels that meet " +
-                "the filters below. It keeps going while you are in the app " +
-                "or while it is reading aloud.\n\n" +
+            "Auto-generate images makes pictures for novels that meet the filters below. " +
+                "Auto-generate for the novel I'm reading makes pictures for the novel " +
+                "open in the reader. After you leave the reader, it keeps going for the " +
+                "novel you last read aloud. While Auto-generate for the novel I'm reading " +
+                "is on, that novel is the one these settings follow. Pictures keep going " +
+                "while you are in the app or while it is reading aloud.\n\n" +
                 "Every and Starting from chapter pick which chapters. For example, " +
                 "every 20 starting from chapter 0 means chapters 1, 20, 40, and so on. " +
                 "A finished novel also always gets pictures for its last 5 chapters. " +
@@ -215,6 +225,16 @@ class SettingsActivity : AppCompatActivity() {
                 "A novel with Auto-generate images on in its own settings " +
                 "is always included, even if you marked it as read or it has fewer stars.",
         )
+    }
+
+    /* The reading option is the one these settings follow while it is
+       on. The library switch and its filters stay as they were, ready
+       for when the reading option is turned off. */
+    private fun syncAutoImageMode() {
+        val reading = findViewById<CheckBox>(R.id.autoImageReadingCheck).isChecked
+        findViewById<CheckBox>(R.id.autoImageCheck).isEnabled = !reading
+        findViewById<EditText>(R.id.autoImageMinStarsInput).isEnabled = !reading
+        findViewById<CheckBox>(R.id.autoImageUnreadCheck).isEnabled = !reading
     }
 
     private fun saveAutoImage() {
@@ -238,6 +258,7 @@ class SettingsActivity : AppCompatActivity() {
             findViewById<CheckBox>(R.id.autoImageCheck).isChecked,
             every, from, stars,
             findViewById<CheckBox>(R.id.autoImageUnreadCheck).isChecked,
+            findViewById<CheckBox>(R.id.autoImageReadingCheck).isChecked,
             gap,
         )
         if (everyInput.text.toString() != every.toString()) everyInput.setText(every.toString())

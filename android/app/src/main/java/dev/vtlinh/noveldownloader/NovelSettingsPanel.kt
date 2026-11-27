@@ -88,8 +88,8 @@ class NovelSettingsPanel(
             "It waits between pictures as set in Settings, and skips a chapter that already " +
             "has one. If the next chapter is not on your phone yet, it waits. " +
             "The novels you read most recently get pictures first. " +
-            "Settings can turn this on for many novels at once; this switch, when " +
-            "on, is only for this novel."
+            "Settings can turn this on for many novels at once, or for just the novel " +
+            "you are reading. This switch, when on, is only for this novel."
     private val ttsLangHelp =
         "Which language this novel is read aloud in. Auto uses the chapter's own text. Pick English, Vietnamese or Russian if that guess is wrong."
     private val recheckHelp =
